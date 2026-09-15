@@ -3,6 +3,10 @@
 **Status: Portfolio Preview**
 **Release: v0.1-portfolio-preview**
 
+![High-level RISC-V SoC block diagram](docs/assets/images/soc_block_diagram.png)
+
+*High-level system overview; the current RTL also includes the additional MMIO blocks listed below.*
+
 FPGA-oriented RV32I SoC project integrating a 5-stage CPU, an AHB-Lite-derived/APB interconnect, memory-mapped peripherals, directed self-checking verification, and Quartus/TimeQuest implementation.
 
 ## Architecture
