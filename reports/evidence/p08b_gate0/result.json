@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "source_revision": "2e681084c6e58578354734b1c88afb65aa5937c5",
+  "source_revision_role": "Source Commit 1; exact verified source snapshot",
+  "evidence_revision_role": "A follow-on evidence/status commit records this result without changing the source snapshot identity.",
+  "gate": "P08B_GATE0",
+  "overall_status": "STOP",
+  "detector": {
+    "run_id": "phase4a_p08b_gate0_20260916",
+    "simulator": "Icarus Verilog/vvp",
+    "exit_code": 0,
+    "result": "PASS_INCOMPATIBILITY_REPRODUCED",
+    "interpretation": "Detector pass only; the firmware trap endpoint is not safe."
+  },
+  "observations": {
+    "cpu_precise_store_access_fault": "PASS",
+    "final_store_fault_cause": 7,
+    "final_store_fault_mepc": "0x00000008",
+    "faulting_store_normal_retirement": false,
+    "younger_x3_commit": false,
+    "default_mtvec": "0x00006d60",
+    "imem_alias_word": "0x00000b58",
+    "aliased_instruction": "0x00000000",
+    "second_trap_cause": 2,
+    "trap_loop_reproduced": true,
+    "firmware_safe_trap_endpoint": "BLOCKED",
+    "p08b_vga_production": "NOT_STARTED",
+    "clean_baseline_v1": "NOT_RELEASED"
+  },
+  "scope_exclusions": [
+    "VGA production implementation",
+    "vendor build",
+    "TimeQuest analysis",
+    "board test",
+    "release acceptance"
+  ]
+}
