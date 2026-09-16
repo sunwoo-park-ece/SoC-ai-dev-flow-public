@@ -1,0 +1,5 @@
+# Additional regex filters for APB AES-GCM IP
+pclk|presetn|psel|penable|pwrite|paddr|pwdata|prdata|pready
+ctrl|control|status|busy|done|start|error|tag_ok
+key|iv|nonce|dir|seq|len|payload|tag|pt|ct
+valid|ready

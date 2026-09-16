@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "top": "AMBA_SoC_TOP",
+  "target": {
+    "board": "DE10-Lite",
+    "device": "10M50DAF484C7G",
+    "system_clock_hz": 50000000
+  },
+  "source_groups": {
+    "common_verilog": [
+      "rtl/bus/**/*.v",
+      "rtl/core/v/**/*.v",
+      "rtl/peripherals/**/*.v",
+      "rtl/soc/**/*.v",
+      "rtl/video/**/*.v"
+    ],
+    "cpu_headers": ["rtl/core/vh/**/*.vh"],
+    "aes_vhdl_dependency_order": [
+      "rtl/peripherals/aes_gcm/pipe0/aes_pkg.vhd",
+      "rtl/peripherals/aes_gcm/pipe0/aes_func.vhd",
+      "rtl/peripherals/aes_gcm/pipe0/gcm_pkg.vhd",
+      "rtl/peripherals/aes_gcm/pipe0/aes_enc_dec_ctrl.vhd",
+      "rtl/peripherals/aes_gcm/pipe0/aes_round.vhd",
+      "rtl/peripherals/aes_gcm/pipe0/aes_last_round.vhd",
+      "rtl/peripherals/aes_gcm/pipe0/aes_kexp.vhd",
+      "rtl/peripherals/aes_gcm/pipe0/aes_ecb.vhd",
+      "rtl/peripherals/aes_gcm/pipe0/ghash_gfmul.vhd",
+      "rtl/peripherals/aes_gcm/pipe0/gcm_gctr.vhd",
+      "rtl/peripherals/aes_gcm/pipe0/gcm_ghash.vhd",
+      "rtl/peripherals/aes_gcm/pipe0/aes_icb.vhd",
+      "rtl/peripherals/aes_gcm/pipe0/aes_gcm.vhd",
+      "rtl/peripherals/aes_gcm/pipe0/top_aes_gcm.vhd"
+    ],
+    "open_models": [
+      "verification/models/memory/IMEM.sv",
+      "verification/models/memory/memory.sv",
+      "verification/models/memory/VRAM.sv",
+      "verification/models/clock/vga_pll.sv",
+      "verification/models/clock/spi_pll.sv",
+      "verification/models/adc/adc_qsys.sv"
+    ],
+    "verilog_only_aes_stub": ["verification/models/aes/top_aes_gcm_structural_stub.sv"],
+    "directed_testbenches": ["verification/directed/**/*.sv"]
+  },
+  "profiles": {
+    "OPEN_SIM_VERILOG": {
+      "groups": ["common_verilog", "open_models", "verilog_only_aes_stub"],
+      "aes_semantics": "structural_only"
+    },
+    "OPEN_SIM_MIXED_MODELSIM": {
+      "groups": ["common_verilog", "open_models", "aes_vhdl_dependency_order"],
+      "aes_semantics": "real_vhdl"
+    },
+    "PRIVATE_QUARTUS": {
+      "groups": ["common_verilog", "aes_vhdl_dependency_order"],
+      "private_bindings": ["IMEM", "memory", "VRAM", "vga_pll", "adc_qsys"],
+      "aes_semantics": "real_vhdl"
+    }
+  },
+  "generated_output_root": "$RUN_ROOT"
+}

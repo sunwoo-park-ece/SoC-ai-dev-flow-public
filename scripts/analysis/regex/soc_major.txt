@@ -1,0 +1,11 @@
+# Additional regex filters for SoC top debug
+hclk|hreset|resetn
+haddr|hwrite|htrans|hsize|hburst|hready|hresp|hwdata|hrdata
+paddr|pwrite|penable|psel|pwdata|prdata|pready
+aw(valid|ready|addr|len|size|burst|id)
+w(valid|ready|data|strb|last)
+b(valid|ready|resp|id)
+ar(valid|ready|addr|len|size|burst|id)
+r(valid|ready|data|resp|last|id)
+dma|irq|interrupt|intc
+start|busy|done|error|timeout

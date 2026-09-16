@@ -489,7 +489,6 @@ APB_LED u_led (
     .PWRITE  (PWRITE),
     .PWDATA  (PWDATA),
     .PRDATA  (PRDATA_TIMER),
-	.counter_debug(),
 	.PREADY  (TIMER_READY)
 );
 

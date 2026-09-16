@@ -1,0 +1,66 @@
+schema_version: 1
+top: AMBA_SoC_TOP
+
+public_source_groups:
+  project_rtl:
+    - rtl/bus/**
+    - rtl/soc/**
+    - rtl/peripherals/*.v
+    - rtl/peripherals/gsensor/APB_GSENSOR_MB.v
+    - rtl/video/**
+  third_party_with_notice:
+    - rtl/core/**
+    - rtl/peripherals/aes_gcm/pipe0/*.vhd
+  project_integration:
+    - rtl/peripherals/aes_gcm/pipe0/apb_aes_gcm_ip.v
+
+machine_readable_profile: fpga/quartus/build_profiles.json
+
+profiles:
+  OPEN_SIM_VERILOG:
+    public_rtl: common_verilog
+    portable_models: open_models
+    aes: structural_stub_only
+  OPEN_SIM_MIXED_MODELSIM:
+    public_rtl: common_verilog
+    portable_models: open_models
+    aes: real_vhdl
+  PRIVATE_QUARTUS:
+    public_rtl: common_verilog
+    private_bindings: [IMEM, memory, VRAM, vga_pll, adc_qsys]
+    aes: real_vhdl
+
+project_owned_replacements:
+  - rtl/video/vga/VGA_SyncGen.v
+  - rtl/peripherals/gsensor/reset_delay.v
+  - rtl/peripherals/gsensor/spi_ee_config.v
+
+portable_models:
+  - verification/models/memory/IMEM.sv
+  - verification/models/memory/memory.sv
+  - verification/models/memory/VRAM.sv
+  - verification/models/clock/vga_pll.sv
+  - verification/models/clock/spi_pll.sv
+  - verification/models/adc/adc_qsys.sv
+
+constraints:
+  timing:
+    - fpga/quartus/constraints/de10_lite.sdc
+  pin_assignments:
+    status: project_owned_reconstruction
+    file: fpga/quartus/constraints/de10_lite_pins.tcl
+
+generated_output_policy:
+  git_tracked: false
+  destination: "$RUN_ROOT"
+
+publication_exclusions:
+  source_files:
+    - path: firmware/apps/benchmark_main.c
+      reason: project benchmark source intentionally not published
+    - path: firmware/apps/dhrystone_main.c
+      reason: absent Dhrystone payload and unresolved redistribution basis
+    - path: firmware/apps/dhrystone_t410n.c
+      reason: absent T410N payload and unresolved upstream license chain
+  performance_report_policy: separately_reviewed_sanitized_derivatives_only
+  default_build_dependency: false

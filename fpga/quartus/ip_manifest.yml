@@ -1,0 +1,50 @@
+schema_version: 1
+target:
+  board: DE10-Lite
+  family: MAX 10
+  device: 10M50DAF484C7G
+  historical_tool: "Quartus Prime Lite 19.1"
+
+policy:
+  vendor_payload_public: false
+  private_binding: "Provide through local configuration outside Git"
+  phase3_substitutes: "Project-authored models only"
+
+ip:
+  IMEM:
+    kind: on-chip ROM
+    public_payload: false
+    phase3_action: behavioral_model
+  memory:
+    kind: byte-enabled dual-port data memory
+    public_payload: false
+    phase3_action: behavioral_model
+  VRAM:
+    kind: mixed-width dual-clock video memory
+    public_payload: false
+    phase3_action: behavioral_model
+  vga_pll:
+    kind: pixel-clock PLL
+    public_payload: false
+    phase3_action: behavioral_model
+    production_ports: [inclk0, c0, locked]
+    output_clock: "25 MHz, divide-by-2 from 50 MHz, 50% duty, 0 degree phase"
+    lock_policy: "locked LOW asserts pixel reset; deassertion is synchronized to c0"
+    regeneration: "Quartus Prime Lite 19.1 qmegawiz; enable locked output without changing c0 parameters"
+  spi_pll:
+    kind: GSensor SPI clock PLL
+    public_payload: false
+    phase3_action: historical_behavioral_model
+    active_binding: false
+  system_pll:
+    kind: optional system-clock PLL
+    public_payload: false
+    phase3_action: behavioral_model_when_enabled
+  adc_qsys:
+    kind: Platform Designer MAX 10 modular ADC subsystem
+    public_payload: false
+    phase3_action: behavioral_model_and_synthesis_black_box
+  overclock:
+    kind: optional private PLL configuration
+    public_payload: false
+    phase3_action: none_until_promoted

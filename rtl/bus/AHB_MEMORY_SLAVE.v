@@ -101,3 +101,31 @@ module AHB_MEMORY_SLAVE (
 	 
 	 
 endmodule
+
+
+
+
+
+
+
+/*
+
+2. AHB 메모리 슬레이브의 치명적 버그 수정
+선우님이 작성하신 AHB_MEMORY_SLAVE에는 버스 시스템을 붕괴시킬 수 있는 아주 위험한 로직이 있었습니다.
+
+문제점: HREADY <= 1'b0; 을 기본값으로 설정해 두셨습니다.
+AHB 스펙 위반: AHB 프로토콜에서 아무 작업이 없는 IDLE 상태일 때 슬레이브의 HREADY는 
+무조건 1(HIGH)을 유지해야 합니다. (0이면 마스터가 버스가 영원히 멈춘 줄 알고 진행을 못 합니다).
+
+1-Cycle 응답: BRAM 기반 메모리는 데이터가 1클럭 만에 튀어나오므로, Wait State(HREADY=0)를 
+인가할 필요 없이 항상 HREADY=1 로 묶어두는 것이 0-Wait 정석입니다.
+
+이전 대화에서 만든 altsyncram BRAM(DataMemory)을 AHB 프로토콜에 맞게 래핑한 완벽한 
+슬레이브 코드는 다음과 같습니다.
+
+🚀 수정된 AHB_MEMORY_SLAVE.v
+AHB의 Address Phase(클럭 1)에서 넘어온 제어 신호들을 레지스터에 저장해두고, 
+Data Phase(클럭 2)에서 BRAM에 값을 쓰도록 1-Stage 지연 로직이 포함되어 있습니다.
+*/
+
+

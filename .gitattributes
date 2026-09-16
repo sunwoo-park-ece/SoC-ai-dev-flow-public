@@ -1,0 +1,3 @@
+# Preserve captured bytes across Windows/WSL checkouts for SHA-256 provenance.
+# New scripts are authored with LF; legacy CRLF files retain their original bytes.
+* -text

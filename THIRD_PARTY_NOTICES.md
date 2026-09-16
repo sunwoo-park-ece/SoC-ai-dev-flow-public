@@ -35,12 +35,12 @@ This source also predates the available project Git history, so the exact histor
 
 The following dependencies are not redistributed in this repository:
 
-- Terasic DE10-Lite GSensor reference helpers corresponding to historical `reset_delay`, `spi_controller`, `spi_ee_config`, and `spi_param.h` implementations; their redistribution terms do not support inclusion here. The current same-purpose RTL in this preview is a spec-driven, project-authored replacement.
-- A historical externally sourced VGA synchronization generator whose upstream identity and redistribution license could not be established. The current `VGA_SyncGen.v` in this preview is a project-authored replacement.
+- Terasic DE10-Lite GSensor reference helpers corresponding to `reset_delay`, `spi_controller`, `spi_ee_config`, and `spi_param.h`; their redistribution terms do not support inclusion here. The project-authored APB wrapper remains public, and clean replacements are planned.
+- An externally sourced VGA synchronization generator whose upstream identity and redistribution license could not be established. A clean replacement is planned.
 - Intel/Altera-generated memories, PLLs, Platform Designer ADC IP, complete Quartus projects, generated HDL, and simulator collateral. These remain private vendor dependencies.
 
-Their absence does not change the ownership of project-authored wrappers and controllers. Vendor instances remain visible only through their authored integration boundaries.
+Their absence does not change the ownership of project-authored wrappers and controllers. See `fpga/quartus/ip_manifest.yml` for the public/private interface boundary.
 
 ## Notice Boundary
 
-No repository-level license overrides third-party terms. Source and corresponding license/notice material must remain together when redistributed. Audit-reference URLs and revisions were accessed during the provenance review on 2026-09-12.
+No repository-level license overrides third-party terms. Source and corresponding license/notice material must remain together when redistributed. Audit-reference URLs and revisions were accessed for the Phase 2 review on 2026-09-12.

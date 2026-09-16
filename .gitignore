@@ -1,23 +1,77 @@
-work/
-db/
-incremental_db/
-output_files/
-simulation/
-*.log
-*.rpt
-*.summary
-*.smsg
-*.sof
-*.pof
-*.jic
-*.qpf
-*.qsf
-*.qws
-*.qsys
-*.qip
-*.elf
-*.mif
-*.hex
-.vscode/
+# OS / editors
 .DS_Store
-*~
+Thumbs.db
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Simulation
+*.vcd
+*.fst
+*.wlf
+work/
+transcript
+vsim.wlf
+
+# Verilator
+obj_dir/
+
+# Firmware generated artifacts
+*.elf
+*.bin
+*.hex
+*.map
+*.lst
+*.o
+*.a
+firmware/build/
+
+# Quartus generated data
+**/db/
+**/incremental_db/
+**/greybox_tmp/
+**/simulation/qsim/
+fpga/quartus/project/simulation/
+*.qws
+*.rpt.smsg
+
+# Quartus output artifacts - keep selected summaries explicitly if needed
+**/output_files/*
+!**/output_files/.gitkeep
+
+# Vivado generated data
+*.jou
+*.log
+*.str
+*.xpr.user
+.Xil/
+**/.cache/
+**/.gen/
+**/.runs/
+**/.sim/
+**/.srcs/
+
+# Generic build / temp
+build/
+tmp/
+temp/
+
+# Raw report/log collections
+reports/raw/
+
+# Legacy simulator / editor artifacts
+*.vvp
+*.cf
+*.bak
+*.BAK.*
+
+# Reviewed reports may be committed explicitly; raw/generated data stays ignored.
+
+# Serena local memories/cache stay private; project.yml is the reviewable setup.
+.serena/*
+!.serena/project.yml

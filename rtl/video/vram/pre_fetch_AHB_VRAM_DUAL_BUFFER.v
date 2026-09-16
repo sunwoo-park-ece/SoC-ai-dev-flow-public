@@ -74,7 +74,7 @@ module AHB_VRAM_DUAL_BUFFER (
    
 
     // =======================================================
-    // 1. Pre-fetch Address Generator
+    // 1. Pre-fetch Address Generator (선우님 아키텍처 적용)
     // =======================================================
     // 화면의 마지막 픽셀(우측 하단 끝 여백)인지 확인
     wire is_end_of_frame = (h_cnt == 10'd798) && (v_cnt == 10'd524);

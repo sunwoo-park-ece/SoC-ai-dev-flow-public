@@ -1,90 +1,51 @@
-# RISC-V SoC on FPGA
+# SoC AI Development Flow
 
-**Status: Portfolio Preview**
-**Release: v0.1-portfolio-preview**
+This repository is the publishable source of truth for a personal FPGA SoC project. It contains specifications, project-authored RTL and firmware, redistributable third-party RTL with notices, portable verification sources, and reviewed reports.
 
-![High-level RISC-V SoC block diagram](docs/assets/images/soc_block_diagram.png)
+The canonical engineering environment is WSL Ubuntu with Codex. RTL/firmware development, Verilator checks, vendor CLI invocation, ModelSim/XSim simulation, result analysis, and engineering-report generation originate there. Antigravity independently develops DV from the approved specifications. Windows Work consumes reviewed evidence for portfolio documents, PDF/PPT material, and interview preparation; it may assist with GUI-only vendor operations, but it is not the canonical build or engineering-report owner.
 
-*High-level system overview; the current RTL also includes the additional MMIO blocks listed below.*
-
-FPGA-oriented RV32I SoC project integrating a 5-stage CPU, an AHB-Lite-derived/APB interconnect, memory-mapped peripherals, directed self-checking verification, and Quartus/TimeQuest implementation.
-
-## Architecture
+## Repository boundary
 
 ```text
-                         RV32I 5-stage CPU
-                         /               \
-                 local IMEM        project AHB-style bus
-                                      /      |      \
-                               32 KiB DMEM  VRAM   AHB-APB bridge
-                                                     |
-                                                    APB
-                +----------+----------+----------+----------+
-                | UART0    | GPIO     | Timer    | G-sensor |
-                | AES-GCM  | ADC      | UART1    | HEX      |
-                | SW       | LED      |          |          |
-                +----------+----------+----------+----------+
+$PUBLIC_REPO  publishable spec/RTL/FW/verification and reviewed reports
+$VENDOR_ROOT private licensed/generated Quartus or Vivado project state
+$RUN_ROOT    raw builds, logs, waves, reports, and temporary outputs
+export/      reviewed artifacts intentionally handed to another environment
 ```
 
-The active baseline is a single-master SoC. Instruction fetch uses local memory; CPU load/store traffic reaches DMEM, the VGA framebuffer, and APB peripherals through the project AHB-style data path. No PLIC, AXI fabric, DMA, or cache is claimed as implemented.
+The private build relationship is:
 
-## Engineering highlights
+```text
+PUBLIC_REPO + PRIVATE_VENDOR_PROJECT + LOCAL_ENV + RUN_DIR
+= PRIVATE FULL FPGA BUILD
+```
 
-- RV32I five-stage pipeline integration with hazards, forwarding, stalls, and precise synchronous trap handling
-- Single-master AHB-Lite-derived data fabric and AHB-to-APB bridge with deterministic error paths
-- Memory-mapped UART, GPIO, timer, G-sensor SPI, VGA, ADC, AES-GCM, switches, LEDs, and HEX display
-- Commit-qualified architectural side effects and `minstret` accounting
-- Directed, self-checking, regression-based verification including negative/error-path cases
-- Reset release and asynchronous-input synchronization across system, VGA, and ADC boundaries
-- Quartus FPGA implementation and TimeQuest static timing analysis on DE10-Lite
+The open-source relationship implemented in Phase 3 is:
 
-## Authorship and provenance
+```text
+PUBLIC_REPO + PUBLIC BEHAVIORAL MODELS
+= OPEN LINT / SIMULATION / ELABORATION
+```
 
-Project-owned SoC integration, peripheral wrappers/controllers, reset infrastructure, and verification are kept distinct from third-party-derived components. The CPU and AES-GCM derivations and their licenses are documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Intel/Altera-generated IP and private Quartus projects are intentionally omitted; public RTL keeps only authored integration boundaries.
+No complete vendor GUI project, generated vendor HDL, or vendor simulation collateral is published here. See [the FPGA boundary](fpga/README.md), [third-party notices](THIRD_PARTY_NOTICES.md), and [verification status](verification/README.md).
 
-## Verification
+## Start here
 
-Verification combines directed scenarios, self-checking scoreboards, regression suites, and negative/error-path testing. The currently reviewed source-level P05B result is:
+- [Specifications](spec/README.md)
+- [RTL](rtl/README.md)
+- [Firmware](firmware/README.md)
+- [Verification](verification/README.md)
+- [Scripts](scripts/README.md)
+- [Reports](reports/README.md)
+- [Git workflow](docs/GIT_WORKFLOW.md)
+- [Engineering roles](docs/AGENT_ROLES.md)
+- [Current status](docs/status/current_status.md)
+- [한국어 안내](README.ko.md)
 
-| Suite | Reviewed result |
-|---|---:|
-| Focused P05B reset/clock/async-input lanes | 3/3 PASS |
-| Canonical open regression lanes | 22/22 PASS |
-| CPU/AHB/APB/P04 regression lanes | 7/7 PASS |
+## Current release status
 
-Representative readable tests are included under `verification/`; raw run artifacts are omitted. **P05B vendor post-fit validation is pending.**
+This is an in-progress source snapshot, not Clean Baseline v1 and not a vendor-free FPGA bitstream build. Phase 4A-P08B is stopped at Gate 0: the CPU/AHB precise store-access-fault path passed, but the current firmware has no approved safe trap endpoint. P08B production VGA implementation has not started. See [current status](docs/status/current_status.md).
 
-## FPGA and STA
+CPU and AES-GCM open-source dependencies are present with their licenses. Public simulation models cover private Intel/Altera memories, PLLs and ADC IP, while project-owned replacements cover VGA sync and GSensor helpers. A disposable private Quartus build binds the same public RTL to private vendor IP. Benchmark and Dhrystone source files are intentionally excluded. Any later performance report must be separately reviewed and must distinguish official Dhrystone 2.1 from the project's Dhrystone-style workload. See [Quartus build profiles](fpga/quartus/README.md) and [model contracts](docs/models/PORTABLE_MODEL_CONTRACTS.md).
 
-| Item | Latest reviewed result |
-|---|---:|
-| Board / FPGA | DE10-Lite / MAX 10 |
-| Tool | Quartus Prime 19.1 |
-| FPGA checkpoint | P04 |
-| Compile / Fit | PASS |
-| Logic elements | 31,949 |
-| Registers | 6,435 |
-| Memory bits | 1,442,048 |
-| Pins | 106 |
-| PLLs | 2 |
-| Slow 85C setup WNS | +0.542 ns |
-| Worst reviewed hold slack | +0.093 ns |
-| Constrained setup/hold TNS | 0 |
-
-These figures describe the reviewed P04 post-fit checkpoint. External I/O timing/electrical closure and final Clean Baseline validation are still in progress.
-
-## AI-assisted workflow
-
-AI tools are used as engineering assistants for specification review, RTL implementation support, regression planning, and evidence reconciliation. Architecture decisions and acceptance gates remain explicit engineering review points.
-
-## Current status
-
-- Portfolio Preview
-- Current P05B RTL/open verification: **PASS**
-- Latest reviewed FPGA post-fit checkpoint: **P04 PASS**
-- P05B Quartus post-fit validation: **pending**
-- Clean Baseline v1: **in progress**
-
-## Repository scope
-
-This preview intentionally omits vendor-generated IP, private Quartus project files, firmware, raw run artifacts, internal migration/task records, and unreleased provenance-sensitive material. It is a recruitment preview, not the final Clean Baseline v1 release.
+Project-authored material is licensed under [Apache License 2.0](LICENSE). Third-party files retain the licenses documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
