@@ -17,7 +17,7 @@ Key baseline subsystems:
 - **RV32I 5-Stage CPU Core:** In-order 5-stage pipeline with local instruction memory and an AHB-style load/store memory-access interface with precise bus fault trap handling (`mcause=5/7`).
 - **AHB Data Memory (DMEM):** 32 KiB on-chip data memory directly attached to the AHB fabric.
 - **VGA / Dual-VRAM Display Subsystem (`AHB_VRAM_DUAL_BUFFER`):** 640×480 @ 60 Hz 1-bpp monochrome display pipeline driven by an independent 25 MHz pixel clock (`pclk_25`), dual physical mixed-width block RAMs, atomic frame-wrap buffer swapping `(799,524)->(0,0)`, an autonomous 9,600-word hardware clear engine, and sticky W1C status registers.
-- **AHB-to-APB Bridge:** Decodes the `0x1000_0000`–`0x1000_FFFF` peripheral window and converts AHB transfers to APB bus cycles.
+- **AHB-to-APB Bridge:** Converts AHB transfers within the canonical `0x4000_0000`–`0x400F_FFFF` APB aperture to APB bus cycles; reserved slots return an error.
 - **APB Peripherals:** Memory-mapped controllers for UART (115200 baud), GPIO (pushbuttons, switches, LEDs), System Timer, ADXL345 G-Sensor interface, ADC (analog joystick / temperature sensor), AES-GCM 128-bit cryptographic accelerator, and 6-digit 7-segment HEX display.
 
 ## Hardware Demos
@@ -28,7 +28,7 @@ Physical FPGA board demonstrations, execution captures, and development logs are
 
 Demonstration recordings and photographs serve as supporting visual evidence confirming hardware bring-up on the physical DE10-Lite FPGA board. Engineering claims and verification statuses are substantiated by formal in-tree evidence packages:
 - **P08B VGA Hardware Clear & W1C Status Integration:** Documented in [CS-009](docs/engineering/CS-009-p08b-vga-hwclear-w1c.md) with measured execution evidence in [P08B-VGA-EV-01](reports/evidence/vga-hwclear/summary.md).
-- **Exact-Count HW Clear Verification:** The autonomous 9,600-word framebuffer clear and atomic buffer swap sequences are validated via directed RTL simulation assertions ([`tb_p08b_vga.sv`](verification/directed/vga/tb_p08b_vga.sv)) and corroborating multi-cycle board captures ([`reports/evidence/vga-hwclear/media/`](reports/evidence/vga-hwclear/)).
+- **Exact-Count HW Clear Verification:** The exact 9,600-word framebuffer clear count is verified by directed RTL simulation assertions ([`tb_p08b_vga.sv`](verification/directed/vga/tb_p08b_vga.sv)); the visible clear/swap sequence is documented separately by [board photographs](reports/evidence/vga-hwclear/board/).
 
 *Visual demonstrations illustrate observable screen behavior; they do not prove internal bus protocol compliance, CDC clock-domain crossing safety, or static timing analysis (STA) sign-off. All technical contracts remain governed by simulation assertions, timing reports, and formal verification evidence.*
 
