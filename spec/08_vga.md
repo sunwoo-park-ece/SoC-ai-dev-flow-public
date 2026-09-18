@@ -1,110 +1,188 @@
 # P08B VGA / VRAM Specification
 
-> **Status:** Current active contract. English is canonical; the Korean companion [`kor/08_vga.ko.md`](kor/08_vga.ko.md) is semantically aligned.
+> **Status:** Current active contract for the frozen P08B functional scope. English is canonical; [`kor/08_vga.ko.md`](kor/08_vga.ko.md) is semantically synchronized.
 >
-> **Reviewed source anchor:** `f28e95df2eafcb939e04ffaca728c44f74c90612`. This is accepted functional scope, not a release claim.
+> **Reviewed source anchor:** `f28e95df2eafcb939e04ffaca728c44f74c90612`. This is functional-scope acceptance, not a release, CDC, or full timing-sign-off claim.
 
-## 1. Status and scope
+## 1. Status and Scope
 
-The active display peripheral is `AHB_VRAM_DUAL_BUFFER`, instantiated by `AMBA_SoC_TOP`. It provides a 640 x 480, 1-bpp double-buffered framebuffer, VGA timing, swap control, and a hardware clear engine.
+The active display peripheral is the AHB-side `AHB_VRAM_DUAL_BUFFER` instance in `AMBA_SoC_TOP`; dormant `APB_VGA_Top` is not an active interface. The scope comprises canonical AHB access, double-buffer ownership, hardware clear, VGA scanout, and the firmware-visible status/control contract.
 
-The frozen local source scope for `VGA-001` through `VGA-006` is owner accepted and functionally verified. It is not Clean Baseline release closure: static CDC, full STA closure, board-warning disposition, reset-window analysis, and programmer identity remain separately open. `VGA-007` (dormant APB source disposition) is also open.
+`VGA-001..006` are VERIFIED for the frozen functional scope and owner accepted. `VGA-007` is OPEN. Static CDC (`CDC-001`), full STA (`STA-001`), external I/O timing (`STA-002`), VGA/ADC warning disposition, the pre-`mtvec` reset window, and independent programmer/JTAG image-to-board binding are outside this verdict.
 
-The public evidence package is [`reports/evidence/vga-hwclear/`](../reports/evidence/vga-hwclear/summary.md) and the engineering narrative is [CS-009](../docs/engineering/CS-009-p08b-vga-hwclear-w1c.md).
+The engineering narrative is [CS-009](../docs/engineering/CS-009-p08b-vga-hwclear-w1c.md); execution evidence is [P08B-VGA-EV-01](../reports/evidence/vga-hwclear/summary.md).
 
-## 2. Current active contract
+## 2. Current Active Contract
 
-### 2.1 Architecture and storage
+### 2.1 Architecture, clocks, and ownership
 
-`AHB_VRAM_DUAL_BUFFER` is an AHB-side peripheral, not the dormant `APB_VGA_Top`. Each framebuffer bank contains 9,600 32-bit words (38,400 bytes), representing 640 x 480 1-bpp pixels. The VGA pixel reader owns the displayed bank; accepted CPU writes and an active cleaner use the other bank.
+`CLOCK_50` feeds `vga_pll`; its nominal pixel output is `pclk_25` while the AHB control/write side uses 50 MHz `HCLK`. `VGA_SyncGen`, prefetch, and the read sides of both mixed-width RAMs are in the pixel domain. CPU writes, control/status state, and `HW_Cleaner` are in HCLK. The two domains exchange request/acknowledge toggles; a live asynchronous bank select is not the ownership interface.
 
-### 2.2 Canonical address and access policy
+```text
+CPU / AHB (HCLK)                         Pixel domain (pclk_25)
+  | canonical writes, status/control          | timing + prefetch
+  v                                           v
+AHB_VRAM_DUAL_BUFFER --request toggle--> pending swap at frame wrap
+  |  \                                      /        |
+  |   +-- HW_Cleaner / write mux ----------+         +--> VGA RGB/HS/VS
+  |                 |
+  +--> VRAM0 / VRAM1 dual-clock storage <--- selected front-bank read port
+```
 
-| Address | Access | Contract |
+`front_bank_p` is the display selection and `front_bank_h` is the synchronized HCLK ownership view. Reset/recovery establishes VRAM0 front and VRAM1 back. CPU writes always target the HCLK back bank; the cleaner uses a target bank latched when its clear begins.
+
+### 2.2 Geometry, storage, and pixels
+
+The visible framebuffer is 640 x 480 x 1 bpp = 307,200 bits = 38,400 bytes = 9,600 32-bit words. There are 20 words per line. For visible coordinates:
+
+```text
+word_index = y * 20 + (x >> 5)       (0 <= x < 640, 0 <= y < 480)
+bit_index  = x & 31
+```
+
+The leftmost pixel of a 32-pixel word is bit 0; increasing X selects increasing bit positions. A zero bit drives black (`R=G=B=0`), and a one bit drives white (`R=G=B=0xF`) when video is active and display is armed.
+
+Each physical RAM has a 16,384 x 32-bit HCLK write view and a 524,288 x 1-bit pclk read view. Only words 0..9599 / bits 0..307199 are visible architectural storage; the remaining physical capacity is reserved and is not software addressable. Read-side synchronous prefetch is an implementation interface constraint: software must use X/Y or word coordinates, never the prefetch counter.
+
+### 2.3 Operations and bank transitions
+
+Only one operation may be outstanding. A nonzero accepted `VRAM_CONTROL` command starts an operation. A swap request crosses to the pixel domain, commits only at `(h_cnt,v_cnt)=(799,524)` transitioning to `(0,0)`, then returns an acknowledgement to HCLK.
+
+| Accepted command | Before completion | Completion and resulting ownership |
 |---|---|---|
-| `0x2000_0000`–`0x2000_95FF` | aligned 32-bit write only | Current writable back buffer. |
-| `0x2001_0000` | read / W1C bit 0 | `VRAM_STATUS`. |
-| `0x2001_0004` | write | `VRAM_CONTROL` command. |
-| All other local addresses, framebuffer reads, and subword/misaligned framebuffer accesses | ERROR | No data write and no command side effect. |
+| `SWAP` | current front remains displayed until frame wrap | swap at frame wrap; old back becomes front; `OP_DONE` sets after ack |
+| `HW_CLEAR` | current front remains displayed | latch current back; write zero to words 0..9599; `OP_DONE` sets after word 9599 commit |
+| `SWAP | HW_CLEAR` | current front remains displayed until frame wrap | swap first; latch old front/new back and clear it; `OP_DONE` sets after final clear commit |
+| zero command | no operation | accepted as no-op by firmware policy; no state change |
 
-Only the table above is architectural. Wider fabric selection or historical local aliases are not part of the software contract.
+An overlapping framebuffer/control request, a request while domain readiness is absent, or a request rejected at data commit receives ERROR and no operation/write side effect. CPU framebuffer writes are excluded while an operation is busy. No operation may modify the displayed front bank.
 
-### 2.3 AHB response and operation acceptance
+### 2.4 Reset, lock loss, and display gating
 
-The peripheral completes an accepted request with the documented ready/response sequence. A request that cannot be accepted—for example, because the target bank is busy or not writable—gets the two-cycle AHB ERROR response. Rejected requests must not assert framebuffer write enable or start/alter an operation.
+The pixel reset is released through `reset_release_sync` from `HRESETn & vga_pll_locked`. While the synchronized HCLK lock view is low, `DOMAIN_READY` is low, ownership/recovery state is rebased to VRAM0-front, pending requests are discarded, and an active operation sets `OP_ABORT`. Raw PLL lock also gates every physical VRAM write. A later valid pixel-domain readiness handshake is required before a new command or framebuffer write is accepted.
 
-At most one cleaner operation is outstanding. Clear start latches its target bank; subsequent display-bank changes cannot redirect that operation. A swap becomes visible only at the defined VSync boundary. Software shall wait for the associated status before relying on the new ownership.
+The first post-reset/recovery output is black because display arming is cleared; a successfully committed swap arms output. Framebuffer memory contents are not an architectural reset-clear guarantee. Firmware needing blank content must render or issue an accepted clear after readiness.
 
-### 2.4 Control and status
+## 3. Interface / Register / Timing Contract
 
-`VRAM_CONTROL` issues clear, swap, and combined commands as implemented by the active RTL. `VRAM_STATUS` reports live `BUSY`/`READY` state and a sticky completion event. Bit 0 is W1C: writing one acknowledges the event; writing zero does not clear it. Set-versus-clear priority and reset behavior are defined by the RTL/DV matrix and shall remain deterministic.
+### 3.1 Canonical address and AHB access
 
-## 3. Interface, register, and timing details
-
-The framebuffer word index spans `0..9599`; a successful hardware-clear operation writes exactly those 9,600 words in its latched target bank. The pixel mapping is linear 1-bpp raster order. The RGB output is monochrome black or white from the selected display bank under the VGA timing generator.
-
-The CPU and VGA sides are in distinct clock domains. The functional contract above does not claim static CDC closure. Similarly, the timing contract describes intended pixel/display behavior and does not claim full post-route STA closure.
-
-## 4. Invariants and error behavior
-
-- A canonical framebuffer write modifies only the writable bank.
-- A rejected, unsupported, read, subword, or misaligned framebuffer request has no write side effect.
-- A cleaner never changes banks after its target is accepted.
-- A displayed image changes bank only at the defined swap boundary.
-- Completion remains observable until W1C acknowledgement; BUSY and READY are live, not inferred from an IDLE-high level.
-- The exact clear count is a RTL/DV property. A board photograph can corroborate a visible black/white transition but cannot establish all 9,600 individual writes.
-
-## 5. Acceptance criteria
-
-| ID | Criterion | Evidence class |
+| Address or range | Access | Contract |
 |---|---|---|
-| `VGA-AC-01` | Canonical aperture and invalid-gap behavior are deterministic. | Directed RTL/DV |
-| `VGA-AC-02` | Unsupported or unaccepted traffic returns ERROR without side effect. | Directed RTL/DV |
-| `VGA-AC-03` | Busy ownership, swap, and clear-target latching are atomic. | Directed RTL/DV |
-| `VGA-AC-04` | Completion is sticky W1C with deterministic ordering. | Directed RTL/DV and firmware execution |
-| `VGA-AC-05` | Each accepted clear writes exactly 9,600 words to its latched bank. | Directed RTL/DV |
-| `VGA-AC-06` | Hardware exhibits the expected visible clear/swap transition. | Board photographs |
-| `VGA-AC-07` | Combined and no-write swap sequences show the expected visible result. | Board photographs |
-| `VGA-AC-08` | The exercised image was accepted by the board operator. | Board observation |
+| `0x2000_0000`–`0x2000_95FF` | aligned 32-bit write only | Current back-buffer words 0..9599. |
+| `0x2000_9600`–`0x2000_FFFF` | none | Reserved gap. |
+| `0x2001_0000` | aligned 32-bit read / W1C write | `VRAM_STATUS`. |
+| `0x2001_0004` | aligned 32-bit write only | `VRAM_CONTROL`. |
+| all other VGA-local addresses, framebuffer reads, subword/misaligned accesses, and CONTROL reads | ERROR | No physical write, event clear, or operation start. |
 
-## 6. Current requirement status
+The target qualifies address phase with `HSEL && HTRANS[1]`, captures address/control for the following data phase, and uses `HREADY_IN` as the global completion qualifier. A normal supported transaction returns `HRESP=OKAY`, `HREADY=1`. A rejected transaction returns the project two-cycle error: first `HRESP=ERROR,HREADY=0`, then `HRESP=ERROR,HREADY=1`. The held data phase cannot duplicate a commit.
 
-| Requirement | Status | Basis |
+Address acceptance is not physical write completion. For framebuffer/control writes, raw PLL lock, synchronized readiness, and idle ownership are revalidated at the data commit phase. Loss before commit turns the transfer into ERROR with zero physical writes; a write that has already committed with final OKAY is neither rolled back nor repeated. This is a functional atomicity contract, not static CDC/metastability sign-off.
+
+Misaligned CPU instructions take the CPU's pre-bus misalignment path (store cause 6); a direct bus transaction with invalid VGA size/alignment receives the local two-cycle ERROR. A terminal rejected VGA store is a faulting operation, not a firmware-retry result.
+
+### 3.2 Status register: `VRAM_STATUS` (`0x2001_0000`)
+
+| Bit | Name | Access | Meaning |
+|---:|---|---|---|
+| 0 | `VSYNC_EVENT` | RO / W1C | Sticky HCLK event on synchronized rising/deassertion edge of active-low `VGA_VS`. |
+| 1 | `OP_DONE` | RO / W1C | Sticky completion after swap acknowledgement or final clear-word commit. |
+| 2 | `OP_BUSY` | RO | Live one-outstanding-operation state. |
+| 3 | `OP_ABORT` | RO / W1C | Sticky lock-loss abort of an active operation. |
+| 4 | `DOMAIN_READY` | RO | Pixel/ownership recovery handshake complete. |
+| 31:5 | reserved | RO / W1C ignored | Reads zero; writes have no defined effect. |
+
+Writing one clears only bits 0, 1, and 3 respectively; writing zero does not clear them. W1C processing occurs before hardware event update, so a coincident event is set-dominant. Reset clears the sticky events. `OP_BUSY` and `DOMAIN_READY` are live and are not W1C state.
+
+### 3.3 Control register: `VRAM_CONTROL` (`0x2001_0004`)
+
+| Bit | Name | Access | Meaning |
+|---:|---|---|---|
+| 0 | `SWAP` | WO command | Request frame-boundary ownership swap. |
+| 1 | `HW_CLEAR` | WO command | Request clear as defined in Section 2.3. |
+| 31:2 | reserved | WO | Ignored; they do not create an operation. |
+
+The register stores no command state and has no read contract. A command with bits `[1:0]==0` creates no operation. A nonzero command is accepted only when `DOMAIN_READY=1` and `OP_BUSY=0`; otherwise its transfer is rejected as above.
+
+### 3.4 VGA timing and scanout constraints
+
+| Horizontal segment | Pixels | Vertical segment | Lines |
+|---|---:|---|---:|
+| visible | 640 | visible | 480 |
+| front porch | 16 | front porch | 10 |
+| sync pulse | 96 | sync pulse | 2 |
+| back porch | 48 | back porch | 33 |
+| total | 800 | total | 525 |
+
+`VGA_HS` and `VGA_VS` are active-low. With nominal 25 MHz pclk, the nominal frame rate is about 59.52 Hz. The timing generator itself defines the 800 x 525 counters; the owner swap boundary is the explicit final-count wrap `(799,524)->(0,0)`, independent of the prefetch reset at `(798,524)`. Full generated-clock and board timing closure are not claimed.
+
+## 4. Invariants and Error Behavior
+
+| Cause | Required response | Required absence of side effect |
 |---|---|---|
-| `VGA-001` | VERIFIED | Canonical decode and boundary directed tests. |
-| `VGA-002` | VERIFIED | Write-only/error-path DV, source review, and firmware build. |
-| `VGA-003` | VERIFIED | Contention/no-side-effect and CPU fault-path DV. |
-| `VGA-004` | VERIFIED | Clear-only, combined, overlap, and target-latch DV. |
-| `VGA-005` | VERIFIED | W1C ordering/collision DV and firmware execution path. |
-| `VGA-006` | VERIFIED functional scope | Exact-count RTL/DV plus board-visible smoke evidence; not STA/CDC closure. |
-| `VGA-007` | OPEN | Dormant `APB_VGA_Top` disposition is deferred. |
+| canonical, ready, idle framebuffer write | one final OKAY commit to HCLK back bank | no front-bank write or duplicate under held `HREADY_IN` |
+| unsupported address/direction/size/alignment | two-cycle ERROR | no VRAM write, status mutation, or operation |
+| busy or not-ready framebuffer/control request | two-cycle ERROR | no cleaner target change, request toggle, or CPU write |
+| PLL loss before data commit | two-cycle ERROR | no physical write for that transfer |
+| PLL loss during active operation | abort/recovery; `OP_ABORT` sticky | no continued physical clear write after lock loss |
 
-Run-specific source digests, tool outcomes, photo hashes, and limitations are in the [evidence result](../reports/evidence/vga-hwclear/result.json), not in this normative contract.
+The following MUST always hold:
 
-## 7. Approved target and deferred work
+- Only canonical aligned word framebuffer writes may change visible framebuffer storage.
+- A clear target is immutable after clear starts and clear writes exactly one zero word per permitted HCLK edge for addresses 0..9599.
+- Swap is visible only at the defined pixel frame wrap; a combined clear never targets its displayed new front.
+- Sticky events remain observable until their own W1C acknowledgement; unrelated W1C bits do not clear them.
+- A final OKAY framebuffer/control write corresponds to exactly one physical commit; a pre-commit ERROR corresponds to zero.
+- Static CDC, full STA, physical timing, and every displayed pixel value are not inferred from a protocol simulation or a photograph.
 
-The approved target is the frozen source behavior above. The following remain outside this acceptance:
+## 5. Acceptance Criteria
 
-| ID | Status | Reason |
+| ID | Stimulus and assertion | Pass condition |
 |---|---|---|
-| `CDC-001` | NOT_RUN / unresolved | No static CDC sign-off. |
+| `VGA-AC-01` | Exercise canonical framebuffer/status/control accesses, gap/alias/read/subword/invalid accesses. | Canonical requests have documented result; each invalid request has two-cycle ERROR and no side effect. |
+| `VGA-AC-02` | Hold data phase, vary ready/lock boundary, and issue consecutive requests. | Exactly-once physical commit for final OKAY; no commit for ERROR or held phase; no false OKAY after pre-commit loss. |
+| `VGA-AC-03` | Exercise swap-only, clear-only, combined, overlap, and repeated commands. | Frame-wrap swap, latched clear target, 0..9599 range, exactly 9,600 clear writes, and rejected overlaps are observed. |
+| `VGA-AC-04` | Set, clear, repeat, and coincide each W1C event with hardware event generation. | VSYNC/DONE/ABORT are independent sticky W1C events with set-dominant collision; BUSY/READY are live. |
+| `VGA-AC-05` | Inject lock loss idle, pending swap, active clear, combined clear, acknowledgement window, and reset-adjacent states. | Writes stop, active operation aborts once, recovery returns safe ownership/black gating, and a new operation is possible after ready. |
+| `VGA-AC-06` | Observe standalone hardware-clear/swap screen sequence on board. | Bounded photographs show the expected visible black/restored transition only. |
+| `VGA-AC-07` | Observe combined and no-write-swap board sequence. | Bounded photographs show expected white/black/restored visible states only. |
+| `VGA-AC-08` | Board operator repeats the smoke sequence. | Operator reports normal operation through the stated bounded cycle count. |
+
+Criteria are stable verification rules. Run IDs, timestamps, hashes, and raw logs are retained only in evidence.
+
+## 6. Current Requirement Status
+
+| Requirement | Status | Compact basis |
+|---|---|---|
+| `VGA-001` | VERIFIED functional scope | Canonical decode/boundary/error directed verification. |
+| `VGA-002` | VERIFIED functional scope | Aligned write-only policy, no read/subword side effect, and firmware interface review. |
+| `VGA-003` | VERIFIED functional scope | Ownership, contention, error/no-side-effect, and CPU-fault verification. |
+| `VGA-004` | VERIFIED functional scope | Target latch, clear-only, combined, overlap, and range/count verification. |
+| `VGA-005` | VERIFIED functional scope | Sticky W1C ordering/collision and firmware control path. |
+| `VGA-006` | VERIFIED functional scope | Same-RTL exact-count DV plus bounded board-visible smoke evidence. |
+| `VGA-007` | OPEN | Dormant APB VGA source disposition. |
+
+Historical evidence is intentionally compact: `P08B-VGA-EV-01` covers `VGA-AC-01..08` with DV PASS for AC-01..05, photo observation for AC-06..07, and user attestation for AC-08. See [summary](../reports/evidence/vga-hwclear/summary.md) and [result](../reports/evidence/vga-hwclear/result.json).
+
+## 7. Approved Target / Deferred Work
+
+| Item | Status | Boundary |
+|---|---|---|
+| `CDC-001` | NOT_RUN / unresolved | Functional request/ack testing is not static CDC sign-off. |
 | `STA-001` | IN_PROGRESS | Internal STA is SCOPED_PASS only, not full closure. |
-| `STA-002` | BLOCKED | Board/I/O electrical timing ownership is unresolved. |
-| VGA/ADC warnings | OPEN | Two warnings require explicit disposition. |
-| Reset window | known risk | Further reset-domain analysis is required. |
-| Programmer identity | unavailable | No programmer-identity evidence was captured. |
+| `STA-002` | BLOCKED | External I/O/electrical timing has no complete peer/board closure. |
+| VGA/ADC warnings | OPEN | Critical proximity warnings require explicit disposition. |
+| `RESET_WINDOW_UNPROTECTED_BEFORE_MTVEC_COMMIT` | known risk | Not a verified safe firmware trap interval. |
+| Programmer/JTAG binding | unavailable | No independent SOF-to-board binding was captured. |
 
 ## 8. Traceability
 
-| Contract area | Source and evidence |
-|---|---|
-| Active peripheral and cleaner | `rtl/video/vram/AHB_VRAM_DUAL_BUFFER.v`, `rtl/video/vram/HW_Cleaner.v` |
-| Firmware interface | `firmware/include/vram.h`, `firmware/drivers/vram.c` |
-| Directed verification | `verification/directed/vga/` |
-| Requirement tracker | [`baseline_cleanup.md`](baseline_cleanup.md) |
-| Board evidence | [`reports/evidence/vga-hwclear/`](../reports/evidence/vga-hwclear/summary.md) |
-| Engineering case | [CS-009](../docs/engineering/CS-009-p08b-vga-hwclear-w1c.md) |
+- Tracker: [`baseline_cleanup.md`](baseline_cleanup.md) and [Korean tracker](kor/baseline_cleanup.ko.md)
+- Active RTL: [`pre_fetch_AHB_VRAM_DUAL_BUFFER.v`](../rtl/video/vram/pre_fetch_AHB_VRAM_DUAL_BUFFER.v), [`HW_Cleaner.v`](../rtl/video/vram/HW_Cleaner.v), [`VGA_SyncGen.v`](../rtl/video/vga/VGA_SyncGen.v)
+- Firmware: [`vram.h`](../firmware/include/vram.h), [`vram.c`](../firmware/drivers/vram.c)
+- Directed verification: [`tb_p08b_vga.sv`](../verification/directed/vga/tb_p08b_vga.sv), [`tb_p08b_vga_state_matrix.sv`](../verification/directed/vga/tb_p08b_vga_state_matrix.sv), [`tb_p08b_vga_atomicity_matrix.sv`](../verification/directed/vga/tb_p08b_vga_atomicity_matrix.sv), [`tb_p08b_vga_cpu_fault.sv`](../verification/directed/vga/tb_p08b_vga_cpu_fault.sv)
+- Case and evidence: [CS-009](../docs/engineering/CS-009-p08b-vga-hwclear-w1c.md), [P08B-VGA-EV-01](../reports/evidence/vga-hwclear/summary.md)
 
-## Appendix A. Historic pre-cleanup notes
+## Appendix A. Historical / Pre-cleanup Notes
 
-Earlier baselines described permissive local aliases, fixed-success response behavior, immediate or live-bank assumptions, and level-style completion interpretations. Those notes are historical context only and must not be used as the current contract.
+Earlier baseline text described broad local aliases, fixed OKAY/ready behavior, immediate HCLK swap, a live clear-bank selection, level-style clear completion, and no hardware-clear board evidence. Those descriptions are historical only; they must not be used as the current contract. The retained architecture/geometry/timing facts were reconciled into Sections 2 and 3; engineering alternatives are in CS-009.
