@@ -141,7 +141,7 @@ The generic firmware header currently contains `mmio_read8()` and `mmio_write8()
 
 Framebuffer storage is an AHB-side block, not an APB peripheral. However, the active VGA write path does not provide a general byte-enable contract and the VGA specification defines aligned 32-bit framebuffer writes as normative.
 
-The current `vram_write_byte()` helper performs an 8-bit CPU store. Firmware shall treat this helper as **non-normative legacy behavior** and shall not use it for new firmware. New code shall update the framebuffer through aligned 32-bit word writes and software masking/packing as required.
+The P08B local candidate removes the legacy `vram_write_byte()` helper. Firmware updates the framebuffer through aligned 32-bit word writes and software packing; no byte-write or readback API is supported.
 
 ### 5.3 Volatile semantics
 
@@ -850,9 +850,9 @@ The current driver exposes command-oriented `timer_start(compare)`, `timer_stop(
 
 `final_main.c` uses `UINT32_MAX` as its long one-shot interval. At terminal it acknowledges READY and explicitly issues a fresh START; it no longer relies on W1C automatic resume. Its elapsed checks retain unsigned subtraction across the visible maximum-to-zero re-arm boundary.
 
-Historical local P06B evidence also covered the project-specific `benchmark_main.c` Timer migration. That source is intentionally excluded from the public snapshot, so the benchmark sub-scope is retained only as private/local historical evidence. The reproducible public application scope uses `final_main.c`.
+`benchmark_main.c` uses the Timer driver rather than direct Timer MMIO. Measurement setup performs RELOAD then START, and measurement completion reads COUNT then issues STOP. The legacy COMPARE=0/W1C automatic-rearm reset trick is removed.
 
-`timer_wait_ready()` remains unbounded. P06B does not close or change `FW-002`, and no Timer IRQ/PLIC behavior is introduced. Host mock-MMIO ordering tests and the actual RV32I build of public `final_main` pass. The approved historical local evidence additionally recorded a `benchmark_main` build. Its source-publication exclusion does not reopen `FW-004`, which remains VERIFIED.
+`timer_wait_ready()` remains unbounded. P06B does not close or change `FW-002`, and no Timer IRQ/PLIC behavior is introduced. Host mock-MMIO ordering tests and actual RV32I builds of `final_main` and `benchmark_main` pass; User/Chat approved this evidence and `FW-004` is VERIFIED.
 
 ## 38. Phase 4A-P07B Current UART Firmware Contract
 
@@ -880,3 +880,15 @@ Host mock-MMIO evidence verifies success/eventual-success/timeout/invalid paths,
 zero-budget behavior, W1C, and LoRa ordering. Affected RV32I applications build.
 This is UART-subscope evidence for `FW-002`; global `FW-002` remains OPEN because
 other peripheral waits remain outside P07B. No UART IRQ/PLIC behavior is added.
+
+## P08B Trap-Policy Boundary
+
+The uncommitted P08B candidate may rely on firmware fail-stop handling only
+after startup's `mtvec` write commits. Every rebuilt image must validate the
+startup opcode order and its own trap symbols. Application and VGA MMIO shall
+occur after installation. Before that commit, reset `mtvec=0x00006d60` lies
+outside canonical IMEM; this is
+`RESET_WINDOW_UNPROTECTED_BEFORE_MTVEC_COMMIT`, not verified behavior.
+Rejected VGA stores are terminal faults: firmware shall not retry, skip,
+increment `mepc`, blindly `mret`, or present the fault as a recoverable driver
+result.

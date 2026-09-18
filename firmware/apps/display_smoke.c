@@ -62,12 +62,11 @@ static void draw_frame(uint32_t step, uint32_t leds, uint32_t frame)
 static int present_frame(void)
 {
     uint32_t tries;
-    vram_clear_vsync();
+    vram_clear_events(VRAM_STATUS_VSYNC);
     for (tries = 0u; tries < VSYNC_POLL_LIMIT; ++tries) {
         if ((vram_status() & VRAM_STATUS_VSYNC) != 0u) {
             /* Publish the complete back buffer without starting hardware clear. */
-            mmio_write32(VRAM_BASE + VRAM_CONTROL, VRAM_CTRL_SWAP);
-            return 1;
+            return vram_start_operation(VRAM_CTRL_SWAP) == VRAM_RESULT_OK;
         }
     }
     return 0;

@@ -64,10 +64,16 @@ module tb_soc_bus_fault_decode;
         end
     endtask
     task check_error(input [31:0] addr, input wr, input [2:0] size);
+        reg vga_owned;
         begin
             set_bus(addr,wr,2'b10,size);
-            if (dut.HSEL_ERROR !== 1 || dut.HSEL_MEM || dut.HSEL_VRAM || dut.HSEL_APB)
+            vga_owned = (addr >= 32'h2000_0000) && (addr <= 32'h2001_ffff);
+            if (vga_owned) begin
+                if (!dut.HSEL_VRAM || dut.HSEL_ERROR || dut.HSEL_MEM || dut.HSEL_APB)
+                    $fatal(1, "invalid VGA request not owned by VGA at %h", addr);
+            end else if (dut.HSEL_ERROR !== 1 || dut.HSEL_MEM || dut.HSEL_VRAM || dut.HSEL_APB) begin
                 $fatal(1, "invalid decode not default ERROR at %h", addr);
+            end
             @(posedge clk); #1;
             if (dut.HRESP !== 2'b01 || dut.HREADY !== 0)
                 $fatal(1, "first default ERROR response %h", addr);

@@ -21,6 +21,7 @@ module tb_p05b_vga_reset;
         .HADDR    (32'h0),
         .HWRITE   (1'b0),
         .HTRANS   (2'b00),
+        .HSIZE    (3'b010),
         .HWDATA   (32'h0),
         .HSEL     (1'b0),
         .HREADY_IN(1'b1),
@@ -67,7 +68,7 @@ module tb_p05b_vga_reset;
         #7 dut.U_PLL.inject_lock_loss(); #1;
         check_condition(dut.vga_pll_locked === 1'b0, "PLL model did not report lock loss");
         check_condition(dut.vga_reset_n === 1'b0, "PLL lock loss did not assert VGA reset");
-        check_condition(dut.U_SYNC.oHCNT === 10'd0 && dut.VRAM_ADDR === 19'd0,
+        check_condition(dut.U_SYNC.oHCNT === 10'd0 && dut.vram_read_addr === 19'd0,
                "VGA state was not cleared on lock loss");
         wait (dut.vga_pll_locked === 1'b1);
         @(posedge dut.pclk_25); #1;

@@ -71,12 +71,19 @@ static uint8_t reverse_bits(uint8_t b)
     return b;
 }
 
-void vga_text_begin_frame(void)
+vram_result_t vga_text_begin_frame(void)
 {
-    vram_wait_vsync();
-    vram_clear_vsync();
-    vram_swap_and_clear();
-    vram_wait_clear_done();
+    vram_result_t result;
+    const uint32_t poll_budget = 2000000u;
+
+    result = vram_wait_ready(poll_budget);
+    if (result != VRAM_RESULT_OK) return result;
+    vram_clear_events(VRAM_STATUS_VSYNC);
+    result = vram_wait_vsync(poll_budget);
+    if (result != VRAM_RESULT_OK) return result;
+    result = vram_start_operation(VRAM_CTRL_SWAP | VRAM_CTRL_HW_CLEAR);
+    if (result != VRAM_RESULT_OK) return result;
+    return vram_wait_operation(poll_budget);
 }
 
 void vga_text_puts(uint32_t word_x, uint32_t y, const char *str)

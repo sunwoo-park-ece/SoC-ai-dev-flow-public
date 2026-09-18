@@ -752,3 +752,12 @@ Cleanup 값은 이제 확정되었다. `mvendorid`와 `marchid`는 외부 alloca
 Project AHB 최종 ERROR(`HRESP=01`, `HREADY=1`)에서 load는 `mcause=5`, store/AMO는 `mcause=7`, `mepc`는 faulting instruction PC다. 실패 load는 GPR writeback 없음, 실패 store는 side effect 없음, 실패 명령은 성공 retire 없음. Misaligned load/store cause 4/6이 우선하고 구별된다. Fetch는 AHB data path 밖이므로 instruction-fetch AHB fault는 새로 정의하지 않는다. Phase 4A-3A는 load/store bus fault만 검증하며 AMO 및 기타 CPU 정확성까지 주장하지 않는다.
 
 **Phase 4A-3A 상태:** load/store 버스 access-fault, 정확한 `mepc`, 실패 writeback/younger stage 억제, misalignment 우선순위를 CPU 단독·SoC 통합 테스트로 검증했다. AMO 지원, 일반 retirement(`CPU-005`), 불법 명령(`CPU-009`), 전체 `TRAP-003` 완료를 뜻하지 않는다.
+
+## P08B reset-window 제한
+
+검토 firmware는 stack/BSS/application 전에 in-range direct `mtvec`를
+설치하며 User/Chat은 해당 CSR write commit 이후만 승인했다. CPU reset 값
+`mtvec=0x00006d60`은 여전히 canonical 16 KiB IMEM 밖이므로 startup write
+이전 exception은 보호되지 않고 검증되지 않은 reset window이다. P08B는
+CPU/reset-vector 재설계를 허가하지 않으며 첫 reset fetch부터의 safe
+trapping을 주장하지 않는다.

@@ -30,7 +30,7 @@ uint32_t mmio_read32(uint32_t addr)
 {
     if (addr == VRAM_BASE + VRAM_STATUS) {
         ++reads;
-        return scenario == 1 ? 0u : 1u;
+        return scenario == 1 ? 0x10u : 0x11u;
     }
     if (addr == LED_BASE + LED_DATA) return leds ^ (scenario == 2 ? 1u : 0u);
     if (addr == HEX_DISPLAY_BASE + HEX_VALUE) return hex ^ (scenario == 3 ? 1u : 0u);
@@ -49,9 +49,11 @@ void mmio_write32(uint32_t addr, uint32_t value)
         }
         ++writes;
     } else if (addr == VRAM_BASE + VRAM_STATUS) {
-        assert(value == 1u);
-        assert(writes > 9600u);
-        ++frames;
+        assert(value == 1u || value == 0xau);
+        if (value == 1u) {
+            assert(writes > 9600u);
+            ++frames;
+        }
     } else if (addr == VRAM_BASE + VRAM_CONTROL) {
         assert(value == 1u); /* SWAP only: hardware clear must stay disabled. */
         assert(scenario != 1);

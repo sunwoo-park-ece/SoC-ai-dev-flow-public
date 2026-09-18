@@ -31,6 +31,7 @@ SECTIONS
     .imem : ALIGN(4)
     {
         KEEP(*(.start))
+        KEEP(*(.trap))
         *(.text*)
         *(.init*)
         *(.fini*)

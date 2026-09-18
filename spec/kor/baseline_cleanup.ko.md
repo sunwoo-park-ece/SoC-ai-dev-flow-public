@@ -154,7 +154,7 @@ Phase 4A-3A 시점에는 slot 8/9와 후속 ISA/trap 근거가 남아 `APB-001`�
 |---|---|---|---|---|---|---|
 | `RST-001` | High | BC | 과거 domain별 assertion/release 불일치와 cold-start 비결정성은 P05 reset architecture로 해결됨. | 필요한 곳의 async assertion, HCLK/destination-sync release, deterministic LOW power-up, 1,000,000-cycle qualification을 보존. | P05 all-domain reset + fitted synchronizer/power-up + positive recovery/removal | VERIFIED |
 | `RST-002` | High | BC | 과거 generated-domain release/PLL-ready gap은 baseline VGA, ADC project logic, PCLK-only G-sensor에서 해결됨. | VGA `locked` qualification, pclk_25/adc_sys_clk local release sync, vendor-managed ADC/Qsys reset, G-sensor 내부 SPI clock 부재를 보존. | P05 lock/reset + fitted PLL/reset/clock inventory | VERIFIED |
-| `CDC-001` | High | BC | VGA front idx direct CDC. | frame-safe CDC. | async swap | OPEN |
+| `CDC-001` | High | BC | 과거 VGA bank selector direct CDC를 P08B candidate에서 교체. | frame-safe CDC/ownership handshake. | async request/ack, 정확한 frame-wrap swap, PLL recovery PASS; review 대기 | IN_PROGRESS |
 | `CDC-002` | Blocker | BC | Gsensor XYZ direct CDC. | atomic XYZ + VALID/SEQ. | async pattern | OPEN |
 | `CDC-003` | Blocker | BC | ADC response direct CDC. | coherent XY publication. | torn-sample | OPEN |
 | `CDC-004` | Medium | BC | P05가 external async-input policy audit을 완료하고 reset/AUX 동작을 수정했으며 승인된 synchronizer를 보존함. | UART RX/AUX, G-sensor INT, reset button, SW, GPIO 구조와 level/pulse 제한을 보존. | P05 directed regression + fitted 36-chain/minimum-2-register review | VERIFIED |
@@ -199,12 +199,12 @@ P04와 후속 User/Chat 승인으로 `BOARDIO-001/002/003/006`은 `VERIFIED`다.
 
 | ID | Sev | Gate | 핵심 작업 | Status |
 |---|---|---|---|---|
-| `VGA-001` | High | BC | canonical decode only | OPEN |
-| `VGA-002` | Medium | BC | 승인된 A3 write-only aligned32 구현; read/subword는 ERROR, byte helper 제거 | OPEN |
-| `VGA-003` | High | BC | CLEAR_BUSY 중 false-success write 제거 | OPEN |
-| `VGA-004` | High | BC | clear target latch | OPEN |
-| `VGA-005` | Medium | BC | CLEAR_DONE/BUSY semantics 정리 | OPEN |
-| `VGA-006` | High | BC | HW-clear RTL+board acceptance | OPEN |
+| `VGA-001` | High | BC | P08B canonical decode/negative DV PASS; review 대기 | IN_PROGRESS |
+| `VGA-002` | Medium | BC | aligned32 write-only, read/subword ERROR, byte helper 제거 PASS; review 대기 | IN_PROGRESS |
+| `VGA-003` | High | BC | busy/not-ready 2-cycle ERROR와 rejected WE 억제 PASS; review 대기 | IN_PROGRESS |
+| `VGA-004` | High | BC | clear target latch와 one-outstanding PASS; review 대기 | IN_PROGRESS |
+| `VGA-005` | Medium | BC | sticky W1C DONE/ABORT, live BUSY/READY PASS; review 대기 | IN_PROGRESS |
+| `VGA-006` | High | BC | 9600-word RTL clear PASS, Quartus/board NOT_RUN | IN_PROGRESS |
 | `VGA-007` | Low | OPT | dormant APB VGA 정리 | OPEN |
 
 ## 11. UART
@@ -297,10 +297,10 @@ UART/LoRa, external-I/O electrical acceptance가 아니다. `UART-005`는 OPEN,
 
 | ID | Sev | Gate | 핵심 작업 | Status |
 |---|---|---|---|---|
-| `FW-001` | High | BC | 승인된 A3에 따라 framebuffer byte-write 제거/deprecate | OPEN |
+| `FW-001` | High | BC | P08B framebuffer byte-write API/use 제거와 영향 FW build/host test PASS; broader review 대기 | IN_PROGRESS |
 | `FW-002` | High | BC | UART/LoRa finite TX/AUX budget, distinct timeout, zero-budget 및 caller migration evidence는 PASS; Timer/VGA/AES 등 global bounded-wait 잔여 | OPEN |
 | `FW-003` | Medium | BC | driver ownership/direct-MMIO 정리 | OPEN |
-| `FW-004` | High | BC | A5 fresh one-shot driver/application migration; host ordering 및 공개 `final_main` RV32I build PASS, 소스 공개 제외된 `benchmark_main` build는 승인된 private/local historical evidence로 보존 | VERIFIED |
+| `FW-004` | High | BC | A5 fresh one-shot driver/application migration; host ordering 및 `final_main`/`benchmark_main` RV32I build PASS | VERIFIED |
 | `FW-005` | High | BC | P04 driver 분리/host PASS, 필수 board evidence 없음 | OPEN |
 | `FW-006` | High | BC | SW/LED constants + 16-slot map migration | VERIFIED |
 | `FW-007` | High | BC | true GPIO/IRQ driver/host 구현; BOARDIO-001/002 dependency 해소, 명시적 GPIO board test 잔여 | IN_PROGRESS |
@@ -409,7 +409,7 @@ all cleanup -> VER-001..008 -> DOC/REPORT -> cleanup gate close
 |---|---|---|
 | A1 GPIO | `GPIO_WIDTH=16`, JP1 GPIO_0–15 1:1; UART/LoRa JP1 27/29/31/34/35 제외 | P04 source/open/post-fit과 User/Chat 승인으로 BOARDIO-001/002/003/005/006 VERIFIED. FW-007은 IN_PROGRESS이며 board test와 VER-005, STA-002는 별도 잔여. |
 | A2 bus/APB fault | canonical invalid access는 2-cycle `HRESP=01` ERROR; APB default error/`PSLVERR` 전달; CPU load/store cause 5/7, precise mepc/side effect/retire | Phase 4A-3A와 후속 3B3R 근거로 BUS-003, APB-004, 전체 TRAP-003 VERIFIED. |
-| A3 VGA | framebuffer write-only, aligned 32-bit; read/subword/gap/alias ERROR | Phase 4A-3A 버스 접근 정책만 적용; `VGA-002`, `FW-001` 전체 cleanup은 OPEN |
+| A3 VGA | framebuffer write-only, aligned 32-bit; read/subword/gap/alias ERROR | P08B local candidate 구현/open DV PASS; `VGA-002`, `FW-001`은 User/Chat review 대기 IN_PROGRESS |
 | A4 UART | busy DATA write PREADY=0 backpressure 후 정확히 1회 수락; programmed/per-direction-active divisor | P07B open verification과 User/Chat 승인으로 UART-001..004 VERIFIED; UART-005 physical board evidence OPEN, UART IRQ DEFERRED, P07B RTL은 later consolidated Quartus/P14 대상 |
 | A5 timer | exact-N-edge one-shot, N=0 즉시, fresh START, STOP/RELOAD, sticky READY/set-dominant W1C | P06B evidence로 TIMER-001..005/FW-004 VERIFIED; APB-005는 Timer sub-scope evidence만 기록하고 OPEN, FW-002 OPEN, TIMER-IRQ DEFERRED 유지 |
 | A6 private SPI | 50 MHz PCLK/clock-enable mode-3 FSM, registered 약 2 MHz SCLK; old dual-phase SPI PLL은 target에서 inactive | SPI-002 IN_PROGRESS; RST-002/STA-001 evidence 필요 |
@@ -440,3 +440,13 @@ A1–A6과 STA-002의 architecture 선택은 Phase 4A-1 local review decision pa
 6. review 후에만 `VERIFIED`.
 
 Code-only fix는 `IN_PROGRESS`이며 `VERIFIED`가 아니다.
+
+## P08B 구현 진입 주석
+
+User/Chat은 startup의 `mtvec` write commit 이후 firmware trap-policy
+compatibility만 Gate 0 scoped PASS로 승인했다. 기존 Gate 0 STOP은 historical
+evidence로 유지한다. 그 이전 구간은
+`RESET_WINDOW_UNPROTECTED_BEFORE_MTVEC_COMMIT`이라는 미검증 architectural
+risk이다. 이 결정은 P08B 구현을 허가하지만 VGA/CDC/FW tracker row를
+VERIFIED로 바꾸거나 Clean Baseline v1 release, 최신 local candidate의
+publication을 뜻하지 않는다.

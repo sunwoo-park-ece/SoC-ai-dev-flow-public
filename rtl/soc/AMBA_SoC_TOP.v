@@ -157,12 +157,10 @@ wire size_aligned = (HSIZE == 3'b000) ||
 wire fb_address = (HADDR >= 32'h2000_0000) && (HADDR <= 32'h2000_95ff);
 wire vga_status_address = (HADDR == 32'h2001_0000);
 wire vga_control_address = (HADDR == 32'h2001_0004);
-wire vga_access_valid = (HSIZE == 3'b010) && (HADDR[1:0] == 2'b00) &&
-                        ((fb_address && HWRITE) || vga_status_address ||
-                         (vga_control_address && HWRITE));
+wire vga_aperture = (HADDR[31:17] == 15'h1000); // 0x2000_0000..0x2001_ffff
 wire HSEL_MEM = transfer_valid && size_supported && size_aligned &&
                 (HADDR[31:15] == 17'h02000); // 32 KiB, no upper alias.
-wire HSEL_VRAM = transfer_valid && vga_access_valid;
+wire HSEL_VRAM = transfer_valid && vga_aperture;
 wire HSEL_APB = transfer_valid && (HADDR[31:20] == 12'h400);
 wire HSEL_ERROR = transfer_valid && !(HSEL_MEM || HSEL_VRAM || HSEL_APB);
 
@@ -373,6 +371,7 @@ AHB_VRAM_DUAL_BUFFER U_VRAM (
 .HADDR      (HADDR),
 .HWRITE     (HWRITE),
 .HTRANS     (HTRANS),
+.HSIZE      (HSIZE),
 .HWDATA     (HWDATA),
 .HSEL       (HSEL_VRAM),
 .HREADY_IN  (HREADY),

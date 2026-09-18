@@ -522,3 +522,18 @@ This document shall remain consistent with:
 A2 data-bus ERROR is a synchronous exception, not an external interrupt: load/store access faults use `mcause=5/7`, faulting-instruction `mepc`, no failed-load writeback, no failed-store side effect, and no successful retirement. Misalignment causes 4/6 remain distinct and precede bus fault handling. A1 exposes local `gpio_irq` at the SoC boundary, but it is not connected to the CPU before the separate PLIC phase. No PLIC source ID or CPU interrupt routing is defined by this freeze.
 
 **Phase 4A-3A status:** directed CPU and SoC tests verify the data-bus access-fault sub-scope. This does not close `TRAP-003`: illegal-instruction and taken-branch alignment cases remain open, and PLIC/IRQ routing is unchanged.
+
+## P08B Scoped Firmware Trap-Policy Decision
+
+User/Chat approved a scoped Gate 0 pass for the uncommitted P08B candidate:
+firmware trap-policy compatibility begins only after startup's `mtvec` write
+has committed. In the reviewed image `_start=0x00000000`, the CSR write is at
+`0x00000008`, the direct trap entry is `0x0000003c`, and the terminal fail-stop
+loop is `0x0000004c`. These values are image-specific and every rebuild must be
+validated again.
+
+Reset `mtvec=0x00006d60` is outside canonical 16 KiB IMEM. Thus
+`RESET_WINDOW_UNPROTECTED_BEFORE_MTVEC_COMMIT` remains a known, unverified
+architectural risk. Safe trapping from the first reset fetch is not claimed.
+The published snapshot's historical Gate 0 STOP remains historical truth; this
+decision neither rewrites it nor marks P08B VERIFIED.

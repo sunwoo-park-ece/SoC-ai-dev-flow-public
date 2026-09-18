@@ -1,57 +1,44 @@
 module HW_Cleaner (
-    input clk,
-    input rst_n,
-    input start,                // Control 레지스터에서 인가
-    
-    output reg [13:0] clr_addr, // 0 ~ 9599 (최대 16383)
-    output reg clr_we,
-    output reg clr_busy,
-    output reg clr_done
+    input  wire        clk,
+    input  wire        rst_n,
+    input  wire        start,
+    input  wire        abort,
+    input  wire        pause,
+    output reg  [13:0] clr_addr,
+    output wire        clr_we,
+    output reg         clr_busy,
+    output reg         clr_done
 );
 
-    localparam IDLE  = 2'b00;
-    localparam CLEAR = 2'b01;
-    localparam DONE  = 2'b10;
-    
-    reg [1:0] state, next_state;
-    
+    localparam [13:0] LAST_WORD = 14'd9599;
+
+    assign clr_we = clr_busy && !abort && !pause;
+
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            state <= IDLE;
             clr_addr <= 14'd0;
+            clr_busy <= 1'b0;
+            clr_done <= 1'b0;
         end else begin
-            state <= next_state;
-            
-            if (state == CLEAR) begin
-                clr_addr <= clr_addr + 14'd1;
-            end else if (state == IDLE) begin
+            clr_done <= 1'b0;
+
+            if (abort) begin
                 clr_addr <= 14'd0;
+                clr_busy <= 1'b0;
+            end else if (start && !clr_busy) begin
+                clr_addr <= 14'd0;
+                clr_busy <= 1'b1;
+            end else if (clr_busy && !pause) begin
+                if (clr_addr == LAST_WORD) begin
+                    // clr_we remains asserted for this edge. Completion is
+                    // reported only after word 9599 is physically committed.
+                    clr_busy <= 1'b0;
+                    clr_done <= 1'b1;
+                end else begin
+                    clr_addr <= clr_addr + 14'd1;
+                end
             end
         end
     end
-    
-    always @(*) begin
-        next_state = state;
-        clr_we = 1'b0;
-        clr_busy = 1'b0;
-        clr_done = 1'b0;
-        
-        case (state)
-            IDLE: begin
-                if (start) next_state = CLEAR;
-                clr_done = 1'b1; // 초기 상태이거나 완료 후 IDLE일 때 Done=1
-            end
-            CLEAR: begin
-                clr_busy = 1'b1;
-                clr_we = 1'b1;
-                if (clr_addr == 14'd9599) begin
-                    next_state = DONE;
-                end
-            end
-            DONE: begin
-                clr_done = 1'b1;
-                if (!start) next_state = IDLE; // start 신호가 내려가면 IDLE 복귀
-            end
-        endcase
-    end
+
 endmodule

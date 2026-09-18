@@ -967,3 +967,12 @@ A later CPU revision may change `mimpid`, but any change shall be explicit in th
 On final project AHB ERROR completion (`HRESP=2'b01`, final `HREADY=1`), a load traps with `mcause=5` and a store/AMO with `mcause=7`; `mepc` is the faulting instruction PC. Failed loads never write a destination GPR, failed stores have no memory/peripheral side effect, and failed instructions do not retire successfully. Existing misaligned load/store causes 4/6 take precedence and remain distinct. Instruction fetch does not use the AHB data path, so this contract does not create an instruction-fetch AHB fault. Phase 4A-3A verifies load/store bus faults; AMO and broader CPU correctness are not thereby claimed.
 
 **Phase 4A-3A status:** load/store bus access faults, exact faulting `mepc`, writeback/younger-stage suppression, and misalignment priority are verified in directed CPU and CPU+SoC tests. This does not verify AMO support, general precise retirement (`CPU-005`), illegal-instruction handling (`CPU-009`), or all of `TRAP-003`.
+
+## P08B Reset-Window Limitation
+
+The reviewed firmware installs an in-range direct `mtvec` before stack, BSS and
+application work, and User/Chat approved compatibility only after that CSR
+write commits. This does not alter CPU reset `mtvec=0x00006d60`, which remains
+outside canonical 16 KiB IMEM. An exception before the startup write commits is
+an unprotected, unverified reset window. P08B does not authorize CPU/reset-vector
+redesign and does not claim safe trapping from the first reset fetch.

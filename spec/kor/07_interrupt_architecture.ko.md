@@ -422,3 +422,17 @@ CPU-local 상세 contract는 `21_cpu_core.md`가 소유한다.
 A2 data-bus ERROR는 external interrupt가 아닌 동기 exception이다. Load/store access fault는 `mcause=5/7`, faulting PC의 `mepc`, 실패 load writeback 없음, 실패 store side effect 없음, 성공 retire 없음이다. Misalignment cause 4/6이 구별되어 우선한다. A1 local `gpio_irq`는 SoC boundary까지 노출하지만 PLIC 전 CPU에 연결하지 않는다. 이 단계는 PLIC source ID나 CPU interrupt routing을 정의하지 않는다.
 
 **Phase 4A-3A 상태:** data-bus access-fault 부분만 CPU/SoC 지향 테스트로 검증했다. `TRAP-003`의 illegal-instruction 및 taken-branch alignment는 열려 있고 PLIC/IRQ 배선은 변경하지 않았다.
+
+## P08B scoped firmware trap-policy 결정
+
+User/Chat은 commit되지 않은 P08B candidate에서 startup의 `mtvec` write가
+commit된 이후 firmware trap-policy compatibility만 scoped PASS로 승인했다.
+검토 image에서 `_start=0x00000000`, CSR write는 `0x00000008`, direct trap
+entry는 `0x0000003c`, terminal fail-stop loop는 `0x0000004c`이다. 이 값은
+image-specific이므로 모든 rebuild에서 다시 검증해야 한다.
+
+Reset `mtvec=0x00006d60`은 canonical 16 KiB IMEM 밖이다. 따라서
+`RESET_WINDOW_UNPROTECTED_BEFORE_MTVEC_COMMIT`은 알려진 미검증
+architectural risk이다. 첫 reset fetch부터의 safe trap은 주장하지 않는다.
+공개 snapshot의 기존 Gate 0 STOP은 historical truth로 유지하며 이 결정은
+이를 소급 변경하거나 P08B를 VERIFIED로 만들지 않는다.

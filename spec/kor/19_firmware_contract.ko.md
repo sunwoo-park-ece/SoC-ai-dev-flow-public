@@ -130,7 +130,7 @@ Software는 `memory_map.md`와 각 peripheral spec이 정의한 canonical addres
 
 VRAM은 APB가 아니라 AHB-side block이지만, active VGA write path 역시 일반적인 byte-enable contract를 제공하지 않는다.
 
-현재 `vram_write_byte()`는 8-bit CPU store를 사용하므로 **legacy non-normative helper**로 취급한다. 신규 firmware는 aligned 32-bit framebuffer write와 software masking/packing을 사용해야 한다.
+P08B local candidate는 legacy `vram_write_byte()` helper를 제거한다. 신규 firmware는 aligned 32-bit framebuffer write와 software packing만 사용하며 byte-write/readback API는 지원하지 않는다.
 
 ### 5.3 Volatile
 
@@ -730,9 +730,9 @@ Firmware는 UART0 status를 통해 synchronized E220-900T22D AUX level을 읽는
 
 `final_main.c`는 `UINT32_MAX`를 긴 one-shot interval로 사용한다. Terminal에서 READY를 acknowledge한 뒤 fresh START를 명시적으로 발행하므로 W1C automatic resume에 더 이상 의존하지 않는다. Elapsed check는 visible maximum-to-zero re-arm 경계에서 unsigned subtraction을 유지한다.
 
-과거 local P06B 근거는 프로젝트 전용 `benchmark_main.c`의 Timer 이관도 포함했다. 해당 소스는 공개 snapshot에서 의도적으로 제외하므로 benchmark sub-scope는 private/local historical evidence로만 보존한다. 공개 재현 가능한 application 범위는 `final_main.c`다.
+`benchmark_main.c`는 Timer direct MMIO 대신 driver를 사용한다. Measurement setup은 RELOAD 후 START, 완료는 COUNT read 후 STOP 순서다. 과거 COMPARE=0/W1C automatic-rearm reset trick은 제거됐다.
 
-`timer_wait_ready()`는 여전히 unbounded다. P06B는 `FW-002`를 종결하거나 바꾸지 않으며 Timer IRQ/PLIC 동작을 추가하지 않는다. Host mock-MMIO ordering test와 공개 `final_main` 실제 RV32I build는 PASS했다. 승인된 과거 local evidence에는 `benchmark_main` build도 기록되어 있다. 해당 소스의 공개 제외는 `FW-004`를 재개방하지 않으며 상태는 VERIFIED를 유지한다.
+`timer_wait_ready()`는 여전히 unbounded다. P06B는 `FW-002`를 종결하거나 바꾸지 않으며 Timer IRQ/PLIC 동작을 추가하지 않는다. Host mock-MMIO ordering test와 `final_main`/`benchmark_main` 실제 RV32I build는 PASS했고, User/Chat이 이 evidence를 승인하여 `FW-004`는 VERIFIED다.
 
 ## 38. Phase 4A-P07B 현행 UART Firmware Contract
 
@@ -757,3 +757,13 @@ Host mock-MMIO evidence는 immediate/eventual success, timeout, invalid, zero-bu
 W1C, LoRa ordering을 검증했고 영향받은 RV32I application build가 PASS했다. 이는
 `FW-002`의 UART sub-scope evidence일 뿐이며 다른 peripheral wait가 P07B 범위 밖에
 남아 있으므로 global `FW-002`는 OPEN이다. UART IRQ/PLIC 동작은 추가하지 않았다.
+
+## P08B trap-policy 경계
+
+Commit되지 않은 P08B candidate는 startup의 `mtvec` write commit 이후에만
+firmware fail-stop handling에 의존한다. 모든 rebuild는 startup opcode
+순서와 자체 trap symbol을 다시 검증해야 하며 application/VGA MMIO는 설치
+이후에 수행한다. 그 이전 reset `mtvec=0x00006d60`은 canonical IMEM 밖에
+있으며 `RESET_WINDOW_UNPROTECTED_BEFORE_MTVEC_COMMIT`이라는 미검증
+risk이다. Rejected VGA store를 retry/skip/`mepc` 증가/blind `mret` 또는
+recoverable driver 결과로 처리하지 않는다.

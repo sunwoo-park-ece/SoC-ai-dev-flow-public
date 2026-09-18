@@ -548,4 +548,52 @@ The later consolidated `baseline_cleanup.md` shall collect the cleanup items rec
 
 A3 freezes framebuffer access as write-only, naturally aligned 32-bit word writes. Reads, byte/halfword writes and noncanonical gaps/aliases follow A2 two-cycle AHB ERROR and CPU access-fault handling. A misaligned CPU store instead takes the pre-bus misalignment cause 6; a direct bus-master misaligned framebuffer transaction is invalid and receives A2 ERROR. `VRAM_STATUS` and `VRAM_CONTROL` keep their separately specified semantics. Firmware uses `vram_write_word()`; `vram_write_byte()` is legacy and must be removed/deprecated during implementation, with no readback API. Current RTL's silent/partial behavior above is not the target. STA-002 requires review of VGA digital output standard, voltage, drive/load and board timing evidence, plus the ADC/VGA pin-adjacency warning and ADC behavior during relevant VGA activity; positive internal slack alone is not board signoff.
 
+## P08B Local Candidate — Implementation Pending Review
+
+The uncommitted P08B candidate implements the frozen replacement contract. This
+section supersedes historical active-behavior descriptions above for that local
+candidate only; published public `main` remains the earlier Gate 0 snapshot.
+
+`VRAM_STATUS` is aligned 32-bit read/W1C at `0x2001_0000`:
+
+| Bit | Name | Semantics |
+|---:|---|---|
+| 0 | `VSYNC_EVENT` | sticky W1C; hardware set dominates coincident clear |
+| 1 | `OP_DONE` | sticky W1C after final swap acknowledge or final clear write |
+| 2 | `OP_BUSY` | read-only live one-outstanding-operation state |
+| 3 | `OP_ABORT` | sticky W1C for PLL-loss operation abort |
+| 4 | `DOMAIN_READY` | read-only ownership/recovery handshake complete |
+
+`VRAM_CONTROL` at `0x2001_0004` is write-only: bit 0 `SWAP`, bit 1
+`HW_CLEAR`. Swap commits once at pixel wrap `(799,524)->(0,0)`. Clear writes
+exactly words 0 through 9599 to a target bank latched at acceptance. Combined
+operation swaps first and clears the old front/new back. A nonzero command is
+accepted only while ready and idle; overlapping/not-ready accesses receive the
+VGA-owned two-cycle ERROR. Unsupported framebuffer reads, sizes, gaps and local
+aliases likewise ERROR without a rejected physical write.
+
+The pixel and HCLK domains exchange request/acknowledge toggles; neither uses a
+live asynchronous bank selector. PLL loss gates writes, aborts an active
+operation, resets ownership to VRAM0-front/VRAM1-back through recovery, and
+leaves output black until a later valid swap. Open focused/integrated DV is
+PASS, while User/Chat acceptance, Quartus/TimeQuest and board evidence remain
+pending/NOT_RUN. P08B therefore remains `IN_PROGRESS/PENDING_REVIEW`.
+
+### P08B AHB write-completion atomicity
+
+Address acceptance is not write completion. For an outstanding framebuffer or
+control write, the VGA slave revalidates raw PLL lock, synchronized domain
+readiness and idle ownership at the data commit phase. If a required condition
+is lost before physical commit, the transfer completes as the VGA-owned
+two-cycle ERROR (`HRESP=ERROR/HREADY=0`, then `HRESP=ERROR/HREADY=1`) and both
+physical VRAM write enables remain zero. A write already physically committed
+with final OKAY is not retroactively failed, repeated or rolled back. Thus a
+final OKAY write maps to exactly one physical commit, while a pre-commit ERROR
+maps to zero. `HREADY_IN=0` holds a valid data phase without repeated commits.
+
+The simulation boundary treats lock low before the HCLK commit edge as ERROR
+and lock loss after that edge as non-retroactive. This functional rule does not
+claim asynchronous setup/hold or metastability closure; static CDC and vendor
+timing review remain required and `NOT_RUN` at this checkpoint.
+
 **Phase 4A-3A status:** top-level AHB decode enforces aligned word framebuffer writes and rejects reads, subword writes, misaligned direct-bus writes, gaps, and aliases before selecting VRAM. Directed bus tests pass. Firmware API cleanup, VGA functional/CDC cleanup, and STA-002 physical signoff remain open.

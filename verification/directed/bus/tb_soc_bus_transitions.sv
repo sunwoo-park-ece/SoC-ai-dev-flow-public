@@ -45,9 +45,9 @@ module tb_soc_bus_transitions;
         begin
             if (dut.u_memory.addr_reg !== held_mem_addr ||
                 dut.u_memory.write_en_reg !== held_mem_write ||
-                dut.U_VRAM.addr_reg !== held_vram_addr ||
-                dut.U_VRAM.write_reg !== held_vram_write ||
-                dut.U_VRAM.read_reg !== held_vram_read ||
+                dut.U_VRAM.data_word_addr !== held_vram_addr[13:0] ||
+                dut.U_VRAM.data_write !== held_vram_write ||
+                (dut.U_VRAM.data_valid && !dut.U_VRAM.data_write) !== held_vram_read ||
                 dut.u_bridge.addr_reg !== held_bridge_addr ||
                 dut.u_bridge.write_reg !== held_bridge_write)
                 $fatal(1,"slave address/control overwritten while global HREADY=0");
@@ -68,9 +68,9 @@ module tb_soc_bus_transitions;
         drive(32'h40020004,2'b10); edge_check(4'b0010,0,0);
         held_mem_addr = dut.u_memory.addr_reg;
         held_mem_write = dut.u_memory.write_en_reg;
-        held_vram_addr = dut.U_VRAM.addr_reg;
-        held_vram_write = dut.U_VRAM.write_reg;
-        held_vram_read = dut.U_VRAM.read_reg;
+        held_vram_addr = {18'h0, dut.U_VRAM.data_word_addr};
+        held_vram_write = dut.U_VRAM.data_write;
+        held_vram_read = dut.U_VRAM.data_valid && !dut.U_VRAM.data_write;
         held_bridge_addr = dut.u_bridge.addr_reg;
         held_bridge_write = dut.u_bridge.write_reg;
         force dut.APB_SLAVE_PREADY = 0;

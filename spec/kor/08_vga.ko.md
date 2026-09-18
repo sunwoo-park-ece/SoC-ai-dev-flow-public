@@ -562,4 +562,45 @@ Host-side display-smoke test는 mocked MMIO를 사용해 framebuffer bounds, SWA
 
 A3 framebuffer는 write-only, 자연 정렬된 32-bit word write만 허용한다. Read, byte/halfword write, 비정규 gap/alias는 A2 2-cycle AHB ERROR 및 CPU access fault로 처리한다. Misaligned CPU store는 bus 접근 전 cause 6 misalignment trap이 우선하고, 직접 bus-master의 misaligned framebuffer transaction은 A2 ERROR다. `VRAM_STATUS`/`VRAM_CONTROL`은 별도 register 의미를 유지한다. FW API는 `vram_write_word()`이며 legacy `vram_write_byte()`는 구현 단계에 제거/deprecate하고 readback API는 제공하지 않는다. Byte strobe/RMW hardware를 추가하지 않는다. STA-002는 VGA 출력 전압/standard/drive/load와 board timing 근거, ADC/VGA pin adjacency warning, VGA 동작 중 ADC 거동을 검토한다. 양의 내부 slack만으로 board signoff가 아니다.
 
+## P08B local candidate — 구현 완료, review 대기
+
+Commit되지 않은 P08B candidate는 frozen replacement contract를 구현한다.
+이 절은 해당 local candidate에 한해 위 historical active behavior를
+대체하며 공개 public `main`은 이전 Gate 0 snapshot 상태다.
+
+`VRAM_STATUS`(`0x2001_0000`) bit는 `VSYNC_EVENT` sticky W1C(bit 0),
+`OP_DONE` sticky W1C(bit 1), live `OP_BUSY`(bit 2), sticky W1C
+`OP_ABORT`(bit 3), `DOMAIN_READY`(bit 4)다. 같은 cycle의 hardware event set은
+W1C보다 우선한다. `VRAM_CONTROL`(`0x2001_0004`)은 write-only이며 bit 0은
+SWAP, bit 1은 HW_CLEAR다.
+
+Swap은 pixel wrap `(799,524)->(0,0)`에서 정확히 한 번 commit된다. Clear는
+acceptance 때 target bank를 latch하고 word 0..9599를 정확히 한 번씩 쓴다.
+Combined operation은 swap 후 old front/new back을 clear한다. Nonzero command는
+ready/idle에서만 수락하며 overlap/not-ready, framebuffer read/subword/gap/
+alias는 VGA-owned 2-cycle ERROR이고 rejected physical write는 없다.
+
+HCLK/pixel domain은 request/ack toggle로 ownership을 전달한다. PLL loss는
+write를 gate하고 active operation을 abort하며 recovery 후 VRAM0-front/
+VRAM1-back으로 복구한다. 첫 valid swap 전 output은 black이다. Open focused/
+integrated DV는 PASS지만 User/Chat 승인과 Quartus/TimeQuest/board evidence는
+대기/NOT_RUN이므로 P08B는 `IN_PROGRESS/PENDING_REVIEW`다.
+
+### P08B AHB write completion 원자성
+
+Address acceptance는 write completion이 아니다. Outstanding framebuffer 또는
+control write는 data commit 단계에서 raw PLL lock, 동기화된 domain readiness,
+idle ownership을 다시 확인한다. 물리 commit 전에 필수 조건이 상실되면 해당
+전송은 VGA-owned 2-cycle ERROR(`HRESP=ERROR/HREADY=0`, 이어서
+`HRESP=ERROR/HREADY=1`)로 끝나며 두 physical VRAM write enable은 모두 0이다.
+이미 final OKAY와 함께 물리적으로 commit된 write는 뒤늦게 ERROR 처리하거나
+반복·rollback하지 않는다. 따라서 final OKAY write는 physical commit 정확히
+1회, pre-commit ERROR는 physical commit 0회에 대응한다. `HREADY_IN=0` 동안
+valid data phase는 유지되지만 중복 commit하지 않는다.
+
+Simulation 판정은 HCLK commit edge 전에 lock이 low이면 ERROR, 해당 edge 뒤
+lock loss이면 소급하지 않는 것으로 정의한다. 이는 비동기 setup/hold 또는
+metastability closure를 주장하지 않으며 static CDC/vendor timing review는 이
+checkpoint에서 계속 `NOT_RUN`이다.
+
 **Phase 4A-3A 상태:** top AHB decode가 framebuffer 정렬 word write만 허용하고 read/subword/직접 버스 misalignment/gap/alias는 VRAM 선택 전에 거부한다. 버스 지향 테스트는 통과했다. FW API, VGA 기능/CDC, STA-002 물리 signoff는 여전히 열려 있다.

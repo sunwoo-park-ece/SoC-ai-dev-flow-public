@@ -65,6 +65,7 @@
 #define ERR_MODE_SYNC           5u
 #define ERR_TAG_FAIL            6u
 #define ERR_UART_TIMEOUT        7u
+#define ERR_VGA_TIMEOUT         8u
 
 #define VGA_WORDS_PER_ROW       20u
 #define VGA_WIDTH_PX            640u
@@ -770,7 +771,10 @@ static void render_rc_map(void)
 
 static void render_dashboard(void)
 {
-    vga_text_begin_frame();
+    if (vga_text_begin_frame() != VRAM_RESULT_OK) {
+        last_error = ERR_VGA_TIMEOUT;
+        return;
+    }
     vga_text_puts(1u, 16u, "RC CONTROLLER SOC");
     vga_text_puts(1u, 44u, "MODE");
     vga_text_puts(5u, 44u, active_mode == MODE_WAYPOINT ? "WAYP" : "MAN");

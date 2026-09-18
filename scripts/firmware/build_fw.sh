@@ -55,6 +55,19 @@ if [[ -d "${BENCH_APP_DIR}" ]]; then
   CFLAGS+=(-I "${BENCH_APP_DIR}")
 fi
 
+if [[ "${FW_NAME}" == "dhrystone_t410n" ]]; then
+  CFLAGS+=(
+    -std=gnu89
+    -DTIMES
+    -DNOENUM
+    -DDHRY_ITERS="${DHRY_ITERS:-300000}"
+    -DHZ="${DHRY_HZ:-50000000}"
+    -Wno-implicit
+    -Wno-return-type
+    -Wno-builtin-declaration-mismatch
+  )
+fi
+
 if [[ -n "${EXTRA_CFLAGS:-}" ]]; then
   # shellcheck disable=SC2206
   extra_cflags_array=(${EXTRA_CFLAGS})
@@ -98,7 +111,7 @@ objects+=("${OUT_DIR}/${FW_NAME}.o")
 
 echo "[4/6] link ELF"
 libs=()
-if [[ "${USE_LIBGCC:-0}" == "1" ]]; then
+if [[ "${FW_NAME}" == "dhrystone_t410n" || "${USE_LIBGCC:-0}" == "1" ]]; then
   libs+=(-lgcc)
 fi
 "${CC}" "${CFLAGS[@]}" "${LDFLAGS[@]}" -o "${OUT_DIR}/${FW_NAME}.elf" "${objects[@]}" "${libs[@]}"
