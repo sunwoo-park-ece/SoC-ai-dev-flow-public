@@ -4,6 +4,70 @@ This repository is the publishable source of truth for a personal FPGA SoC proje
 
 The canonical engineering environment is WSL Ubuntu with Codex. RTL/firmware development, Verilator checks, vendor CLI invocation, ModelSim/XSim simulation, result analysis, and engineering-report generation originate there. Antigravity independently develops DV from the approved specifications. Windows Work consumes reviewed evidence for portfolio documents, PDF/PPT material, and interview preparation; it may assist with GUI-only vendor operations, but it is not the canonical build or engineering-report owner.
 
+## Hardware Overview
+
+The active FPGA baseline integrates a custom RV32I SoC around a 5-stage pipelined CPU, an AHB-Lite bus fabric, dedicated memory and display subsystems, and an APB peripheral subsystem.
+
+![Current SoC Block Diagram](docs/assets/images/soc_block_diagram.png)
+
+> **Diagram scope:** This diagram provides a simplified architectural overview. The canonical architecture, memory map, and interface contracts are defined in [`spec/`](spec/README.md) (specifically [`spec/00_soc_architecture.md`](spec/00_soc_architecture.md), [`spec/01_memory_map.md`](spec/01_memory_map.md), and [`spec/08_vga.md`](spec/08_vga.md)). In case of disagreement, the specifications take precedence.
+>
+> *Note on active P08B status:* The block diagram depicts the high-level functional topology. The active frozen P08B RTL incorporates a dedicated Hardware Clear Engine (`HW_Cleaner`), write-one-to-clear (W1C) status synchronization (`VSYNC_EVENT`, `OP_DONE`, `OP_ABORT`), `DOMAIN_READY` handshakes, and a 2-cycle `HRESP=ERROR` bus response path inside the AHB dual-VRAM subsystem. Advanced interconnect blocks such as PLIC, AXI, DMA, and external SDRAM are planned future milestones and are not present in the current baseline.
+
+Key baseline subsystems:
+- **RV32I 5-Stage CPU Core:** In-order 5-stage pipeline with local instruction memory and an AHB-style load/store memory-access interface with precise bus fault trap handling (`mcause=5/7`).
+- **AHB Data Memory (DMEM):** 32 KiB on-chip data memory directly attached to the AHB fabric.
+- **VGA / Dual-VRAM Display Subsystem (`AHB_VRAM_DUAL_BUFFER`):** 640×480 @ 60 Hz 1-bpp monochrome display pipeline driven by an independent 25 MHz pixel clock (`pclk_25`), dual physical mixed-width block RAMs, atomic frame-wrap buffer swapping `(799,524)->(0,0)`, an autonomous 9,600-word hardware clear engine, and sticky W1C status registers.
+- **AHB-to-APB Bridge:** Decodes the `0x1000_0000`–`0x1000_FFFF` peripheral window and converts AHB transfers to APB bus cycles.
+- **APB Peripherals:** Memory-mapped controllers for UART (115200 baud), GPIO (pushbuttons, switches, LEDs), System Timer (64-bit microsecond counter), ADXL345 G-Sensor interface, ADC (analog joystick / temperature sensor), AES-GCM 128-bit cryptographic accelerator, and 6-digit 7-segment HEX display.
+
+## Hardware Demos
+
+Physical FPGA board demonstrations, execution captures, and development logs are published on the project owner's YouTube channel:
+
+- **YouTube — FPGA / SoC / Embedded Project Demos:** https://www.youtube.com/channel/UC9DlYapKa23KqJkNadjSObQ
+
+Demonstration recordings and photographs serve as supporting visual evidence confirming hardware bring-up on the physical DE10-Lite FPGA board. Engineering claims and verification statuses are substantiated by formal in-tree evidence packages:
+- **P08B VGA Hardware Clear & W1C Status Integration:** Documented in [CS-009](docs/engineering/CS-009-p08b-vga-hwclear-w1c.md) with measured execution evidence in [P08B-VGA-EV-01](reports/evidence/vga-hwclear/summary.md).
+- **Exact-Count HW Clear Verification:** The autonomous 9,600-word framebuffer clear and atomic buffer swap sequences are validated via directed RTL simulation assertions ([`tb_p08b_vga.sv`](verification/directed/vga/tb_p08b_vga.sv)) and corroborating multi-cycle board captures ([`reports/evidence/vga-hwclear/media/`](reports/evidence/vga-hwclear/)).
+
+*Visual demonstrations illustrate observable screen behavior; they do not prove internal bus protocol compliance, CDC clock-domain crossing safety, or static timing analysis (STA) sign-off. All technical contracts remain governed by simulation assertions, timing reports, and formal verification evidence.*
+
+## Planned Implementation Roadmap
+
+The implementation roadmap outlines the structured engineering trajectory for post-baseline SoC evolution. This sequence represents a **forward-looking working plan, not currently implemented features**:
+
+1. **PLIC and CPU External Interrupt Path:**
+   - Define platform-level interrupt controller (PLIC) gateway and memory-mapped register architecture.
+   - Integrate peripheral interrupt lines (UART, timer, GPIO, display VSync) into CPU trap entry.
+   - Validate CSR handling, vectored/direct interrupt dispatch, and ISR drivers.
+2. **AXI Interconnect Migration:**
+   - Introduce target AXI4 interconnect fabric with multi-master arbitration policies.
+   - Preserve existing APB peripherals via an AXI-to-APB bridge.
+   - Incrementally migrate CPU data and display masters from AHB-Lite to AXI.
+3. **Multi-Channel DMA and AXI Arbitration:**
+   - Implement an AXI master direct memory access (DMA) engine with configurable channels.
+   - Establish hardware scheduling, round-robin/priority arbitration, and software control registers.
+   - Verify bus back-pressure, transfer contention, transfer completion, and error responses.
+4. **External SDRAM Subsystem:**
+   - Add an SDR SDRAM controller with dedicated physical pad constraints and refresh management.
+   - Integrate the SDRAM controller into the AXI memory address map.
+   - Achieve physical timing closure, validate burst throughput, and verify row/bank access latency.
+5. **DMA Staging and Buffer Data Path:**
+   - Define structured internal buffering paths between CPU DMEM, VRAM, DMA, and external SDRAM.
+   - Eliminate redundant CPU memcpy overhead during frame generation and peripheral data streaming.
+6. **Data Cache (D-Cache) Controller:**
+   - Introduce a multi-way set-associative data cache architecture following external memory stabilization.
+   - Implement cache line refill, write-through/write-back policies, invalidation, and flush mechanisms.
+   - Define cache coherency interactions with DMA and software cache-maintenance operations.
+7. **System-Level Integration and Performance Closure:**
+   - Expand open-source regression testbenches and independent UVM verification coverage.
+   - Reconcile cross-domain CDC paths, reset synchronization, and terminal error propagation.
+   - Measure real-hardware Fmax, resource utilization, memory bandwidth, and IPC benchmark metrics.
+
+*Note: This roadmap is an engineering working plan. Prior to baseline integration, each milestone must strictly complete the defined development lifecycle: Specification ➔ RTL/Firmware Implementation ➔ Independent DV / Simulation ➔ FPGA Synthesis & Timing Closure ➔ Measured Board Evidence ➔ Milestone Review.*
+
+
 ## Repository boundary
 
 ```text
