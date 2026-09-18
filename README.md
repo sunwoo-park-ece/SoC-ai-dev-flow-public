@@ -11,15 +11,14 @@ The active FPGA baseline integrates a custom RV32I SoC around a 5-stage pipeline
 ![Current SoC Block Diagram](docs/assets/images/soc_block_diagram.png)
 
 > **Diagram scope:** This diagram provides a simplified architectural overview. The canonical architecture, memory map, and interface contracts are defined in [`spec/`](spec/README.md) (specifically [`spec/00_soc_architecture.md`](spec/00_soc_architecture.md), [`spec/01_memory_map.md`](spec/01_memory_map.md), and [`spec/08_vga.md`](spec/08_vga.md)). In case of disagreement, the specifications take precedence.
->
-> *Note on active P08B status:* The block diagram depicts the high-level functional topology. The active frozen P08B RTL incorporates a dedicated Hardware Clear Engine (`HW_Cleaner`), write-one-to-clear (W1C) status synchronization (`VSYNC_EVENT`, `OP_DONE`, `OP_ABORT`), `DOMAIN_READY` handshakes, and a 2-cycle `HRESP=ERROR` bus response path inside the AHB dual-VRAM subsystem. Advanced interconnect blocks such as PLIC, AXI, DMA, and external SDRAM are planned future milestones and are not present in the current baseline.
+
 
 Key baseline subsystems:
 - **RV32I 5-Stage CPU Core:** In-order 5-stage pipeline with local instruction memory and an AHB-style load/store memory-access interface with precise bus fault trap handling (`mcause=5/7`).
 - **AHB Data Memory (DMEM):** 32 KiB on-chip data memory directly attached to the AHB fabric.
 - **VGA / Dual-VRAM Display Subsystem (`AHB_VRAM_DUAL_BUFFER`):** 640×480 @ 60 Hz 1-bpp monochrome display pipeline driven by an independent 25 MHz pixel clock (`pclk_25`), dual physical mixed-width block RAMs, atomic frame-wrap buffer swapping `(799,524)->(0,0)`, an autonomous 9,600-word hardware clear engine, and sticky W1C status registers.
 - **AHB-to-APB Bridge:** Decodes the `0x1000_0000`–`0x1000_FFFF` peripheral window and converts AHB transfers to APB bus cycles.
-- **APB Peripherals:** Memory-mapped controllers for UART (115200 baud), GPIO (pushbuttons, switches, LEDs), System Timer (64-bit microsecond counter), ADXL345 G-Sensor interface, ADC (analog joystick / temperature sensor), AES-GCM 128-bit cryptographic accelerator, and 6-digit 7-segment HEX display.
+- **APB Peripherals:** Memory-mapped controllers for UART (115200 baud), GPIO (pushbuttons, switches, LEDs), System Timer, ADXL345 G-Sensor interface, ADC (analog joystick / temperature sensor), AES-GCM 128-bit cryptographic accelerator, and 6-digit 7-segment HEX display.
 
 ## Hardware Demos
 
@@ -44,15 +43,12 @@ The implementation roadmap outlines the structured engineering trajectory for po
 2. **AXI Interconnect Migration:**
    - Introduce target AXI4 interconnect fabric with multi-master arbitration policies.
    - Preserve existing APB peripherals via an AXI-to-APB bridge.
-   - Incrementally migrate CPU data and display masters from AHB-Lite to AXI.
 3. **Multi-Channel DMA and AXI Arbitration:**
    - Implement an AXI master direct memory access (DMA) engine with configurable channels.
    - Establish hardware scheduling, round-robin/priority arbitration, and software control registers.
    - Verify bus back-pressure, transfer contention, transfer completion, and error responses.
 4. **External SDRAM Subsystem:**
-   - Add an SDR SDRAM controller with dedicated physical pad constraints and refresh management.
    - Integrate the SDRAM controller into the AXI memory address map.
-   - Achieve physical timing closure, validate burst throughput, and verify row/bank access latency.
 5. **DMA Staging and Buffer Data Path:**
    - Define structured internal buffering paths between CPU DMEM, VRAM, DMA, and external SDRAM.
    - Eliminate redundant CPU memcpy overhead during frame generation and peripheral data streaming.
