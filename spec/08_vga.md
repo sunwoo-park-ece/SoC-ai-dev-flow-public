@@ -160,16 +160,16 @@ The following MUST always hold:
 
 ## 5. Acceptance Criteria
 
-| ID | Stimulus and unchanged assertion | Pass condition | Evidence layer / current result |
-|---|---|---|---|
-| `VGA-AC-01` | Exercise canonical aperture boundaries and reserved gaps. | Canonical framebuffer/status/control addresses decode deterministically and gaps/aliases do not become architectural accesses. | same-RTL directed DV — PASS |
-| `VGA-AC-02` | Exercise unsupported read/size/alignment and unaccepted busy/not-ready traffic. | Each request returns two-cycle ERROR with no framebuffer, status, ownership, or command side effect. | same-RTL directed DV — PASS |
-| `VGA-AC-03` | Exercise swap-only, clear-only, combined, overlap, and ownership transitions. | Swap/clear ordering is atomic, clear target remains latched, displayed front is preserved, and overlaps are rejected. | same-RTL directed DV — PASS |
-| `VGA-AC-04` | Set, clear, repeat, and coincide VSYNC/DONE/ABORT events and inspect BUSY/READY. | Sticky W1C events are independent and deterministically ordered/set-dominant; BUSY/READY remain live. | same-RTL DV plus firmware execution path — PASS |
-| `VGA-AC-05` | Start an accepted clear on a known latched bank and count cleaner physical commits/addresses. | Exactly 9,600 zero-word commits occur, covering words 0 through 9599 exactly once on that bank. | same-RTL H05 DV exact-count check — PASS |
-| `VGA-AC-06` | Observe standalone hardware-clear/swap screen sequence on board. | Bounded photographs show the expected visible black/restored transition only. | board photographs — PHOTO_OBSERVED |
-| `VGA-AC-07` | Observe combined and no-write-swap board sequence. | Bounded photographs show expected white/black/restored visible states only. | board photographs — PHOTO_OBSERVED |
-| `VGA-AC-08` | Board operator repeats the smoke sequence. | Operator reports normal operation through the stated bounded cycle count. | operator report through cycle 5 — USER_ATTESTED |
+| ID | Stable stimulus and assertion | Pass condition |
+|---|---|---|
+| `VGA-AC-01` | Exercise canonical aperture boundaries and reserved gaps. | Canonical framebuffer/status/control addresses decode deterministically and gaps/aliases do not become architectural accesses. |
+| `VGA-AC-02` | Exercise unsupported read/size/alignment and unaccepted busy/not-ready traffic. | Each request returns two-cycle ERROR with no framebuffer, status, ownership, or command side effect. |
+| `VGA-AC-03` | Exercise swap-only, clear-only, combined, overlap, and ownership transitions. | Swap/clear ordering is atomic, clear target remains latched, displayed front is preserved, and overlaps are rejected. |
+| `VGA-AC-04` | Set, clear, repeat, and coincide VSYNC/DONE/ABORT events and inspect BUSY/READY. | Sticky W1C events are independent and deterministically ordered/set-dominant; BUSY/READY remain live. |
+| `VGA-AC-05` | Start an accepted clear on a known latched bank and count cleaner physical commits/addresses. | Exactly 9,600 zero-word commits occur, covering words 0 through 9599 exactly once on that bank. |
+| `VGA-AC-06` | Observe standalone hardware-clear/swap screen sequence on board. | Bounded photographs show the expected visible black/restored transition only. |
+| `VGA-AC-07` | Observe combined and no-write-swap board sequence. | Bounded photographs show expected white/black/restored visible states only. |
+| `VGA-AC-08` | Board operator repeats the smoke sequence. | Operator reports normal operation through the stated bounded cycle count. |
 
 These IDs preserve the behavioral meanings published with `P08B-VGA-EV-01`; they are not reassigned to the separate held-phase or lock-loss/reset matrices. Those matrices support detailed current-contract statements but are not introduced here as new approved stable criteria. Run IDs, timestamps, hashes, and raw logs are retained only in evidence. Photographs do not prove the AC-05 count, individual MMIO transactions, CDC/STA, or programmer identity.
 
@@ -185,7 +185,18 @@ These IDs preserve the behavioral meanings published with `P08B-VGA-EV-01`; they
 | `VGA-006` | VERIFIED functional scope | Same-RTL exact-count DV plus bounded board-visible smoke evidence. |
 | `VGA-007` | OPEN | Dormant APB VGA source disposition. |
 
-Historical evidence is intentionally compact: `P08B-VGA-EV-01` covers `VGA-AC-01..08` with DV PASS for AC-01..05, photo observation for AC-06..07, and user attestation for AC-08. See [summary](../reports/evidence/vga-hwclear/summary.md) and [result](../reports/evidence/vga-hwclear/result.json).
+The current criterion-to-evidence mapping is intentionally compact:
+
+| AC ID | Current result | Evidence class | Link |
+|---|---|---|---|
+| `VGA-AC-01` | PASS | same-RTL directed DV | [P08B-VGA-EV-01](../reports/evidence/vga-hwclear/summary.md) |
+| `VGA-AC-02` | PASS | same-RTL directed DV | [P08B-VGA-EV-01](../reports/evidence/vga-hwclear/summary.md) |
+| `VGA-AC-03` | PASS | same-RTL directed DV | [P08B-VGA-EV-01](../reports/evidence/vga-hwclear/summary.md) |
+| `VGA-AC-04` | PASS | same-RTL DV plus firmware execution path | [P08B-VGA-EV-01](../reports/evidence/vga-hwclear/summary.md) |
+| `VGA-AC-05` | PASS | same-RTL H05 exact-count DV | [P08B-VGA-EV-01](../reports/evidence/vga-hwclear/summary.md) |
+| `VGA-AC-06` | PHOTO_OBSERVED | bounded cycle-0 board photographs | [P08B-VGA-EV-01](../reports/evidence/vga-hwclear/summary.md) |
+| `VGA-AC-07` | PHOTO_OBSERVED | bounded cycle-0 board photographs | [P08B-VGA-EV-01](../reports/evidence/vga-hwclear/summary.md) |
+| `VGA-AC-08` | USER_ATTESTED | bounded operator report through cycle 5 | [P08B-VGA-EV-01 result](../reports/evidence/vga-hwclear/result.json) |
 
 ## 7. Approved Target / Deferred Work
 

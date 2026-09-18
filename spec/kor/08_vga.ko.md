@@ -157,16 +157,16 @@ normal production sequence는 bounded다. READY 대기, aligned word로 back ban
 
 ## 5. Acceptance Criteria
 
-| ID | Stimulus와 기존 assertion | Pass condition | Evidence layer / current result |
-|---|---|---|---|
-| `VGA-AC-01` | canonical aperture boundary와 reserved gap exercise | canonical framebuffer/status/control 주소가 결정적으로 decode되고 gap/alias가 architectural access가 되지 않음 | same-RTL directed DV — PASS |
-| `VGA-AC-02` | unsupported read/size/alignment와 unaccepted busy/not-ready traffic exercise | 각 request가 two-cycle ERROR, framebuffer/status/ownership/command side effect 없음 | same-RTL directed DV — PASS |
-| `VGA-AC-03` | swap-only, clear-only, combined, overlap, ownership transition exercise | swap/clear ordering atomic, target latched, displayed front 보존, overlap reject | same-RTL directed DV — PASS |
-| `VGA-AC-04` | VSYNC/DONE/ABORT set/clear/repeat/coincident 및 BUSY/READY 확인 | independent sticky W1C, deterministic/set-dominant ordering, live BUSY/READY | same-RTL DV plus firmware execution path — PASS |
-| `VGA-AC-05` | known latched bank의 accepted clear를 시작하고 cleaner physical commit/address count | 해당 bank word 0..9599를 각각 한 번, 정확히 9,600 zero-word commit | same-RTL H05 DV exact-count check — PASS |
-| `VGA-AC-06` | board standalone hardware-clear/swap screen sequence 관측 | bounded photo가 expected black/restored transition만 보임 | board photographs — PHOTO_OBSERVED |
-| `VGA-AC-07` | board combined/no-write-swap sequence 관측 | bounded photo가 expected white/black/restored state만 보임 | board photographs — PHOTO_OBSERVED |
-| `VGA-AC-08` | operator가 smoke sequence 반복 | stated bounded cycle까지 정상 동작 보고 | operator report through cycle 5 — USER_ATTESTED |
+| ID | Stable stimulus와 assertion | Pass condition |
+|---|---|---|
+| `VGA-AC-01` | canonical aperture boundary와 reserved gap exercise | canonical framebuffer/status/control 주소가 결정적으로 decode되고 gap/alias가 architectural access가 되지 않음 |
+| `VGA-AC-02` | unsupported read/size/alignment와 unaccepted busy/not-ready traffic exercise | 각 request가 two-cycle ERROR, framebuffer/status/ownership/command side effect 없음 |
+| `VGA-AC-03` | swap-only, clear-only, combined, overlap, ownership transition exercise | swap/clear ordering atomic, target latched, displayed front 보존, overlap reject |
+| `VGA-AC-04` | VSYNC/DONE/ABORT set/clear/repeat/coincident 및 BUSY/READY 확인 | independent sticky W1C, deterministic/set-dominant ordering, live BUSY/READY |
+| `VGA-AC-05` | known latched bank의 accepted clear를 시작하고 cleaner physical commit/address count | 해당 bank word 0..9599를 각각 한 번, 정확히 9,600 zero-word commit |
+| `VGA-AC-06` | board standalone hardware-clear/swap screen sequence 관측 | bounded photo가 expected black/restored transition만 보임 |
+| `VGA-AC-07` | board combined/no-write-swap sequence 관측 | bounded photo가 expected white/black/restored state만 보임 |
+| `VGA-AC-08` | operator가 smoke sequence 반복 | stated bounded cycle까지 정상 동작 보고 |
 
 이 ID는 `P08B-VGA-EV-01`과 함께 게시된 behavioral meaning을 보존하며 별도 held-phase 또는 lock-loss/reset matrix에 재할당하지 않는다. 그 matrix는 상세 current-contract 문장을 지원하지만 여기서 새 approved stable criterion으로 만들지 않는다. Run ID, 날짜, hash, raw log는 evidence만 보존한다. 사진은 AC-05 count, individual MMIO, CDC/STA, programmer identity를 증명하지 않는다.
 
@@ -182,7 +182,18 @@ normal production sequence는 bounded다. READY 대기, aligned word로 back ban
 | `VGA-006` | VERIFIED functional scope | same-RTL exact-count DV와 bounded board-visible smoke |
 | `VGA-007` | OPEN | dormant APB VGA source disposition |
 
-Historical evidence summary: `P08B-VGA-EV-01`은 AC-01..05 DV PASS, AC-06..07 photo observation, AC-08 user attestation을 분리한다. [summary](../../reports/evidence/vga-hwclear/summary.md)와 [result](../../reports/evidence/vga-hwclear/result.json)를 참조한다.
+현재 criterion-to-evidence mapping은 다음 compact 표로 유지한다.
+
+| AC ID | Current result | Evidence class | Link |
+|---|---|---|---|
+| `VGA-AC-01` | PASS | same-RTL directed DV | [P08B-VGA-EV-01](../../reports/evidence/vga-hwclear/summary.md) |
+| `VGA-AC-02` | PASS | same-RTL directed DV | [P08B-VGA-EV-01](../../reports/evidence/vga-hwclear/summary.md) |
+| `VGA-AC-03` | PASS | same-RTL directed DV | [P08B-VGA-EV-01](../../reports/evidence/vga-hwclear/summary.md) |
+| `VGA-AC-04` | PASS | same-RTL DV plus firmware execution path | [P08B-VGA-EV-01](../../reports/evidence/vga-hwclear/summary.md) |
+| `VGA-AC-05` | PASS | same-RTL H05 exact-count DV | [P08B-VGA-EV-01](../../reports/evidence/vga-hwclear/summary.md) |
+| `VGA-AC-06` | PHOTO_OBSERVED | bounded cycle-0 board photographs | [P08B-VGA-EV-01](../../reports/evidence/vga-hwclear/summary.md) |
+| `VGA-AC-07` | PHOTO_OBSERVED | bounded cycle-0 board photographs | [P08B-VGA-EV-01](../../reports/evidence/vga-hwclear/summary.md) |
+| `VGA-AC-08` | USER_ATTESTED | bounded operator report through cycle 5 | [P08B-VGA-EV-01 result](../../reports/evidence/vga-hwclear/result.json) |
 
 ## 7. Approved Target / Deferred Work
 
