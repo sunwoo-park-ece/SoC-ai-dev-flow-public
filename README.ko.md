@@ -17,7 +17,7 @@
 - **RV32I 5단계 CPU 코어:** 로컬 명령어 메모리(IMEM)와 AHB 스타일 로드/스토어 메모리 접근 인터페이스를 갖춘 In-order 5단계 파이프라인 CPU로, 정밀한 버스 오류 트랩(`mcause=5/7`)을 지원합니다.
 - **AHB 데이터 메모리 (DMEM):** AHB 패브릭에 직접 연결된 32 KiB 온칩 데이터 메모리.
 - **VGA / 듀얼 VRAM 디스플레이 서브시스템 (`AHB_VRAM_DUAL_BUFFER`):** 독립적인 25 MHz 픽셀 클럭(`pclk_25`)으로 구동되는 640×480 @ 60 Hz 1-bpp 단색 비트맵 파이프라인으로, 물리적 듀얼 뱅크 혼합 폭 BRAM, `(799,524)->(0,0)` 프레임 랩 스왑, 9,600 워드 자동 하드웨어 클리어 엔진, W1C 상태 레지스터를 포함합니다.
-- **AHB-to-APB 브리지:** `0x1000_0000`–`0x1000_FFFF` 주변장치 영역을 디코딩하여 AHB 트랜잭션을 APB 버스 전송으로 변환합니다.
+- **AHB-to-APB 브리지:** 정규 APB 주소 영역인 `0x4000_0000`–`0x400F_FFFF`의 AHB 트랜잭션을 APB 버스 전송으로 변환하며, 예약 슬롯 접근은 오류를 반환합니다.
 - **APB 주변장치:** UART (115200 bps), GPIO (푸시버튼, 슬라이드 스위치, LED), 시스템 타이머, ADXL345 G-센서 인터페이스, ADC (아날로그 조이스틱 / 온도 센서), AES-GCM 128비트 암호화 가속기, 6자리 7세그먼트 HEX 디스플레이 컨트롤러.
 
 ## Hardware Demos
@@ -28,7 +28,7 @@
 
 시연 영상 및 캡처 사진은 물리적 DE10-Lite FPGA 보드에서의 정상 동작을 확인하는 보조적인 시각적 증거입니다. 모든 기술적 주장과 검증 결과는 저장소 내 공식 엔지니어링 패키지를 통해 추적 가능합니다:
 - **P08B VGA 하드웨어 클리어 및 W1C 상태 통합:** 엔지니어링 사례 분석 [CS-009](docs/engineering/CS-009-p08b-vga-hwclear-w1c.md) 및 공개 증적 [P08B-VGA-EV-01](reports/evidence/vga-hwclear/summary.md) 수록.
-- **정확한 9,600회 HW Clear 검증:** 자율적인 9,600 워드 프레임버퍼 클리어 및 원자적 버퍼 스왑 시퀀스는 방향성 RTL 시뮬레이션 어설션([`tb_p08b_vga.sv`](verification/directed/vga/tb_p08b_vga.sv))과 다중 사이클 보드 사진 증적([`reports/evidence/vga-hwclear/media/`](reports/evidence/vga-hwclear/))을 통해 교차 검증되었습니다.
+- **정확한 9,600회 HW Clear 검증:** 프레임버퍼를 정확히 9,600워드 클리어한다는 내부 카운트는 방향성 RTL 시뮬레이션 어설션([`tb_p08b_vga.sv`](verification/directed/vga/tb_p08b_vga.sv))으로 검증했으며, 화면에 보이는 클리어/스왑 시퀀스는 별도의 [보드 사진](reports/evidence/vga-hwclear/board/)으로 기록했습니다.
 
 *시각적 데모는 화면 표시 동작을 보여줄 뿐이며, 내부 버스 프로토콜 정합성, 클럭 도메인 교차(CDC) 신호 무결성, 정적 타이밍 분석(STA) 결과를 증명하지 않습니다. 모든 기술적 계약은 시뮬레이션 어설션, 타이밍 분석 보고서, 검증 증적에 의해서만 규정됩니다.*
 
@@ -69,7 +69,7 @@
 ```text
 $PUBLIC_REPO  공개 가능한 spec/RTL/FW/verification 및 정제 보고서
 $VENDOR_ROOT 라이선스·생성물이 포함된 비공개 Quartus/Vivado 프로젝트
-$RUN_ROOT    빌드, 로그, 파형, 원본 리포트, 임시 산출물
+$RUN_ROOT    빌드, 로그, 파형, 원본 리포트
 export/      다른 환경으로 넘길 검토 완료 산출물
 ```
 
