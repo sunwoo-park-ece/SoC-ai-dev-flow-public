@@ -45,16 +45,16 @@ bit_index  = x & 31
 
 ### 2.3 Operation과 bank transition
 
-outstanding operation은 하나뿐이다. nonzero `VRAM_CONTROL` command가 operation을 시작한다. swap request는 pixel domain으로 넘어가 `(h_cnt,v_cnt)=(799,524)`에서 `(0,0)`으로 wrap할 때만 commit하고 ack가 HCLK로 돌아온다.
+outstanding operation은 하나뿐이다. final-OKAY control-register write는 bus transaction 한 번의 수락이다. command bit가 nonzero이면 그 수락이 operation request를 정확히 한 번 발행한다. 이후 swap ack, cleaner write, `OP_DONE`은 control transaction 자체의 physical write가 아니라 뒤따르는 state-machine effect다. swap request는 pixel domain으로 넘어가 `(h_cnt,v_cnt)=(799,524)`에서 `(0,0)`으로 wrap할 때만 commit하고 ack가 HCLK로 돌아온다.
 
 | 수락 명령 | 완료 전 | 완료 및 ownership 결과 |
 |---|---|---|
 | `SWAP` | 현재 front를 계속 표시 | frame wrap에서 swap; old back이 front; ack 후 `OP_DONE` set |
 | `HW_CLEAR` | 현재 front를 계속 표시 | current back을 래치하고 word 0..9599를 0으로 write; word 9599 commit 뒤 `OP_DONE` set |
 | `SWAP | HW_CLEAR` | frame wrap 전에는 현재 front 표시 | 먼저 swap, old front/new back을 래치해 clear; 마지막 clear commit 뒤 `OP_DONE` set |
-| zero command | 동작 없음 | firmware 정책상 no-op, state 변화 없음 |
+| command bit `[1:0]==0` | 동작 없음 | control access가 ready/idle이면 한 번 수락; reserved bit는 무시되고 operation은 시작하지 않음 |
 
-overlap framebuffer/control request, domain not-ready request, data commit에서 거절된 request는 ERROR이며 operation/write side effect가 없다. operation busy 동안 CPU framebuffer write는 배제된다. 어떤 operation도 표시 중 front bank를 변경하면 안 된다.
+overlap framebuffer/control request, domain not-ready의 framebuffer/control request, data phase에서 거절된 request는 ERROR다. 거절 framebuffer request는 VRAM word write 0회, 거절 control request는 command issue 0회다. operation busy 동안 CPU framebuffer write는 배제된다. STATUS read/W1C는 별도 register policy로 수락되며 VRAM을 쓰지 않는다. 어떤 operation도 표시 중 front bank를 변경하면 안 된다.
 
 ### 2.4 Reset, lock loss, display gating
 
@@ -76,7 +76,7 @@ post-reset/recovery 첫 출력은 display armed가 clear되어 black이다. 성�
 
 target은 address phase를 `HSEL && HTRANS[1]`로 qualify하고 다음 data phase에 address/control을 capture하며 `HREADY_IN`을 global completion qualifier로 쓴다. 정상 지원 transaction은 `HRESP=OKAY`, `HREADY=1`이다. 거절 transaction은 project two-cycle error(`HRESP=ERROR,HREADY=0`, 다음 `HRESP=ERROR,HREADY=1`)다. held data phase는 duplicate commit을 만들지 않는다.
 
-address acceptance는 physical write completion이 아니다. framebuffer/control write는 data commit에서 raw PLL lock, synchronized readiness, idle ownership을 다시 확인한다. commit 전 loss는 zero physical write ERROR가 되며 이미 final OKAY로 commit한 write는 rollback/repeat하지 않는다. 이는 functional atomicity 계약이지 static CDC/metastability sign-off가 아니다.
+address acceptance는 data-phase bus acceptance가 아니며 bus acceptance도 이후 operation completion과 다르다. framebuffer/control write는 data phase에서 raw PLL lock, synchronized readiness, idle ownership을 다시 확인한다. framebuffer transfer의 final OKAY는 writable back bank physical word write 정확히 1회이고 pre-acceptance ERROR는 0회다. control transfer의 final OKAY는 register-command acceptance 정확히 1회이지 즉시 VRAM word write가 아니다. swap ack와 cleaner write는 이후 발생한다. 완료된 effect는 rollback/repeat하지 않는다. 이는 functional atomicity 계약이지 static CDC/metastability sign-off가 아니다.
 
 misaligned CPU instruction은 CPU pre-bus misalignment path(store cause 6)를 사용한다. invalid size/alignment direct bus transaction은 local two-cycle ERROR다. terminal rejected VGA store는 firmware retry 결과가 아니라 faulting operation이다.
 
@@ -93,6 +93,8 @@ misaligned CPU instruction은 CPU pre-bus misalignment path(store cause 6)를 �
 
 1을 쓰면 각각 bit 0, 1, 3만 clear하며 0 write는 clear하지 않는다. W1C 처리가 hardware event update보다 먼저여서 coincident event는 set-dominant다. reset은 sticky event를 clear한다. `OP_BUSY`와 `DOMAIN_READY`는 live이며 W1C state가 아니다.
 
+STATUS access는 framebuffer/control readiness rejection gate를 사용하지 않는다. 따라서 aligned status read/W1C write는 `OP_BUSY=1` 또는 `DOMAIN_READY=0`에서도 수락될 수 있다. 수락된 W1C bus write는 선택 event acknowledge만 수행하며 VRAM word write가 아니다.
+
 ### 3.3 Control register: `VRAM_CONTROL` (`0x2001_0004`)
 
 | Bit | Name | Access | 의미 |
@@ -101,9 +103,25 @@ misaligned CPU instruction은 CPU pre-bus misalignment path(store cause 6)를 �
 | 1 | `HW_CLEAR` | WO command | Section 2.3의 clear request |
 | 31:2 | reserved | WO | ignored; operation을 만들지 않음 |
 
-register는 command state를 저장하지 않고 read contract도 없다. `[1:0]==0` command는 operation을 만들지 않는다. nonzero command는 `DOMAIN_READY=1`이고 `OP_BUSY=0`일 때만 수락되며 아니면 ERROR다.
+register는 command state를 저장하지 않고 read contract도 없다. 지원 write는 data phase에서 한 번 수락된다. `[1:0]==0`이면 reserved bit만 포함한 값도 operation effect가 없다. command bit 중 하나가 1이면 수락이 operation을 한 번 발행하고 해당 state를 set한다. completion은 뒤의 frame-wrap ack 및/또는 cleaner word 9599 이후다. nonzero command는 `DOMAIN_READY=1`이고 `OP_BUSY=0`일 때만 수락되며 아니면 ERROR다.
 
-### 3.4 VGA timing과 scanout constraint
+### 3.4 Firmware API와 사용 계약
+
+동결 driver는 아래 bounded interface를 제공한다. 아래 `OK`, `TIMEOUT`, `NOT_READY`, `BUSY`, `ABORTED`는 대응하는 `VRAM_RESULT_*` enum 값이다. 이 함수들은 invalid 또는 race-lost MMIO가 만드는 CPU bus trap을 catch하지 않는다. 반환값은 status 관측과 direct MMIO 이전 precheck만 나타낸다.
+
+| Function | 인수와 동작 | 반환 / 제한 |
+|---|---|---|
+| `vram_status()` | aligned STATUS read | raw 32-bit status 반환 |
+| `vram_clear_events(mask)` | `mask & (VSYNC_EVENT | OP_DONE | OP_ABORT)`만 W1C STATUS write | `void`; BUSY/READY 및 unselected event를 ack하지 않음 |
+| `vram_wait_ready(poll_budget)` | 최대 `poll_budget` read 동안 `DOMAIN_READY=1` polling | `OK` 또는 `TIMEOUT` |
+| `vram_wait_vsync(poll_budget)` | poll마다 `OP_ABORT`, not-ready, `VSYNC_EVENT` 순서 확인 | `ABORTED`, `NOT_READY`, `OK`, `TIMEOUT` |
+| `vram_start_operation(command)` | command를 `SWAP|HW_CLEAR`로 mask; READY 후 BUSY precheck; zero는 no-op. nonzero이면 stale DONE/ABORT를 clear하고 CONTROL direct write | `NOT_READY`, `BUSY`, `OK`; `OK`는 이후 MMIO race fault 부재나 operation completion 증명이 아님 |
+| `vram_wait_operation(poll_budget)` | poll마다 `OP_ABORT`, not-ready, `OP_DONE` 순서 확인 | `ABORTED`, `NOT_READY`, `OK`, `TIMEOUT` |
+| `vram_write_word(word_offset,value)` | `VRAM_BASE + 4*word_offset` direct write | `void`; bounds/readiness/ownership check와 trap recovery 없음. caller가 writable-back 조건과 `0..9599` 보장 |
+
+normal production sequence는 bounded다. READY 대기, aligned word로 back bank render, stale VSYNC W1C, VSYNC 대기, `vram_start_operation(SWAP|HW_CLEAR)` 호출(먼저 stale DONE/ABORT W1C), `OP_DONE` 또는 bounded failure 대기 순서다. API result는 hardware access-fault contract를 대신하지 않는다. standalone display-smoke diagnostic은 다른 test sequence를 쓸 수 있다. Evidence가 별도로 식별한 board-diagnostic source는 frozen source anchor에 포함되지 않으며 이 production 계약을 재정의할 수 없다.
+
+### 3.5 VGA timing과 scanout constraint
 
 | Horizontal segment | Pixel | Vertical segment | Line |
 |---|---:|---|---:|
@@ -119,33 +137,38 @@ register는 command state를 저장하지 않고 read contract도 없다. `[1:0]
 
 | 원인 | 필수 응답 | 없어야 할 side effect |
 |---|---|---|
-| canonical, ready, idle framebuffer write | HCLK back bank에 한 번 final OKAY commit | front write 또는 held `HREADY_IN` duplicate 없음 |
-| unsupported address/direction/size/alignment | two-cycle ERROR | VRAM write, status mutation, operation 없음 |
-| busy/not-ready framebuffer/control request | two-cycle ERROR | cleaner target, request toggle, CPU write 변화 없음 |
-| data commit 전 PLL loss | two-cycle ERROR | 해당 transaction physical write 없음 |
+| canonical, ready, idle framebuffer write | final OKAY data-phase acceptance 1회 | HCLK back-bank word write 정확히 1회; front write/held-phase duplicate 없음 |
+| accepted STATUS W1C write | final OKAY와 선택 event ack | VRAM word write 없음; unrelated/live field 불변 |
+| accepted nonzero CONTROL write | final OKAY와 command issue 정확히 1회 | 즉시 VRAM word write 없음; 이후 operation/ack/clear/`OP_DONE`은 별개 |
+| command `[1:0]==0` CONTROL write | final OKAY와 no operation | reserved bit 무시; request/clear/VRAM write 없음 |
+| unsupported address/direction/size/alignment | two-cycle ERROR | VRAM write, status mutation, command issue 없음 |
+| busy/not-ready framebuffer/control request | two-cycle ERROR | cleaner target, request toggle, command issue, CPU write 변화 없음 |
+| framebuffer/control data-phase acceptance 전 PLL loss | two-cycle ERROR | 해당 transaction framebuffer write/control command issue 없음 |
 | active operation 중 PLL loss | abort/recovery와 `OP_ABORT` sticky | lock loss 뒤 clear write 지속 없음 |
 
 - canonical aligned word framebuffer write만 visible framebuffer storage를 바꿀 수 있다.
 - clear target은 시작 후 immutable이며 주소 0..9599를 permitted HCLK edge마다 정확히 한 zero word로 쓴다.
 - swap은 frame wrap에서만 보이고 combined clear는 새 displayed front를 target으로 하지 않는다.
 - sticky event는 자기 W1C 전까지 보이며 unrelated W1C가 지우지 않는다.
-- final OKAY framebuffer/control write는 한 physical commit, pre-commit ERROR는 zero commit에 대응한다.
+- final OKAY framebuffer write는 physical back-bank word commit 정확히 1회, ERROR completion은 0회다.
+- final OKAY control write는 accepted register write 1회다. nonzero command bit만 operation을 발행하며 이후 swap/clear effect와 completion event는 bus acceptance와 별개다.
+- accepted STATUS W1C는 선택 sticky event만 ack하고 framebuffer memory를 쓰지 않는다.
 - protocol simulation/사진은 static CDC, full STA, physical timing, 모든 pixel value를 증명하지 않는다.
 
 ## 5. Acceptance Criteria
 
-| ID | Stimulus와 assertion | Pass condition |
-|---|---|---|
-| `VGA-AC-01` | canonical framebuffer/status/control과 gap/alias/read/subword/invalid access exercise | canonical 결과; invalid마다 two-cycle ERROR와 no side effect |
-| `VGA-AC-02` | held data phase, ready/lock boundary, consecutive request | final OKAY exactly-once commit; ERROR/held phase no commit; pre-commit loss false OKAY 없음 |
-| `VGA-AC-03` | swap-only, clear-only, combined, overlap, repeated command | frame-wrap swap, latched target, 0..9599, exact 9,600 clear, rejected overlap |
-| `VGA-AC-04` | 각 W1C event set/clear/repeat/coincident test | VSYNC/DONE/ABORT independent sticky W1C set-dominant; BUSY/READY live |
-| `VGA-AC-05` | idle/pending/clear/combined/ack-window/reset-adjacent PLL loss injection | write stop, one abort, safe ownership/black recovery, ready 후 new operation |
-| `VGA-AC-06` | board에서 standalone clear/swap screen sequence 관측 | bounded photo가 expected black/restored transition만 보임 |
-| `VGA-AC-07` | board에서 combined/no-write-swap sequence 관측 | bounded photo가 expected white/black/restored state만 보임 |
-| `VGA-AC-08` | operator가 smoke sequence 반복 | operator가 stated bounded cycle까지 정상 동작 보고 |
+| ID | Stimulus와 기존 assertion | Pass condition | Evidence layer / current result |
+|---|---|---|---|
+| `VGA-AC-01` | canonical aperture boundary와 reserved gap exercise | canonical framebuffer/status/control 주소가 결정적으로 decode되고 gap/alias가 architectural access가 되지 않음 | same-RTL directed DV — PASS |
+| `VGA-AC-02` | unsupported read/size/alignment와 unaccepted busy/not-ready traffic exercise | 각 request가 two-cycle ERROR, framebuffer/status/ownership/command side effect 없음 | same-RTL directed DV — PASS |
+| `VGA-AC-03` | swap-only, clear-only, combined, overlap, ownership transition exercise | swap/clear ordering atomic, target latched, displayed front 보존, overlap reject | same-RTL directed DV — PASS |
+| `VGA-AC-04` | VSYNC/DONE/ABORT set/clear/repeat/coincident 및 BUSY/READY 확인 | independent sticky W1C, deterministic/set-dominant ordering, live BUSY/READY | same-RTL DV plus firmware execution path — PASS |
+| `VGA-AC-05` | known latched bank의 accepted clear를 시작하고 cleaner physical commit/address count | 해당 bank word 0..9599를 각각 한 번, 정확히 9,600 zero-word commit | same-RTL H05 DV exact-count check — PASS |
+| `VGA-AC-06` | board standalone hardware-clear/swap screen sequence 관측 | bounded photo가 expected black/restored transition만 보임 | board photographs — PHOTO_OBSERVED |
+| `VGA-AC-07` | board combined/no-write-swap sequence 관측 | bounded photo가 expected white/black/restored state만 보임 | board photographs — PHOTO_OBSERVED |
+| `VGA-AC-08` | operator가 smoke sequence 반복 | stated bounded cycle까지 정상 동작 보고 | operator report through cycle 5 — USER_ATTESTED |
 
-criterion은 안정적인 검증 규칙이다. Run ID, 날짜, hash, raw log는 evidence만 보존한다.
+이 ID는 `P08B-VGA-EV-01`과 함께 게시된 behavioral meaning을 보존하며 별도 held-phase 또는 lock-loss/reset matrix에 재할당하지 않는다. 그 matrix는 상세 current-contract 문장을 지원하지만 여기서 새 approved stable criterion으로 만들지 않는다. Run ID, 날짜, hash, raw log는 evidence만 보존한다. 사진은 AC-05 count, individual MMIO, CDC/STA, programmer identity를 증명하지 않는다.
 
 ## 6. Current Requirement Status
 
