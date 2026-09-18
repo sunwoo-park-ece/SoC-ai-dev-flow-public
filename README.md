@@ -37,6 +37,7 @@ No complete vendor GUI project, generated vendor HDL, or vendor simulation colla
 - [Verification](verification/README.md)
 - [Scripts](scripts/README.md)
 - [Reports](reports/README.md)
+- [Engineering case studies](docs/engineering/README.md)
 - [Git workflow](docs/GIT_WORKFLOW.md)
 - [Engineering roles](docs/AGENT_ROLES.md)
 - [Current status](docs/status/current_status.md)
@@ -44,7 +45,7 @@ No complete vendor GUI project, generated vendor HDL, or vendor simulation colla
 
 ## Current release status
 
-This is an in-progress source snapshot, not Clean Baseline v1 and not a vendor-free FPGA bitstream build. Phase 4A-P08B is stopped at Gate 0: the CPU/AHB precise store-access-fault path passed, but the current firmware has no approved safe trap endpoint. P08B production VGA implementation has not started. See [current status](docs/status/current_status.md).
+This is an in-progress source snapshot, not Clean Baseline v1 and not a vendor-free FPGA bitstream build. The frozen P08B VGA functional scope (`VGA-001..006`) is owner accepted with directed RTL/DV and board-visible smoke evidence, while CDC/STA, warning, reset-window, programmer-identity, and release work remain open. The separate CPU safe-trap endpoint remains blocked at Gate 0. See [current status](docs/status/current_status.md) and [CS-009](docs/engineering/CS-009-p08b-vga-hwclear-w1c.md).
 
 CPU and AES-GCM open-source dependencies are present with their licenses. Public simulation models cover private Intel/Altera memories, PLLs and ADC IP, while project-owned replacements cover VGA sync and GSensor helpers. A disposable private Quartus build binds the same public RTL to private vendor IP. Benchmark and Dhrystone source files are intentionally excluded. Any later performance report must be separately reviewed and must distinguish official Dhrystone 2.1 from the project's Dhrystone-style workload. See [Quartus build profiles](fpga/quartus/README.md) and [model contracts](docs/models/PORTABLE_MODEL_CONTRACTS.md).
 

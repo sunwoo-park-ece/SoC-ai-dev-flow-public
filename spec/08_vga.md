@@ -1,599 +1,110 @@
-# Baseline SoC VGA / VRAM Subsystem Specification
+# P08B VGA / VRAM Specification
 
-> **Status:** DRAFT — reconstructed from the active FPGA baseline and subject to Developer + ChatGPT Chat final review.
+> **Status:** Current active contract. English is canonical; the Korean companion [`kor/08_vga.ko.md`](kor/08_vga.ko.md) is semantically aligned.
 >
-> **Canonical language:** English. If this file and `vga.ko.md` conflict, this file is authoritative.
->
-> **Parent specifications:** `soc_architecture.md`, `memory_map.md`, `ahb_fabric.md`, `reset_clock.md`.
+> **Reviewed source anchor:** `f28e95df2eafcb939e04ffaca728c44f74c90612`. This is accepted functional scope, not a release claim.
 
-> **Phase 4A-3A reading rule:** Earlier permissive framebuffer descriptions reconstruct the pre-cleanup baseline. The final framebuffer section records the now-enforced A3 bus-access policy only; firmware API, VGA CDC, and physical/board acceptance remain open.
+## 1. Status and scope
 
-## 1. Purpose
+The active display peripheral is `AHB_VRAM_DUAL_BUFFER`, instantiated by `AMBA_SoC_TOP`. It provides a 640 x 480, 1-bpp double-buffered framebuffer, VGA timing, swap control, and a hardware clear engine.
 
-This document defines the active FPGA baseline VGA / VRAM subsystem. It specifies:
+The frozen local source scope for `VGA-001` through `VGA-006` is owner accepted and functionally verified. It is not Clean Baseline release closure: static CDC, full STA closure, board-warning disposition, reset-window analysis, and programmer identity remain separately open. `VGA-007` (dormant APB source disposition) is also open.
 
-- the active AHB-side display architecture,
-- CPU-visible framebuffer and control/status behavior,
-- physical front/back-buffer organization,
-- 640×480 1-bpp pixel format,
-- VGA timing and pixel-clock behavior,
-- buffer-swap semantics,
-- VSync status synchronization,
-- the hardware-clear engine,
-- software usage requirements,
-- known CDC/protocol limitations,
-- baseline cleanup items required before major future interconnect work.
+The public evidence package is [`reports/evidence/vga-hwclear/`](../reports/evidence/vga-hwclear/summary.md) and the engineering narrative is [CS-009](../docs/engineering/CS-009-p08b-vga-hwclear-w1c.md).
 
-This document describes the **implemented baseline**, including implementation quirks that software shall currently avoid. It does not promote dormant VGA source files or broad address aliases into architectural features.
+## 2. Current active contract
 
-## 2. Active Architectural Boundary
+### 2.1 Architecture and storage
 
-The active display path is the AHB-side module:
+`AHB_VRAM_DUAL_BUFFER` is an AHB-side peripheral, not the dormant `APB_VGA_Top`. Each framebuffer bank contains 9,600 32-bit words (38,400 bytes), representing 640 x 480 1-bpp pixels. The VGA pixel reader owns the displayed bank; accepted CPU writes and an active cleaner use the other bank.
 
-```text
-AHB_VRAM_DUAL_BUFFER
-```
+### 2.2 Canonical address and access policy
 
-instantiated directly in `AMBA_SoC_TOP`.
+| Address | Access | Contract |
+|---|---|---|
+| `0x2000_0000`–`0x2000_95FF` | aligned 32-bit write only | Current writable back buffer. |
+| `0x2001_0000` | read / W1C bit 0 | `VRAM_STATUS`. |
+| `0x2001_0004` | write | `VRAM_CONTROL` command. |
+| All other local addresses, framebuffer reads, and subword/misaligned framebuffer accesses | ERROR | No data write and no command side effect. |
 
-The active path is:
+Only the table above is architectural. Wider fabric selection or historical local aliases are not part of the software contract.
 
-```text
-CPU load/store path
-        |
-        v
-   AHB fabric
-        |
-        v
-AHB_VRAM_DUAL_BUFFER
-   |            |
-   | HCLK       | pclk_25
-   |            |
-   +--> VRAM0 --+
-   +--> VRAM1 --+--> VGA pixel stream
-   |
-   +--> status / control
-   +--> HW_Cleaner
-```
+### 2.3 AHB response and operation acceptance
 
-The subsystem is **not** an APB peripheral in the active baseline.
+The peripheral completes an accepted request with the documented ready/response sequence. A request that cannot be accepted—for example, because the target bank is busy or not writable—gets the two-cycle AHB ERROR response. Rejected requests must not assert framebuffer write enable or start/alter an operation.
 
-`rtl/video/vga/APB_VGA_Top.v` exists as dormant source material but is not instantiated by `AMBA_SoC_TOP`; its presence shall not define the baseline architecture or register map.
+At most one cleaner operation is outstanding. Clear start latches its target bank; subsequent display-bank changes cannot redirect that operation. A swap becomes visible only at the defined VSync boundary. Software shall wait for the associated status before relying on the new ownership.
 
-## 3. Canonical Address Map
+### 2.4 Control and status
 
-The canonical software-visible VGA region is:
+`VRAM_CONTROL` issues clear, swap, and combined commands as implemented by the active RTL. `VRAM_STATUS` reports live `BUSY`/`READY` state and a sticky completion event. Bit 0 is W1C: writing one acknowledges the event; writing zero does not clear it. Set-versus-clear priority and reset behavior are defined by the RTL/DV matrix and shall remain deterministic.
 
-| Address | Size | Function | Baseline access |
-|---:|---:|---|---|
-| `0x2000_0000` – `0x2000_95FF` | 38,400 B | Current back-buffer framebuffer | **32-bit write only** |
-| `0x2000_9600` – `0x2000_FFFF` | — | Reserved | No software access |
-| `0x2001_0000` | 4 B | `VRAM_STATUS` | Read; W1C for bit 0 |
-| `0x2001_0004` | 4 B | `VRAM_CONTROL` | Write-command register |
+## 3. Interface, register, and timing details
 
-The top-level fabric broadly selects all `0x2xxx_xxxx` addresses, while the VGA subsystem decodes only lower address bits. Consequently, physical aliases exist. Those aliases are not architectural addresses.
+The framebuffer word index spans `0..9599`; a successful hardware-clear operation writes exactly those 9,600 words in its latched target bank. The pixel mapping is linear 1-bpp raster order. The RGB output is monochrome black or white from the selected display bank under the VGA timing generator.
 
-### 3.1 Important framebuffer-read limitation
+The CPU and VGA sides are in distinct clock domains. The functional contract above does not claim static CDC closure. Similarly, the timing contract describes intended pixel/display behavior and does not claim full post-route STA closure.
 
-The active RTL contains a commented-out back-buffer read-data path. As implemented, `HRDATA` returns framebuffer data for **no framebuffer address**.
+## 4. Invariants and error behavior
 
-A CPU read from the canonical framebuffer window therefore returns zero through the active VGA slave response path rather than the stored framebuffer word.
+- A canonical framebuffer write modifies only the writable bank.
+- A rejected, unsupported, read, subword, or misaligned framebuffer request has no write side effect.
+- A cleaner never changes banks after its target is accepted.
+- A displayed image changes bank only at the defined swap boundary.
+- Completion remains observable until W1C acknowledgement; BUSY and READY are live, not inferred from an IDLE-high level.
+- The exact clear count is a RTL/DV property. A board photograph can corroborate a visible black/white transition but cannot establish all 9,600 individual writes.
 
-Accordingly, the baseline framebuffer contract is **write-only from the CPU**. Firmware and verification shall not use framebuffer readback as a correctness mechanism.
+## 5. Acceptance criteria
 
-## 4. AHB-Side Transfer Contract
+| ID | Criterion | Evidence class |
+|---|---|---|
+| `VGA-AC-01` | Canonical aperture and invalid-gap behavior are deterministic. | Directed RTL/DV |
+| `VGA-AC-02` | Unsupported or unaccepted traffic returns ERROR without side effect. | Directed RTL/DV |
+| `VGA-AC-03` | Busy ownership, swap, and clear-target latching are atomic. | Directed RTL/DV |
+| `VGA-AC-04` | Completion is sticky W1C with deterministic ordering. | Directed RTL/DV and firmware execution |
+| `VGA-AC-05` | Each accepted clear writes exactly 9,600 words to its latched bank. | Directed RTL/DV |
+| `VGA-AC-06` | Hardware exhibits the expected visible clear/swap transition. | Board photographs |
+| `VGA-AC-07` | Combined and no-write swap sequences show the expected visible result. | Board photographs |
+| `VGA-AC-08` | The exercised image was accepted by the board operator. | Board observation |
 
-The active VGA slave exposes:
+## 6. Current requirement status
 
-```text
-HREADY = 1
-HRESP  = OKAY
-```
+| Requirement | Status | Basis |
+|---|---|---|
+| `VGA-001` | VERIFIED | Canonical decode and boundary directed tests. |
+| `VGA-002` | VERIFIED | Write-only/error-path DV, source review, and firmware build. |
+| `VGA-003` | VERIFIED | Contention/no-side-effect and CPU fault-path DV. |
+| `VGA-004` | VERIFIED | Clear-only, combined, overlap, and target-latch DV. |
+| `VGA-005` | VERIFIED | W1C ordering/collision DV and firmware execution path. |
+| `VGA-006` | VERIFIED functional scope | Exact-count RTL/DV plus board-visible smoke evidence; not STA/CDC closure. |
+| `VGA-007` | OPEN | Dormant `APB_VGA_Top` disposition is deferred. |
 
-for all selected transfers. The VGA target therefore inserts no AHB wait state.
+Run-specific source digests, tool outcomes, photo hashes, and limitations are in the [evidence result](../reports/evidence/vga-hwclear/result.json), not in this normative contract.
 
-A transfer is treated as valid when:
+## 7. Approved target and deferred work
 
-```text
-HSEL == 1
-and HTRANS is NONSEQ or SEQ
-```
+The approved target is the frozen source behavior above. The following remain outside this acceptance:
 
-Address/control are latched for the following data phase. Store data is consumed from `HWDATA` in that data phase.
+| ID | Status | Reason |
+|---|---|---|
+| `CDC-001` | NOT_RUN / unresolved | No static CDC sign-off. |
+| `STA-001` | IN_PROGRESS | Internal STA is SCOPED_PASS only, not full closure. |
+| `STA-002` | BLOCKED | Board/I/O electrical timing ownership is unresolved. |
+| VGA/ADC warnings | OPEN | Two warnings require explicit disposition. |
+| Reset window | known risk | Further reset-domain analysis is required. |
+| Programmer identity | unavailable | No programmer-identity evidence was captured. |
 
-The VGA slave does **not** consume `HSIZE`, `CUSTOM_WRITE_MASK`, or an equivalent byte-enable signal.
+## 8. Traceability
 
-Therefore only naturally aligned **32-bit framebuffer writes** are part of the normative baseline contract.
+| Contract area | Source and evidence |
+|---|---|
+| Active peripheral and cleaner | `rtl/video/vram/AHB_VRAM_DUAL_BUFFER.v`, `rtl/video/vram/HW_Cleaner.v` |
+| Firmware interface | `firmware/include/vram.h`, `firmware/drivers/vram.c` |
+| Directed verification | `verification/directed/vga/` |
+| Requirement tracker | [`baseline_cleanup.md`](baseline_cleanup.md) |
+| Board evidence | [`reports/evidence/vga-hwclear/`](../reports/evidence/vga-hwclear/summary.md) |
+| Engineering case | [CS-009](../docs/engineering/CS-009-p08b-vga-hwclear-w1c.md) |
 
-Byte or halfword framebuffer stores shall not be relied on. The current firmware helper `vram_write_byte()` exists, but the active RTL has no byte-enable path and a byte store can overwrite the containing 32-bit framebuffer word with store-aligned data rather than preserve the other bytes. This helper is a cleanup target, not a supported architectural capability.
+## Appendix A. Historic pre-cleanup notes
 
-## 5. Framebuffer Geometry and Pixel Format
-
-The visible image is:
-
-```text
-640 pixels × 480 pixels × 1 bit/pixel
-= 307,200 bits
-= 38,400 bytes
-= 9,600 × 32-bit words
-```
-
-Each visible row contains:
-
-```text
-640 / 32 = 20 words
-```
-
-The canonical software word index is:
-
-```text
-word_index = y * 20 + (x >> 5)
-bit_index  = x & 31
-```
-
-for:
-
-```text
-0 <= x < 640
-0 <= y < 480
-```
-
-The validated firmware convention maps the leftmost pixel of each 32-pixel word to the low-order bit and advances toward higher bit positions as X increases. Existing text rendering reverses each 8-bit font row before packing specifically to match this pixel ordering.
-
-Pixel value semantics are:
-
-| Stored bit | VGA output |
-|---:|---|
-| 0 | black: `R=0, G=0, B=0` |
-| 1 | white: `R=0xF, G=0xF, B=0xF` |
-
-The baseline display is therefore monochrome even though the DE10-Lite VGA output exposes 4 bits per RGB channel.
-
-## 6. Physical VRAM Organization
-
-The subsystem instantiates two Intel/Altera mixed-width dual-port RAMs:
-
-```text
-VRAM0
-VRAM1
-```
-
-Each physical buffer is configured as:
-
-```text
-Port A: 16,384 × 32-bit, HCLK write side
-Port B: 524,288 × 1-bit, pclk_25 read side
-```
-
-This is 524,288 bits = 64 KiB of physical storage per buffer.
-
-Only the first 9,600 Port-A words / 307,200 Port-B bits are canonical visible framebuffer storage. The remainder of each physical RAM is not part of the software-visible framebuffer contract.
-
-The dual-clock RAM primitive itself provides the storage crossing between HCLK writes and pixel-clock reads. Higher-level buffer-selection control still contains CDC concerns described later in this document.
-
-## 7. Front / Back Buffer Ownership
-
-`front_buffer_idx` selects the physical front buffer:
-
-| `front_buffer_idx` | VGA front buffer | CPU/HW-clear back buffer |
-|---:|---|---|
-| 0 | VRAM0 | VRAM1 |
-| 1 | VRAM1 | VRAM0 |
-
-Reset sets:
-
-```text
-front_buffer_idx = 0
-```
-
-so VRAM0 begins as front and VRAM1 as back.
-
-The CPU framebuffer window always targets whichever physical RAM is currently designated as the **back buffer**. Software does not directly address VRAM0 versus VRAM1.
-
-## 8. Buffer Swap
-
-Writing `VRAM_CONTROL.SWAP = 1` toggles `front_buffer_idx`.
-
-The command therefore performs:
-
-```text
-old back  -> new front
-old front -> new back
-```
-
-The bit is a command, not stored state. Writing `0` performs no swap.
-
-The active RTL changes `front_buffer_idx` in the HCLK domain immediately when the control write is committed. It does not implement a pixel-domain frame-boundary handshake.
-
-The intended firmware usage is therefore:
-
-```text
-1. render a complete frame into the back buffer
-2. wait for the VSync status event
-3. issue SWAP
-```
-
-This reduces the probability of visible tearing by performing the swap during vertical blanking, but the current implementation does not constitute a formally CDC-safe atomic frame-boundary swap.
-
-## 9. VGA Pixel Clock and Timing
-
-The board 50 MHz clock feeds `vga_pll`, which generates:
-
-```text
-pclk_25 = 25 MHz
-```
-
-The VGA timing generator uses:
-
-### Horizontal timing
-
-| Segment | Pixels |
-|---|---:|
-| Visible | 640 |
-| Front porch | 16 |
-| Sync pulse | 96 |
-| Back porch | 48 |
-| Total | 800 |
-
-### Vertical timing
-
-| Segment | Lines |
-|---|---:|
-| Visible | 480 |
-| Front porch | 10 |
-| Sync pulse | 2 |
-| Back porch | 33 |
-| Total | 525 |
-
-`VGA_HS` and `VGA_VS` are active-low.
-
-At exactly 25 MHz, the nominal frame frequency is:
-
-```text
-25,000,000 / (800 × 525) ≈ 59.52 Hz
-```
-
-The implementation and comments refer to this as the conventional 640×480 @ approximately 60 Hz VGA mode.
-
-RGB output is forced black outside the visible region.
-
-## 10. Pixel Prefetch Path
-
-The mixed-width VRAM read port is clocked by `pclk_25` and uses a 19-bit linear pixel address.
-
-The subsystem implements a prefetch address generator so that the synchronous RAM read pipeline presents the required pixel bit when `VGA_SyncGen` reaches the corresponding visible coordinate.
-
-The address generator:
-
-- advances through 307,200 visible pixel positions in scan order,
-- performs line-boundary prefetch handling,
-- resets its linear read address around the end of the frame so pixel 0 is available for the next visible frame.
-
-Software shall reason in framebuffer X/Y or 32-bit word coordinates rather than depending on the internal prefetch counter cycle sequence.
-
-## 11. VSync CDC and Status Flag
-
-`VGA_VS` originates in the 25 MHz pixel domain.
-
-The active implementation synchronizes the VSync signal into HCLK using three sequential samples:
-
-```text
-vga_vsync_sig
-   -> vsync_d1
-   -> vsync_d2
-   -> vsync_d3
-```
-
-and detects:
-
-```text
-vsync_rising_edge = vsync_d2 & ~vsync_d3
-```
-
-Because VGA VSync is active-low, this rising edge corresponds to **deassertion / end of the active-low VSync pulse**, not the beginning of the pulse.
-
-When detected, the HCLK-domain `vsync_flag` becomes 1 and remains set until software clears it by writing 1 to `VRAM_STATUS[0]`.
-
-The VSync flag is polling-based; no interrupt is generated.
-
-## 12. Status and Control Registers
-
-### 12.1 `VRAM_STATUS` — `0x2001_0000`
-
-| Bit | Name | Access | Baseline behavior |
-|---:|---|---|---|
-| 0 | `VSYNC` | R / W1C | Sticky synchronized VSync-deassertion event flag |
-| 1 | `CLEAR_DONE` | R | Direct `HW_Cleaner.clr_done` status |
-| 2 | `CLEAR_BUSY` | R | 1 while the cleaner is actively writing framebuffer words |
-| 31:3 | Reserved | R | 0 |
-
-Important `CLEAR_DONE` semantics:
-
-`clr_done` is high in both the cleaner `IDLE` and `DONE` states. It is therefore **not a one-cycle completion pulse** and is already high when the cleaner is idle after reset.
-
-Software should use `CLEAR_BUSY == 0` to determine that active clearing has finished. The current production driver follows this policy.
-
-Writing `VRAM_STATUS` only acts on bit 0. Writing 1 to bit 0 clears `VSYNC`; other write bits have no defined action.
-
-### 12.2 `VRAM_CONTROL` — `0x2001_0004`
-
-| Bit | Name | Access | Baseline behavior |
-|---:|---|---|---|
-| 0 | `SWAP` | W command | Toggle front/back ownership |
-| 1 | `HW_CLEAR` | W command | Request hardware clear of the resulting/current back buffer |
-| 31:2 | Reserved | W | Ignored |
-
-The control register is command-style rather than stored read/write state. Reads are not part of the normative contract and the active VGA `HRDATA` path does not return control state.
-
-## 13. Hardware Clear Engine
-
-`HW_Cleaner` clears the visible back-buffer area by writing zero to:
-
-```text
-word 0 through word 9599 inclusive
-```
-
-The cleaner state machine is:
-
-```text
-IDLE -> CLEAR -> DONE -> IDLE
-```
-
-During `CLEAR`:
-
-```text
-clr_busy = 1
-clr_we   = 1
-```
-
-and one 32-bit zero word is written per HCLK cycle.
-
-The active clearing portion therefore requires 9,600 HCLK write cycles, approximately:
-
-```text
-9,600 / 50 MHz = 192 us
-```
-
-excluding command/start state-transition overhead.
-
-### 13.1 Combined swap-and-clear command
-
-The existing driver writes:
-
-```text
-SWAP | HW_CLEAR
-```
-
-in one control transaction. The intended result is:
-
-```text
-publish completed old back buffer as the new front
-then clear the old front, which is now the new back
-```
-
-This is the normal baseline use of the hardware clear engine.
-
-### 13.2 Cleaner priority over CPU framebuffer writes
-
-While `CLEAR_BUSY=1`, the cleaner owns the back-buffer write address, write-enable, and write data mux.
-
-A simultaneous CPU framebuffer write is therefore not applied to VRAM. However, the AHB slave still reports:
-
-```text
-HREADY = 1
-HRESP  = OKAY
-```
-
-so the CPU cannot detect that the write was discarded.
-
-**Normative software rule:** software shall not write the framebuffer while `CLEAR_BUSY=1`.
-
-### 13.3 Swap while clear is active
-
-The cleaner's physical RAM target is selected from the live `front_buffer_idx`. A second SWAP while clearing can therefore redirect subsequent cleaner writes to the other physical buffer.
-
-**Normative software rule:** software shall not issue another SWAP while `CLEAR_BUSY=1`.
-
-The combined initial `SWAP | HW_CLEAR` command is the intended exception because clearing starts after the buffer-role change and targets the resulting back buffer.
-
-## 14. Reset Behavior
-
-On system reset, the VGA subsystem resets control state including:
-
-```text
-front_buffer_idx = 0
-vsync_flag       = 0
-hw_clear_start   = 0
-hw_clear_run     = 0
-VRAM_ADDR        = 0
-```
-
-The VGA timing counters are also reset through `HRESETn` in the pixel-clock domain, and the VRAM read output/address path receives asynchronous clear through the RAM IP.
-
-System reset shall **not** be treated as an architectural command to erase both framebuffer memories. Software requiring a known blank back buffer shall clear it explicitly in software or through `HW_Cleaner`.
-
-Per `reset_clock.md`, reset deassertion and some generated-clock-domain usage require further CDC/reset cleanup before production-quality signoff.
-
-## 15. Dormant APB VGA Source
-
-`rtl/video/vga/APB_VGA_Top.v` is not instantiated in the active SoC top level.
-
-Therefore:
-
-- it has no canonical APB slot,
-- its internal register behavior is not software-visible baseline behavior,
-- firmware shall not target it,
-- future refactoring shall not treat it as authoritative over `AHB_VRAM_DUAL_BUFFER`.
-
-If a future architecture intentionally migrates VGA control onto APB/AXI-Lite, that change requires a new approved specification rather than silently activating this dormant source.
-
-## 16. Firmware Contract
-
-Current baseline firmware support includes:
-
-```text
-vram_status()
-vram_wait_vsync()
-vram_clear_vsync()
-vram_swap_and_clear()
-vram_wait_clear_done()
-vram_write_word()
-```
-
-The normative sequence for hardware-assisted double buffering is:
-
-```text
-wait until current back buffer is available
-render using aligned 32-bit writes
-wait for synchronized VSync event
-clear VSync flag
-issue SWAP | HW_CLEAR
-wait until CLEAR_BUSY == 0
-render the next frame into the newly cleared back buffer
-```
-
-The `display_smoke` diagnostic deliberately uses a different validation sequence:
-
-```text
-software-clear all 9,600 back-buffer words
-render frame
-wait bounded time for VSync
-issue SWAP only
-```
-
-This isolates buffer publication from the hardware-clear engine during board diagnosis.
-
-Firmware shall not rely on:
-
-- framebuffer readback,
-- byte/halfword framebuffer writes,
-- noncanonical VRAM aliases,
-- writing framebuffer memory while clear is busy,
-- issuing another swap while clear is busy.
-
-## 17. Validation Status
-
-The migrated baseline has reproduced successful Quartus compilation with the active AHB VGA subsystem.
-
-The current `display_smoke` image has developer-confirmed physical-board VGA operation and visibly exercises:
-
-- framebuffer 32-bit writes,
-- 640×480 scanout,
-- text / pattern pixel ordering,
-- VSync polling progress,
-- software-triggered SWAP,
-- repeated frame publication.
-
-The host-side display-smoke test uses mocked MMIO and checks framebuffer bounds, SWAP-only behavior, VSync timeout handling, and related software behavior. It is not CPU/RTL simulation.
-
-The current display-smoke board test does **not** establish full proof of:
-
-- hardware-clear operation,
-- behavior of CPU writes attempted during hardware clear,
-- framebuffer readback,
-- byte/halfword framebuffer stores,
-- formal CDC correctness of buffer selection,
-- generated-clock/reset timing signoff,
-- all physical alias boundaries.
-
-## 18. Baseline Cleanup Targets Before Major Feature Integration
-
-The following items shall be carried into the later consolidated `baseline_cleanup.md` plan:
-
-1. **Tighten VGA top-level decode** to the canonical framebuffer/status/control aperture rather than selecting the full `0x2xxx_xxxx` region.
-2. **Enforce frozen A3 read policy** — keep the window write-only and make framebuffer reads return A2 ERROR; remove misleading read expectations.
-3. **Enforce frozen A3 access policy** — reject byte/halfword framebuffer writes; remove or prohibit `vram_write_byte()` and equivalent APIs rather than adding byte strobes/RMW.
-4. **Fix cleaner/CPU write arbitration** — do not silently acknowledge and discard CPU framebuffer writes while `CLEAR_BUSY=1`; use backpressure, explicit rejection/error, or a stronger architectural ownership mechanism.
-5. **Latch cleaner target ownership** at clear start so a later SWAP cannot redirect an in-progress clear operation.
-6. **Make frame swap CDC-safe** — synchronize/handshake the swap into the pixel domain and preferably commit buffer ownership at a defined frame boundary.
-7. **Define generated-domain reset release** and PLL-lock policy consistently with `reset_clock.md`.
-8. **Add complete generated-clock timing constraints** for `pclk_25` and re-run STA/CDC review.
-9. **Clarify `CLEAR_DONE` semantics** — consider a sticky completion event or rely solely on BUSY rather than using a signal that is high during IDLE.
-10. **Add directed RTL verification** for pixel/word boundaries, status W1C behavior, swap timing, clear length, clear/write contention, repeated commands, reset, and reserved addresses.
-11. **Add FPGA acceptance coverage for HW clear** because the current `display_smoke` board test intentionally clears in software.
-12. **Remove active/dormant VGA ambiguity** by clearly separating or deleting unused `APB_VGA_Top` integration artifacts when safe to do so.
-
-## 19. Baseline Invariants
-
-Until a future approved VGA/display specification supersedes this document:
-
-1. The active display subsystem is AHB-side `AHB_VRAM_DUAL_BUFFER`, not an APB VGA peripheral.
-2. The canonical visible framebuffer is 640×480×1 bpp = 38,400 bytes = 9,600 words.
-3. CPU framebuffer access is normative only as aligned 32-bit writes.
-4. CPU framebuffer readback is not implemented.
-5. Pixel 0/1 maps to black/white respectively.
-6. The display uses two physical VRAM buffers and software-visible access always targets the current back buffer.
-7. Reset selects VRAM0 as front and VRAM1 as back.
-8. SWAP toggles physical front/back ownership.
-9. VSync status is a sticky HCLK-domain flag generated from the synchronized rising/deassertion edge of active-low VGA VSync.
-10. VGA timing is 800×525 total with a 25 MHz pixel clock and 640×480 visible region.
-11. Hardware clear writes zero to words 0..9599 of the current back buffer.
-12. Software must not write or re-swap the framebuffer while hardware clear is busy.
-13. Broad physical aliases outside the canonical VGA aperture are unsupported.
-14. Dormant `APB_VGA_Top.v` behavior is not part of the active baseline contract.
-
-## 20. Related Specifications
-
-This document shall remain consistent with:
-
-- `soc_architecture.md`
-- `memory_map.md`
-- `ahb_fabric.md`
-- `reset_clock.md`
-- future `firmware_contract.md`
-
-The later consolidated `baseline_cleanup.md` shall collect the cleanup items recorded here together with those from the other baseline specifications.
-
-## Phase 4A-2 Approved Framebuffer and Physical Target (bus access policy active Phase 4A-3A)
-
-A3 freezes framebuffer access as write-only, naturally aligned 32-bit word writes. Reads, byte/halfword writes and noncanonical gaps/aliases follow A2 two-cycle AHB ERROR and CPU access-fault handling. A misaligned CPU store instead takes the pre-bus misalignment cause 6; a direct bus-master misaligned framebuffer transaction is invalid and receives A2 ERROR. `VRAM_STATUS` and `VRAM_CONTROL` keep their separately specified semantics. Firmware uses `vram_write_word()`; `vram_write_byte()` is legacy and must be removed/deprecated during implementation, with no readback API. Current RTL's silent/partial behavior above is not the target. STA-002 requires review of VGA digital output standard, voltage, drive/load and board timing evidence, plus the ADC/VGA pin-adjacency warning and ADC behavior during relevant VGA activity; positive internal slack alone is not board signoff.
-
-## P08B Local Candidate — Implementation Pending Review
-
-The uncommitted P08B candidate implements the frozen replacement contract. This
-section supersedes historical active-behavior descriptions above for that local
-candidate only; published public `main` remains the earlier Gate 0 snapshot.
-
-`VRAM_STATUS` is aligned 32-bit read/W1C at `0x2001_0000`:
-
-| Bit | Name | Semantics |
-|---:|---|---|
-| 0 | `VSYNC_EVENT` | sticky W1C; hardware set dominates coincident clear |
-| 1 | `OP_DONE` | sticky W1C after final swap acknowledge or final clear write |
-| 2 | `OP_BUSY` | read-only live one-outstanding-operation state |
-| 3 | `OP_ABORT` | sticky W1C for PLL-loss operation abort |
-| 4 | `DOMAIN_READY` | read-only ownership/recovery handshake complete |
-
-`VRAM_CONTROL` at `0x2001_0004` is write-only: bit 0 `SWAP`, bit 1
-`HW_CLEAR`. Swap commits once at pixel wrap `(799,524)->(0,0)`. Clear writes
-exactly words 0 through 9599 to a target bank latched at acceptance. Combined
-operation swaps first and clears the old front/new back. A nonzero command is
-accepted only while ready and idle; overlapping/not-ready accesses receive the
-VGA-owned two-cycle ERROR. Unsupported framebuffer reads, sizes, gaps and local
-aliases likewise ERROR without a rejected physical write.
-
-The pixel and HCLK domains exchange request/acknowledge toggles; neither uses a
-live asynchronous bank selector. PLL loss gates writes, aborts an active
-operation, resets ownership to VRAM0-front/VRAM1-back through recovery, and
-leaves output black until a later valid swap. Open focused/integrated DV is
-PASS, while User/Chat acceptance, Quartus/TimeQuest and board evidence remain
-pending/NOT_RUN. P08B therefore remains `IN_PROGRESS/PENDING_REVIEW`.
-
-### P08B AHB write-completion atomicity
-
-Address acceptance is not write completion. For an outstanding framebuffer or
-control write, the VGA slave revalidates raw PLL lock, synchronized domain
-readiness and idle ownership at the data commit phase. If a required condition
-is lost before physical commit, the transfer completes as the VGA-owned
-two-cycle ERROR (`HRESP=ERROR/HREADY=0`, then `HRESP=ERROR/HREADY=1`) and both
-physical VRAM write enables remain zero. A write already physically committed
-with final OKAY is not retroactively failed, repeated or rolled back. Thus a
-final OKAY write maps to exactly one physical commit, while a pre-commit ERROR
-maps to zero. `HREADY_IN=0` holds a valid data phase without repeated commits.
-
-The simulation boundary treats lock low before the HCLK commit edge as ERROR
-and lock loss after that edge as non-retroactive. This functional rule does not
-claim asynchronous setup/hold or metastability closure; static CDC and vendor
-timing review remain required and `NOT_RUN` at this checkpoint.
-
-**Phase 4A-3A status:** top-level AHB decode enforces aligned word framebuffer writes and rejects reads, subword writes, misaligned direct-bus writes, gaps, and aliases before selecting VRAM. Directed bus tests pass. Firmware API cleanup, VGA functional/CDC cleanup, and STA-002 physical signoff remain open.
+Earlier baselines described permissive local aliases, fixed-success response behavior, immediate or live-bank assumptions, and level-style completion interpretations. Those notes are historical context only and must not be used as the current contract.

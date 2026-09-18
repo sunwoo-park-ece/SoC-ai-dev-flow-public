@@ -1,5 +1,7 @@
 # Reports and Evidence
 
+Reviewed run evidence is indexed in [evidence/README.md](evidence/README.md).
+
 Engineering reports are generated from WSL Ubuntu execution evidence. Codex runs and analyzes Verilator, ModelSim, XSim, and vendor CLI jobs; raw logs, waves, databases, and generated reports stay under `$RUN_ROOT`.
 
 Only reviewed and sanitized material belongs here, such as:

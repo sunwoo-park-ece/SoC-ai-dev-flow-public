@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0",
+  "evidence_id": "P08B-VGA-EV-01",
+  "title": "P08B VGA HW cleaner and W1C functional evidence",
+  "status": "CONDITIONAL_PASS",
+  "review_status": "APPROVED",
+  "evidence_date": "2026-09-18",
+  "verified_source_revision": {"repository": "https://github.com/sunwoo-park-ece/SoC-ai-dev-flow-public", "commit": "f28e95df2eafcb939e04ffaca728c44f74c90612"},
+  "requirements": ["VGA-001", "VGA-002", "VGA-003", "VGA-004", "VGA-005", "VGA-006"],
+  "criteria": [
+    {"id": "VGA-AC-01", "result": "PASS", "evidence_layer": "same-RTL directed DV"},
+    {"id": "VGA-AC-02", "result": "PASS", "evidence_layer": "same-RTL directed DV"},
+    {"id": "VGA-AC-03", "result": "PASS", "evidence_layer": "same-RTL directed DV"},
+    {"id": "VGA-AC-04", "result": "PASS", "evidence_layer": "same-RTL DV plus firmware execution path"},
+    {"id": "VGA-AC-05", "result": "PASS", "evidence_layer": "same-RTL H05 DV exact 9600 commit check"},
+    {"id": "VGA-AC-06", "result": "PHOTO_OBSERVED", "evidence_layer": "cycle-0 board photos"},
+    {"id": "VGA-AC-07", "result": "PHOTO_OBSERVED", "evidence_layer": "cycle-0 board photos"},
+    {"id": "VGA-AC-08", "result": "USER_ATTESTED", "evidence_layer": "user report through cycle 5"}
+  ],
+  "diagnostic_firmware": {"included_in_verified_source_commit": false, "source_sha256": "26fd968534694323eaa5e848542815107204f41b5523191d34a13ab7e616808e", "sof_sha256": "fe069d1f35ba125469359abf78d4616332c0544ff964075084d99aec660d1b86", "programmer_identity": "USER_ATTESTED / NOT_INDEPENDENTLY_PROVEN"},
+  "board_photos": [
+    {"file": "board/01-pattern-a.jpg", "sha256": "d83424f430a31c7e9a54055405ddb49f611b5c7fa11896e44bf3cbda6e55d2a8"},
+    {"file": "board/02-pattern-a-held.jpg", "sha256": "b2b9ab085a63a755816e45be553ca99fdc17a2453bdeebc9f152d6fe241a1ba6"},
+    {"file": "board/03-hwclear-black.jpg", "sha256": "b7205e5b1cf894a23c1fd87ed9f7115d71e181771a0785780cda4341121b9c54"},
+    {"file": "board/04-pattern-restored.jpg", "sha256": "a2bc2e48335592e4e941004c11d6cdaa1108716a7377397c02f7640171afc43a"},
+    {"file": "board/05-combined-setup.jpg", "sha256": "45ccae2ba806b1b4e86c59953e742313a80c9b667b23d0e247c75bdf402df9a3"},
+    {"file": "board/06-combined-white.jpg", "sha256": "2bff8512c473250b1fe51bdd63455fd878fc39426b47469b66a6ec70fc8ffd40"},
+    {"file": "board/07-no-write-swap-black.jpg", "sha256": "9c0daa277771acdc176e1b2e71915cbc1a2c0d4b9083230080b8373427815831"},
+    {"file": "board/08-final-restored.jpg", "sha256": "98c0af9948bfc9a872a3ba0402534f83fd650479b3bfdd353cb833d86f82f101"}
+  ],
+  "limitations": ["static CDC NOT_RUN", "STA-002 BLOCKED", "VGA/ADC proximity warnings OPEN", "no independent programmer/JTAG log"],
+  "private_raw_evidence_retained": true,
+  "sanitization": {"absolute_paths_removed": true, "host_identifiers_removed": true, "vendor_generated_payload_included": false, "raw_logs_included": false, "binaries_included": false}
+}

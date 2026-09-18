@@ -160,7 +160,7 @@ Phase 4A-3A evidence (local review archive `PHASE_4A_3A_BUS_CPU_APB_REPORT.md` a
 |---|---|---|---|---|---|---|---|
 | `RST-001` | High | BC | Historical inconsistent assertion/release and nondeterministic cold-start risks are resolved by the P05 reset architecture. | Preserve asynchronous assertion where appropriate, HCLK/destination-synchronous release, deterministic LOW power-up, and the 1,000,000-cycle qualification. | `06_reset_clock` | P05 all-domain reset tests + fitted synchronizer/power-up + positive recovery/removal evidence | VERIFIED |
 | `RST-002` | High | BC | Historical generated-domain release/PLL-ready gaps are resolved for the baseline VGA, ADC project logic, and PCLK-only G-sensor. | Preserve VGA `locked` qualification, pclk_25/adc_sys_clk local release synchronizers, vendor-managed ADC/Qsys reset, and no internal G-sensor SPI clock. | `06_reset_clock`, `08_vga`, `12_gsensor`, `13_spi`, `15_adc_joystick` | P05 lock/reset tests + fitted PLL/reset/clock inventory | VERIFIED |
-| `CDC-001` | High | BC | Historical direct VGA bank-selector crossing is replaced in the P08B candidate. | Frame-safe CDC/ownership handshake with a defined commit boundary. | `06_reset_clock`, `08_vga` | P08B async request/ack, exact frame-wrap swap and PLL recovery PASS; review pending | IN_PROGRESS |
+| `CDC-001` | High | BC | Static CDC closure for the active VGA ownership crossing is not established. | Frame-safe CDC/ownership handshake with a defined commit boundary. | `06_reset_clock`, `08_vga` | static CDC sign-off NOT_RUN / unresolved | OPEN |
 | `CDC-002` | Blocker | BC | Historical `spi_clk`→PCLK transfer was removed by A6; software still lacks an atomic X/Y/Z snapshot across two APB reads and VALID/SEQ. | Define a coherent software-visible PCLK XYZ snapshot + validity/sequence without reintroducing CDC. | `06_reset_clock`, `12_gsensor`, `19_firmware_contract` | first-sample validity, interleaved APB read/refresh and atomic XYZ tests | OPEN |
 | `CDC-003` | Blocker | BC | ADC response valid/channel/data crosses `adc_sys_clk`→PCLK directly. | Coherent handshake/FIFO/snapshot + atomic XY publication. | `06_reset_clock`, `15_adc_joystick`, `19_firmware_contract` | async response/torn-sample tests | OPEN |
 | `CDC-004` | Medium | BC | P05 completed the external asynchronous-input policy audit and corrected reset/AUX behavior while preserving approved synchronizers. | Preserve audited UART RX/AUX, G-sensor INT, reset-button, SW, and GPIO structures and their documented level/pulse limitations. | `06_reset_clock`, `09_uart`, `11_gpio`, `12_gsensor`, `17_sw` | P05 directed transitions/regressions + fitted 36-chain/minimum-2-register review | VERIFIED |
@@ -205,15 +205,17 @@ P04 and the later User/Chat closure decision verify `BOARDIO-001/002/003/006`. I
 
 | ID | Sev | Gate | Current issue | Required outcome | Dependent specs | Verification | Status |
 |---|---|---|---|---|---|---|---|
-| `VGA-001` | High | BC | P08B candidate removes broad selection/local aliases. | Restrict decode to canonical framebuffer/status/control apertures. | `01_memory_map`, `04_ahb_fabric`, `08_vga` | focused boundary/gap plus SoC CPU-fault PASS; review pending | IN_PROGRESS |
-| `VGA-002` | Medium | BC | P08B candidate implements aligned write-only framebuffer and removes byte helper. | Implement frozen A3: write-only aligned 32-bit framebuffer; unsupported reads/subword accesses ERROR; remove/deprecate byte-write helper. | `08_vga`, `19_firmware_contract` | negative DV, source search, FW builds PASS; review pending | IN_PROGRESS |
-| `VGA-003` | High | BC | P08B candidate rejects busy/not-ready traffic with two-cycle ERROR and no rejected WE. | Backpressure/reject/error/ownership mechanism that removes false success. | `08_vga`, `04_ahb_fabric` | contention and actual CPU cause-7 path PASS; review pending | IN_PROGRESS |
-| `VGA-004` | High | BC | P08B candidate latches clear target with one outstanding operation. | Latch clear target at start; define repeated-command behavior. | `08_vga` | clear-only/combined/overlap PASS; review pending | IN_PROGRESS |
-| `VGA-005` | Medium | BC | P08B candidate uses sticky W1C DONE/ABORT and live BUSY/READY. | Use BUSY semantics or define a sticky completion event. | `08_vga`, `19_firmware_contract` | ordering/W1C dominance/abort PASS; review pending | IN_PROGRESS |
-| `VGA-006` | High | BC | RTL clear evidence exists; physical board acceptance remains outstanding. | Add RTL + physical HW-clear acceptance after arbitration/CDC fixes. | `08_vga` | exact 9600-word RTL clear PASS; Quartus/board NOT_RUN | IN_PROGRESS |
+| `VGA-001` | High | BC | Canonical framebuffer/status/control decode is the current contract. | Preserve canonical aperture and invalid-gap ERROR behavior. | `01_memory_map`, `04_ahb_fabric`, `08_vga` | boundary/gap and CPU fault-path DV | VERIFIED |
+| `VGA-002` | Medium | BC | Framebuffer is aligned 32-bit write-only; reads/subword accesses ERROR. | Preserve write-only/error policy and removed byte helper. | `08_vga`, `19_firmware_contract` | negative DV, source review, firmware build | VERIFIED |
+| `VGA-003` | High | BC | Busy/not-ready traffic gets two-cycle ERROR without rejected WE. | Preserve rejection, ownership, and no-side-effect behavior. | `08_vga`, `04_ahb_fabric` | contention and CPU cause-7 DV | VERIFIED |
+| `VGA-004` | High | BC | Clear target is latched and only one cleaner operation is outstanding. | Preserve target latch and repeated-command behavior. | `08_vga` | clear-only/combined/overlap DV | VERIFIED |
+| `VGA-005` | Medium | BC | Completion is sticky W1C; BUSY/READY are live. | Preserve deterministic ordering and acknowledgement semantics. | `08_vga`, `19_firmware_contract` | ordering/W1C/collision DV and firmware path | VERIFIED |
+| `VGA-006` | High | BC | Exact-count RTL/DV and board-visible smoke evidence exist. | Preserve clear/swap behavior; complete CDC/STA work separately. | `08_vga` | exact 9,600-word RTL/DV; board photos | VERIFIED |
 | `VGA-007` | Low | OPT | Dormant `APB_VGA_Top` can confuse active ownership. | Archive/remove/mark unmistakably dormant when safe. | `08_vga` | source review | OPEN |
 
 Dependencies: `CDC-001`, `RST-002`, `STA-001`.
+
+The `VGA-001` through `VGA-006` status is owner-accepted functional scope at the frozen P08B source. It does not close `CDC-001`, `STA-001`, `STA-002`, warning disposition, reset-window analysis, or programmer identity.
 
 ## 11. UART0 / UART1
 
@@ -476,7 +478,7 @@ BASELINE CLEANUP GATE CLOSED
 |---|---|---|
 | A1 GPIO | `GPIO_WIDTH=16`, JP1 `GPIO_[0:15]` 1:1; UART/LoRa JP1 27/29/31/34/35 excluded. | P04 source/open/post-fit evidence and User/Chat approval verify `BOARDIO-001/002/003/005/006`. `FW-007` is IN_PROGRESS and still lacks its explicit board test; `VER-005` remains OPEN. Quantitative peer/electrical/timing closure remains `STA-002`. |
 | A2 bus/APB fault | Canonical invalid accesses use two-cycle `HRESP=01` ERROR; APB default error/`PSLVERR` propagation; CPU load/store causes 5/7 with precise `mepc`, no failed side effect/retire. | Phase 4A-3A bus evidence plus later 3B3R trap/ISA regression verify `BUS-003`, `APB-004`, and whole `TRAP-003`. |
-| A3 VGA | Framebuffer write-only, aligned 32-bit; read/subword/gap/alias ERROR. | P08B local candidate implementation/open DV PASS; `VGA-002` and `FW-001` are IN_PROGRESS pending User/Chat review. |
+| A3 VGA | Framebuffer write-only, aligned 32-bit; read/subword/gap/alias ERROR. | Frozen P08B functional scope verifies `VGA-001..006`; `FW-001` remains IN_PROGRESS for broader partial-MMIO review. |
 | A4 UART | Busy DATA write backpressured by `PREADY=0` until exactly one acceptance; programmed/per-direction-active divisor architecture. | P07B open verification and User/Chat approval verify `UART-001..004`; `UART-005` physical board evidence remains OPEN, UART IRQ remains DEFERRED, and P07B RTL awaits the later consolidated Quartus/P14 checkpoint. |
 | A5 Timer | One-shot, exact N active edges, N=0 immediate, fresh START, STOP/RELOAD, sticky READY/set-dominant W1C. | `TIMER-001..005` and `FW-004` VERIFIED by P06B directed/open/firmware evidence; `APB-005` remains OPEN beyond its recorded Timer sub-scope, `FW-002` remains OPEN, and `TIMER-IRQ` remains DEFERRED. |
 | A6 private SPI | One 50 MHz PCLK/clock-enable mode-3 FSM, registered ~2 MHz SCLK; old dual-phase SPI PLL inactive in cleanup target. | `SPI-002` IN_PROGRESS; `RST-002/STA-001` still require evidence. |
@@ -516,6 +518,6 @@ User/Chat approved Gate 0 only for firmware trap-policy compatibility after
 startup's `mtvec` write commits. The earlier Gate 0 STOP remains historical
 evidence. The preceding interval is tracked as
 `RESET_WINDOW_UNPROTECTED_BEFORE_MTVEC_COMMIT` and remains an unverified
-architectural risk. This authorizes P08B implementation; it changes no
-VGA/CDC/FW row to VERIFIED, does not release Clean Baseline v1, and does not
-claim publication of the newer local candidate.
+architectural risk. The accepted VGA functional scope changes `VGA-001..006` to
+VERIFIED only; it does not close CDC/FW work, release Clean Baseline v1, or claim
+full timing/board closure.

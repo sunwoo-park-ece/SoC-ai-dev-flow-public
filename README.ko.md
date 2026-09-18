@@ -37,13 +37,14 @@ PUBLIC_REPO + PUBLIC BEHAVIORAL MODELS
 - [검증](verification/README.md)
 - [스크립트](scripts/README.md)
 - [보고서](reports/README.ko.md)
+- [엔지니어링 사례](docs/engineering/README.md)
 - [Git 작업 흐름](docs/GIT_WORKFLOW.ko.md)
 - [역할 분담](docs/AGENT_ROLES.ko.md)
 - [현재 상태](docs/status/current_status.md)
 
 ## 현재 상태
 
-현재 저장소는 진행 중인 소스 snapshot이며 Clean Baseline v1이나 벤더 IP 없는 FPGA bitstream build가 아니다. Phase 4A-P08B는 Gate 0에서 정지했다. CPU/AHB precise store-access-fault 경로는 통과했지만 현재 firmware에는 승인된 safe trap endpoint가 없다. P08B production VGA 구현은 시작하지 않았다. [현재 상태](docs/status/current_status.md)를 참고한다.
+현재 저장소는 진행 중인 소스 snapshot이며 Clean Baseline v1이나 벤더 IP 없는 FPGA bitstream build가 아니다. 동결 P08B VGA 기능 범위(`VGA-001..006`)는 directed RTL/DV와 보드 가시 smoke 증적으로 owner accepted 상태지만 CDC/STA, 경고, reset-window, programmer identity, release 작업은 열려 있다. 별도의 CPU safe-trap endpoint는 Gate 0에서 BLOCKED다. [현재 상태](docs/status/current_status.md)와 [CS-009](docs/engineering/CS-009-p08b-vga-hwclear-w1c.md)를 참고한다.
 
 CPU와 AES-GCM 오픈소스 의존성은 라이선스와 함께 포함한다. 공개 시뮬레이션 모델은 비공개 Intel/Altera 메모리·PLL·ADC IP의 인터페이스를 대체하고, VGA 동기 및 GSensor helper는 사양 기반으로 다시 구현했다. 비공개 Quartus 빌드는 동일한 공개 RTL을 직접 참조한다. Benchmark/Dhrystone 소스는 의도적으로 제외한다. 향후 성능보고서를 공개할 때는 별도 검토를 거치고 공식 Dhrystone 2.1과 프로젝트의 Dhrystone-style workload를 구분해야 한다. [Quartus 빌드 프로필](fpga/quartus/README.md)과 [모델 계약](docs/models/PORTABLE_MODEL_CONTRACTS.md)을 참고한다.
 
