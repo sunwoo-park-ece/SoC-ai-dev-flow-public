@@ -69,7 +69,7 @@
 ```text
 $PUBLIC_REPO  공개 가능한 spec/RTL/FW/verification 및 정제 보고서
 $VENDOR_ROOT 라이선스·생성물이 포함된 비공개 Quartus/Vivado 프로젝트
-$RUN_ROOT    빌드, 로그, 파형, 원본 리포트
+$RUN_ROOT    빌드, 로그, 파형, 원본 리포트, 임시 산출물
 export/      다른 환경으로 넘길 검토 완료 산출물
 ```
 
