@@ -294,7 +294,7 @@ spi_count 47 .. 0
 
 Read-data phase에서 `posedge spi_clk`마다 SDO sample을 receive shift register에 shift-in한다.
 
-최종 X/Y/Z byte reconstruction은 `gsensor.md`가 소유하며, 특히 현재 Z-axis expression은 known-pattern directed verification 대상이다.
+48개 수신 data bit의 X/Y/Z 해석은 `12_gsensor.ko.md`가 소유한다. 이 앞선 문단은 역사 기록이다. 현행 A6은 세 축 모두 완전한 `completed_rx` byte pair로 복원하고 제한된 `GS-002` known-pattern digital 증거가 있으며 P09B 변경 후 재검증해야 한다.
 
 ## 10. SPI Mode Classification
 
@@ -482,3 +482,11 @@ A6은 50 MHz PCLK 하나만 FSM clock으로 사용하며 clock-enable tick과 re
 User/Chat 승인에 따라 현행 tracker의 `SPI-001` 상태는 디지털 transaction/waveform 검증 범위에서 `VERIFIED`다. `verification/directed/models/gsensor/tb_gsensor_single_pclk.sv`와 focused G-sensor 회귀가 mode 3, registered SCLK의 12/13-PCLK half-period, 11개 16-bit 초기화 write, 3개 완전한 56-bit read, MOSI 순서, rising-edge MISO 수집, CS 유지, known-pattern 데이터 및 전송 중 reset 중단·safe idle·재시작을 검증했다. 이 종료에서 합성 RTL·SDC·QSF 변경, Quartus 빌드, 보드 테스트는 없었다. 물리 ADXL345 timing의 `SPI-002`는 `IN_PROGRESS`이며 `GS-005`, `STA-002`, `CDC-002`, `GS-001`은 별도 미완료다.
 
 기존 §16의 “SPI-001” private/generic SPI 논의는 A6 이전 역사 기록으로 보존한다. 현행 tracker의 `SPI-001`은 디지털 파형 검증 행이며 용어 정리는 이후 Full Spec Refresh에서 수행한다.
+
+## P09B ADXL345 transaction 계약 — source/documentation 동시 게시 갱신
+
+> **현행 Public 통합:** 12-write PCLK-only 구현은 P09B source/documentation 동시 commit과 함께 현행 상태가 된다. Historical 11-write 증거는 역사 기록이고 `SPI-002`는 열려 있다.
+
+> **게시 정합성:** 12-write PCLK-only 구현은 대응 source commit과 함께만 게시된다. Historical 11-write 증거는 역사 기록이고 `SPI-002`는 열려 있다.
+
+격리 P09B 후보는 fixed-function PCLK-only mode-3 전송과 전체 56-bit DATAX0..DATAZ1 read를 유지한다. 순서가 고정된 12개 초기화 write는 `(0x24,0x20)`, `(0x25,0x03)`, `(0x26,0x01)`, `(0x27,0x7F)`, `(0x28,0x09)`, `(0x29,0x46)`, `(0x2C,0x09)`, `(0x2F,0x00)`, `(0x2E,0x80)`, `(0x31,0x00)`, `(0x20,0x07)`, `(0x2D,0x08)`이다. 즉 50 Hz DATA_READY를 켜서 INT1으로 map하고 measurement mode를 마지막에 시작한다. 기존 11-write 파형 증거는 역사 기록이며 새 table의 검증 증거가 아니다. 격리 후보에서 controller reset 입력은 historical 추가 2^20-PCLK local delay가 아닌 `PRESETn` 직접 연결이다. 공통 reset release 후 초기화를 시작하고 12개 write와 CS HIGH 완료 이후에만 acquisition/watchdog을 arm한다. 비동기 reset assertion은 SPI를 중단하고 scheduler를 clear하며 동기 release 후 전체 sequence를 재시작한다. 과거 E0/E1 completion이 이후 publish되면 안 된다. 디지털 burst 완료가 새로운 물리 conversion의 증명은 아니다. INT1이 primary trigger이고 30 ms elapsed-PCLK watchdog이 fallback이며 종전의 명목상 8.192 ms idle poll이 아니다. 정확한 coalescing·edge 우선순위·sample publish는 [12_gsensor.ko.md](12_gsensor.ko.md)를 따른다. Stage 1 `NOT_RUN` 표시는 역사 기록이다. 격리 후보에는 focused digital 및 CPU/host 근거가 있지만 sensor supply startup, ADXL345 board timing, 물리 pin 확인은 이 계약 밖에 남고 `SPI-002`는 종료되지 않았다. 이는 통합 승인 전 현재 Public `main`을 갱신하지 않는다.

@@ -451,3 +451,31 @@ evidence로 유지한다. 그 이전 구간은
 `RESET_WINDOW_UNPROTECTED_BEFORE_MTVEC_COMMIT`이라는 미검증 architectural
 risk이다. 승인된 VGA 기능 범위는 `VGA-001..006`만 VERIFIED로 바꾸며,
 CDC/FW 작업, Clean Baseline v1 release, 전체 timing/board closure를 뜻하지 않는다.
+
+## P09B Stage 1 spec 검토 표시 — Historical Stage 1 당시 기준 (tracker 종료 없음)
+
+Stage 1 당시 `12_gsensor.ko.md`와 `19_firmware_contract.ko.md`의 G-sensor 제안 계약은 `GS-001`, `GS-003`, `GS-004`, `GS-005`, `CDC-002`, `FW-008`을 **명세 수준에서만** 다뤘다. 당시에는 P09B 생산 RTL·firmware·testbench·runner·Fitter/TimeQuest·board 검증이 수행되지 않았으며 위 tracker 상태도 그대로였다. 이전 `SPI-001` 검증은 역사적 11-write 디지털 파형에 한정되며 새 순서의 증거가 아니었다. `GS-IRQ`는 DEFERRED였고 ADXL345 외부 INT1은 acquisition 입력이지 CPU/PLIC interrupt source가 아니다.
+
+Stage 1 reset 수정도 당시에는 **목표일 뿐**이었다. Pinned A6에는 약 20 ms 공통 release qualification **뒤에** 약 20.97152 ms G-sensor local delay가 있었다. AC-18/19는 당시 예정된 부정/abort 검사로 **NOT_RUN**이었다. Sensor rail 준비, startup, 물리 INT1, pin timing, board XYZ는 별도 gate였다.
+
+## P09B 게시 준비 tracker 제안 (별도 tracker 승인 필요)
+
+> **현행 Public 통합:** source/documentation 통합은 현행 상태가 되지만 이 표는 tracker 제안으로 남으며 어떤 행도 `VERIFIED`로 승격하지 않는다.
+
+> **게시 정합성:** source/documentation 동시 게시는 구현된 P09B 범위를 설명할 수 있지만 tracker 상태를 변경하거나 어떤 행도 `VERIFIED`로 승격하지 않는다.
+
+이 표는 이후 격리 후보의 로컬 제안이며 Public `main` 또는 tracker closure 변경이 아니다.
+위 Historical Stage 1 표시와 현재 후보 증거를 분리한다. RTL/FW 및 patch provenance는
+private final-evidence draft에 기록한다. 여기서는 `VERIFIED`를 제안하지 않는다.
+
+| 항목 | 현재 -> 제안 | 근거 / AC 처분 | 잔여 위험 |
+|---|---|---|---|
+| GS-001 | OPEN -> IN_PROGRESS | Stage 4/5 독립 HOLD/VALID/SEQ, CPU/host checker | reset/negative 및 외부 동작 미종결 |
+| GS-002 | VERIFIED -> VERIFIED | 기존 asymmetric-byte reconstruction 근거 유지 | 물리 orientation 주장 없음 |
+| GS-003/004 | OPEN/OPEN -> IN_PROGRESS | 12-write/INT1/watchdog source 및 focused/CPU 근거 | 물리 INT1 및 완전한 reset-negative coverage 미종결 |
+| GS-005 | IN_PROGRESS -> IN_PROGRESS | simulation/CPU 근거, 사진 `SEQ=0x1450`, 사용자 별도 관측 `SEQ≈0x7C00`·XYZ 약 ±255·desk-rest Z+/left-tilt X+/toward-user Y+ 수동 기울임 방향/부호 변화 | 전체 board acceptance가 아님: 정량 calibration, 체계적 orientation matrix, 물리 INT1 waveform, 장시간 무결성, 외부 SPI timing 미검증 |
+| CDC-002 | OPEN -> IN_PROGRESS | single-PCLK source와 focused 근거 | 독립 CDC/물리 closure 주장 없음 |
+| FW-008 | OPEN -> IN_PROGRESS | 격리 후보 driver lifecycle 및 독립 host/CPU MMIO·fault checker | Public integration, 전체 API-negative/reset coverage, 물리 동작 미종결 |
+| STA-002 | BLOCKED -> BLOCKED | 임의 I/O delay 없음; fresh STA는 내부 path만 확인 | 외부 I/O/electrical, ADC/VGA critical warning |
+| VER-001/002/004/007 | IN_PROGRESS/IN_PROGRESS/IN_PROGRESS/OPEN -> IN_PROGRESS | Stage 5 regression, fresh fit/STA, source->ELF->MIF->SOF chain | 제외 negative branch 및 warning 처분 미종결 |
+| VER-005 | OPEN -> IN_PROGRESS | 사진 `SEQ=0x1450` 및 사용자 별도 수동 기울임/SEQ≈`0x7C00` 관측 | 전체 board acceptance가 아님: 승인된 정량 절차, calibration/orientation matrix, 장시간·외부 timing 근거 부족 |

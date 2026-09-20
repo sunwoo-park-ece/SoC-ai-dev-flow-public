@@ -6,7 +6,9 @@
 >
 > **Parent specifications:** `soc_architecture.md`, `memory_map.md`, `apb_subsystem.md`, `reset_clock.md`, `interrupt_architecture.md`.
 
-> **Implementation note (Phase 4A-GSENSOR, 2026-09-14):** Sections describing `spi_pll`, `spi_clk`, pre-first-sample unknown reset values, and direct `spi_clk`→PCLK readback document the historical baseline. The narrowly scoped implementation status at the end of this file supersedes those clocking/reset descriptions for the current public candidate; the APB software contract and remaining VALID/SEQ limitations still apply.
+> **Current A6 clocking:** The active G-sensor RTL has no `spi_pll` instance or internal SPI clock domain. Controller, sample registers, and APB wrapper use 50 MHz PCLK; external mode-3 SCLK is a registered output. Historical PLL/CDC descriptions below are identified as such; they are not current defects. Separate APB reads still lack an atomic XYZ snapshot and software-visible VALID/SEQ.
+
+> **P09B isolated-candidate status (2026-09-20, review pending):** The final P09B candidate, reconstructed from Public `fe2daa7...` plus the approved private patch chain, implements the final-section LIVE/HOLD/VALID/SEQ ABI, 12 initialization writes, INT1/30 ms scheduler and direct shared reset. This is not a claim about the current Public `main`: it is uncommitted isolated-candidate provenance pending User/Chat review and public-source integration. Focused/CPU/host evidence, a fresh private fit/STA and one board display observation exist; external timing/electrical, physical INT1/orientation, calibration and the explicitly retained NOT_RUN cases remain open.
 
 ## 1. Purpose
 
@@ -34,15 +36,14 @@ The active APB wrapper is:
 rtl/peripherals/gsensor/APB_GSENSOR_MB.v
 ```
 
-with private submodules:
+with active project-owned submodules:
 
 ```text
-rtl/peripherals/gsensor/v/reset_delay.v
-rtl/peripherals/gsensor/v/adxl345_controller.v
-rtl/peripherals/gsensor/v/SPI_MASTER.v
-rtl/peripherals/gsensor/v/spi_param.h
-private vendor-project vault: spi_pll generated IP (not in public tree)
+rtl/peripherals/gsensor/reset_delay.v
+rtl/peripherals/gsensor/spi_ee_config.v
 ```
+
+The old `adxl345_controller.v`, `SPI_MASTER.v`, `spi_param.h`, and private-vault `spi_pll` belong to the historical reference implementation, not the active public G-sensor source or FPGA binding.
 
 Top-level integration is:
 
@@ -60,16 +61,10 @@ AHB -> APB bridge
        |
        +--> reset_delay
        |
-       +--> spi_pll
-       |      +--> spi_clk            2 MHz
-       |      +--> spi_clk_out        2 MHz, phase shifted
-       |
-       +--> spi_ee_config             fixed-function ADXL345 controller
-                  |
-                  +--> spi_controller
+       +--> spi_ee_config             fixed-function ADXL345 controller, PCLK
                   |
                   +--> GSENSOR_CS_N
-                  +--> GSENSOR_SCLK
+                  +--> GSENSOR_SCLK   registered mode-3 output, ~2 MHz
                   +--> GSENSOR_SDI
                   +<-- GSENSOR_SDO
                   +<-- GSENSOR_INT[1]
@@ -189,15 +184,15 @@ The active parameters are:
 IDLE_MSB = 14
 read_idle_count[14:0]
 trigger condition = read_idle_count[14]
-spi_clk = 2 MHz nominal
+poll_div_count = 25 PCLKs per increment of poll_count (historical 11-write acquisition policy)
 ```
 
-Starting from zero, bit 14 becomes high after 16,384 `spi_clk` increments.
+Starting from zero, bit 14 becomes high after 16,384 `poll_count` increments.
 
 Therefore the nominal fallback interval is approximately:
 
 ```text
-16,384 / 2,000,000
+16,384 × 25 / 50,000,000
 = 8.192 ms
 ```
 
@@ -232,7 +227,7 @@ GSENSOR_SDI   FPGA -> sensor data
 GSENSOR_SDO   sensor -> FPGA data
 ```
 
-The generated `spi_pll` produces two nominal 2 MHz clocks from the 50 MHz input. In the generated baseline IP, the configured phase shifts are different for `c0` and `c1`; `spi_clk` is used by the internal state/sampling logic and `spi_clk_out` drives the gated external serial clock.
+The active controller and sample registers use only 50 MHz PCLK. A registered mode-3 `GSENSOR_SCLK` output uses 12/13-PCLK half-periods (25 PCLKs per nominal 2 MHz serial cycle); it is not an internal clock. The former dual-phase `spi_pll` implementation is historical and has no active G-sensor wrapper instance or Quartus binding.
 
 The SPI engine supports the transactions needed by this accelerometer controller:
 
@@ -245,7 +240,7 @@ It is not exposed as a generic APB SPI master. `spi.md` documents the private im
 
 The APB wrapper receives the system `PRESETn` and adds a local delay using `reset_delay`.
 
-`reset_delay` holds `dly_rst=1` until bit 20 of a 21-bit PCLK counter becomes set. Relative to `PRESETn` release, the local delay is:
+The pinned `reset_delay` has a 20-bit PCLK counter and keeps `dly_rst=1` until the counter reaches all ones; it deasserts on the following PCLK edge. Relative to `PRESETn` release, the local delay is:
 
 ```text
 2^20 PCLK cycles
@@ -256,25 +251,22 @@ The APB wrapper receives the system `PRESETn` and adds a local delay using `rese
 During the delay:
 
 ```text
-spi_pll areset = 1
 spi_ee_config iRSTN = 0
 ```
 
-When the delay expires, PLL reset and controller reset are released together.
-
-The baseline does not use the PLL `locked` output and therefore does not explicitly wait for PLL lock before allowing the controller to begin operation.
+When the delay expires, the controller reset is released. There is no G-sensor PLL reset or `locked` signal in the active path.
 
 ### 8.1 Sample-register reset limitation
 
-`out_acc_x`, `out_acc_y`, and `out_acc_z` are not explicitly assigned in the reset branch of `spi_ee_config`.
+`out_acc_x`, `out_acc_y`, and `out_acc_z` are explicitly reset to zero in the active `spi_ee_config`.
 
-Therefore an APB read before the first completed sensor burst does not have a defined architectural sample value. In simulation the values may be unknown; in hardware software shall not interpret pre-first-sample data as valid sensor data.
+Therefore an APB read before the first completed sensor burst returns deterministic zero, but software shall not interpret it as a valid sensor sample.
 
 The current APB interface exposes no status bit that lets software determine when the first valid sample has arrived.
 
 ## 9. Internal `gsensor_ready` Signal
 
-`spi_ee_config` contains a `gsensor_ready` output. It is asserted for the internal SPI-clock-domain completion of a successful read transaction.
+`spi_ee_config` contains a registered `gsensor_ready` output asserted on completion of a full read transaction in the PCLK domain.
 
 However, `APB_GSENSOR_MB` does not connect this output to a wrapper signal or APB status register.
 
@@ -287,11 +279,11 @@ sample_sequence  = not exposed
 sample_timestamp = not exposed
 ```
 
-Future cleanup should reuse or replace this completion indication as part of a proper PCLK-domain snapshot/valid handshake.
+P09B proposes to consume this PCLK-domain completion one edge later for a coherent LIVE publication and software-visible snapshot/valid contract.
 
-## 10. Clock-Domain Crossing and Sample Coherency
+## 10. Sample Coherency (no active internal SPI-to-PCLK CDC)
 
-This is a known baseline correctness limitation.
+The historical multi-bit `spi_clk`→PCLK crossing was removed by A6. The remaining limitation is a software-visible snapshot boundary, not an active internal CDC path.
 
 The source sample registers:
 
@@ -301,37 +293,35 @@ out_acc_y
 out_acc_z
 ```
 
-are updated in the 2 MHz `spi_clk` domain.
+are updated together in the 50 MHz PCLK domain after a completed burst.
 
-The APB wrapper reads those multi-bit buses directly from the 50 MHz `PCLK` domain using combinational logic. There is no:
+The APB wrapper reads those buses with combinational readback. There is no:
 
-- multi-bit CDC handshake,
 - destination-domain snapshot register,
-- asynchronous FIFO,
 - sample-version handshake,
 - atomic X/Y/Z capture mechanism.
 
-Therefore a sample update close to an APB read can theoretically produce metastability or a torn multi-bit value.
+There is no internal multi-bit metastability claim from an SPI-to-PCLK crossing. A read at an update boundary and two separate APB word reads still lack a specified coherent CPU snapshot.
 
-In addition, X/Y are returned in one APB word while Z requires a second APB transaction. Even after the CDC mechanism is corrected, an explicit snapshot mechanism is required if software must guarantee that X, Y, and Z came from the same acquisition event.
+X/Y are returned in one APB word while Z requires a second APB transaction; LIVE may refresh between them. An explicit HOLD snapshot is required if software must guarantee one acquisition generation.
 
-This issue is already part of the system-level CDC cleanup identified in `reset_clock.md` and is normative here for the G-sensor block.
+This is the `GS-001`/`CDC-002` software-coherency cleanup scope; the old generated-clock CDC mechanism itself is not present in active RTL.
 
 ## 11. Current Data-Reconstruction Logic
 
-At the end of a 56-bit burst, the controller reconstructs samples with the following active bit selections:
+At the end of a full 56-bit burst, the active A6 controller registers the completed six data bytes with these bit selections:
 
 ```text
-X = {s2p_data[38:31], s2p_data[46:39]}
-Y = {s2p_data[22:15], s2p_data[30:23]}
-Z = {s2p_data[6:0], 1'b0, s2p_data[14:7]}
+X = {completed_rx[39:32], completed_rx[47:40]}
+Y = {completed_rx[23:16], completed_rx[31:24]}
+Z = {completed_rx[7:0], completed_rx[15:8]}
 ```
 
-X and Y use two complete eight-bit fields. Z is reconstructed asymmetrically: seven captured bits, one inserted zero bit, and one eight-bit field.
+All three axes use complete low/high byte pairs, with ADXL345 low bytes received first. The project-owned `spi_ee_config.v` registers XYZ together at completion. Existing `GS-002` known-pattern digital evidence used `X=0x1234, Y=0x5678, Z=0x9ABC`; this supports byte reconstruction only, not physical orientation or cross-APB-read atomicity.
 
-The RTL itself contains a comment stating that the receive-shift indexing requires confirmation. Therefore the current Z reconstruction, and the complete byte/bit ordering of the 56-bit read path, shall be treated as **implementation behavior requiring directed verification**, not as a proven ideal ADXL345 byte mapping.
+**Historical pre-A6 reference only:** the old vendor-derived extraction used `Z={s2p_data[6:0],1'b0,s2p_data[14:7]}` and had an inserted zero bit. It is not the current A6 RTL or an open current Z-bit defect.
 
-Software shall not compensate for this possible RTL issue by inventing a different software bit mapping. The RTL shall be verified and corrected during baseline cleanup if required.
+Software must still interpret each axis as signed 16-bit data; no software bit-repair mapping is needed. P09B must preserve the actual full-byte reconstruction and independently reverify it after the proposed reset/acquisition changes.
 
 ## 12. Interrupt Architecture Relationship
 
@@ -402,7 +392,7 @@ Baseline-directed verification should cover at minimum:
 - periodic fallback trigger interval,
 - 56-bit burst command and transfer length,
 - known-pattern SPI return data for X/Y/Z byte-order validation,
-- the asymmetric Z reconstruction case,
+- full-byte signed/asymmetric known-pattern XYZ reconstruction (historical inserted-zero Z is not active),
 - first-sample validity behavior,
 - sample update while APB reads are occurring,
 - sensor interrupt input behavior versus periodic fallback,
@@ -416,16 +406,16 @@ The following items shall be carried into the consolidated baseline cleanup list
 
 | Priority | Cleanup target | Required direction |
 |---|---|---|
-| High | Unsafe multi-bit `spi_clk -> PCLK` crossing | Add a proper sample-transfer handshake, snapshot register, or equivalent CDC-safe structure. |
+| Historical, resolved by A6 | Unsafe multi-bit `spi_clk -> PCLK` crossing | Removed with PCLK-only controller; retain separate LIVE/HOLD software coherency target. |
 | High | No software-visible sample-valid/ready state | Expose a synchronized valid/ready or sequence mechanism; define first-sample validity. |
-| High | Unverified X/Y/Z bit reconstruction | Run known-pattern directed tests; correct byte/bit extraction, especially asymmetric Z logic, if required. |
+| Historical, GS-002 VERIFIED | X/Y/Z byte reconstruction | A6 full-byte extraction passed the scoped known-pattern digital check; preserve it in P09B regression without claiming physical accuracy. |
 | High | No atomic three-axis snapshot | Define a coherent XYZ snapshot contract. |
-| High | PLL lock ignored | Define generated-clock/reset release policy and wait for lock if required. |
+| Historical, resolved by A6 | G-sensor PLL lock ignored | No active G-sensor PLL or generated-clock reset/lock path. |
 | Medium | Stale 16.384 ms RTL comment | Correct documentation to the active bit-14 / ~8.192 ms fallback behavior or redesign the rate generator. |
 | Medium | Sensor ODR versus polling-rate mismatch | Define acquisition policy around the intended 50 Hz sensor update rate and avoid unnecessary duplicate reads if appropriate. |
 | Medium | Interrupt-pin naming/mapping ambiguity | Resolve `GSENSOR_INT[1]` versus internal `iG_INT2` naming and verify the physical pin contract. |
 | Medium | `INT_ENABLE=0x00` despite interrupt-trigger path | Decide whether acquisition is timer-driven, data-ready-driven, or hybrid and configure the ADXL345 consistently. |
-| Medium | Sample registers not reset | Define deterministic reset/invalid values or gate visibility with VALID. |
+| Medium | Zero reset without validity indication | A6 resets sample registers to zero; P09B must expose VALID to distinguish pre-first-sample data. |
 | Medium | No software configuration interface | Decide whether fixed hardware initialization remains intentional or whether controlled configuration registers are required. |
 | Low | Local register mirrors | Tighten local offset decode or explicitly contain the alias behavior. |
 | Low | Unused APB write inputs / debug-only outputs | Clean interface naming and remove or formalize debug-only signals. |
@@ -440,15 +430,159 @@ Until a later approved specification changes the architecture:
 4. `+0x04` returns Z in `[15:0]` with the upper halfword zero.
 5. The sensor is initialized by dedicated hardware, not firmware SPI transactions.
 6. The private SPI interface is not a generic software-visible APB SPI controller.
-7. The current sensor controller uses nominal 2 MHz generated clocks.
+7. The current sensor controller uses only 50 MHz PCLK and generates a registered nominal 2 MHz external SCLK.
 8. The fallback read trigger is based on active `read_idle_count[14]`, approximately 8.192 ms before transfer overhead.
 9. The APB wrapper exposes no valid/ready/timestamp/sequence status.
 10. The active CPU has no G-sensor interrupt source.
-11. Direct multi-bit `spi_clk -> PCLK` sample crossing remains a known cleanup item.
-12. The current sample reconstruction shall not be silently rewritten in documentation; any correction requires RTL verification and an updated specification.
+11. There is no active internal `spi_clk -> PCLK` crossing; coherent CPU readout across XY and Z remains a cleanup item.
+12. The active full-byte `completed_rx` reconstruction is the current source contract; any RTL correction requires new verification and an updated specification.
 
-## Phase 4A-GSENSOR A6 Implementation Status
+## Historical A6 implementation/evidence status
 
-A6 is implemented in the current public candidate: the fixed-function ADXL345 FSM and X/Y/Z result registers use only 50 MHz PCLK, with registered mode-3 external SCLK and 12/13-PCLK half-periods (25 PCLKs per 2 MHz SCLK cycle). The historical dual-phase `spi_pll` remains in the private vault but has no active wrapper instance or Quartus binding. `GSENSOR_INT[1]` enters a two-flop PCLK synchronizer. The eleven initialization writes, 56-bit read, APB register packing and `PREADY=1` contract are retained. Sample registers reset to zero and publish X/Y/Z together after a completed read, but zero is **not** a software-visible VALID indication.
+At the A6 evidence point, the fixed-function ADXL345 FSM and X/Y/Z result registers used only 50 MHz PCLK, with registered mode-3 external SCLK and 12/13-PCLK half-periods (25 PCLKs per 2 MHz SCLK cycle). The historical dual-phase `spi_pll` remained in the private vault but had no active wrapper instance or Quartus binding. `GSENSOR_INT[1]` entered a two-flop PCLK synchronizer. The eleven initialization writes, 56-bit read, APB register packing and `PREADY=1` contract were retained. This paragraph records pinned A6 facts, not the P09B candidate contract below.
 
 Focused/open tests pass, and the user-run `gsensor_pclk_01` Quartus fit has two active PLLs (ADC/VGA), no G-sensor generated clock, and positive 50 MHz setup/hold slack at the analyzed corners. This verifies the internal single-PCLK clocking sub-scope, **not** ADXL345 board-pin setup/hold, a VALID/SEQ API, atomicity across two separate APB reads, physical interrupt mapping, `GS-001`/`CDC-002` closure, or board acceptance. Detailed raw build evidence and the Phase 4A-GSENSOR report remain in the private local evidence archive.
+
+## P09B final implementation and scoped evidence — paired publication update
+
+> **Current Public integration:** This implementation is current with the paired P09B source/documentation commits. Earlier candidate wording is pre-publication provenance only; scoped evidence does not promote physical acceptance or retained NOT_RUN checks.
+
+> **Publication synchronization:** The implementation below becomes the Public contract only with the paired source and documentation commits. Scoped evidence does not promote physical acceptance or retained NOT_RUN checks.
+
+The isolated, unintegrated P09B candidate implements the final P09B contract in
+this document: direct shared `PRESETn`, twelve ordered initialization writes,
+INT1-triggered/30 ms fallback acquisition, and the LIVE/HOLD/VALID/SEQ APB ABI.
+Focused, host and CPU checker evidence, a fit/STA review and one board-display
+observation exist for that candidate. These facts do not describe Public `main`,
+do not turn physical INT1/orientation/calibration or external timing into a
+pass, and do not close the retained NOT_RUN negative tests.
+
+## Historical Stage 1 target/evidence at that time — not current candidate status
+
+### Reset ownership and interrupted-transaction boundary
+
+At Stage 1, the then-pinned A6 source had two sequential reset qualifications;
+the then-proposed P09B target had only the shared system qualification. This
+following subsection records that historical specification/evidence boundary;
+it is not a statement that the P09B candidate above was unimplemented.
+
+| Path/owner | Current pinned A6 | P09B target after separately approved RTL stage |
+|---|---|---|
+| `KEY[0]` → system | LOW asynchronously asserts `system_reset_controller`; release uses two HCLK flops then 1,000,000 qualified 50 MHz edges (~20 ms) | unchanged |
+| SoC/bridge/APB | top `HRESETn=PRESETN_SYS`; bridge `PCLK=HCLK`, `PRESETn=HRESETn` | unchanged |
+| G-sensor controller | wrapper `reset_delay(PRESETn,PCLK)` holds `iRSTN=!dly_rst` for another 2^20 PCLK (~20.97152 ms); init starts roughly 41 ms plus synchronization after button release | wrapper connects `spi_ee_config.iRSTN` **directly to `PRESETn`**; no second timer, generated reset or new clock domain |
+| LIVE/HOLD/scheduler | not yet implemented | all XYZ/SEQ/VALID, IRQ synchronizer/history, pending request and watchdog use the same `PRESETn` |
+
+The target removes the `reset_delay` **instantiation** and obsolete wrapper `RESET_DELAY_BITS` parameter at Stage 2 only; `reset_delay.v` is neither edited nor deleted at Stage 1. The existing shared reset controller, bridge and other consumers are unchanged. On common reset release, the controller begins exactly 12 ordered SPI initialization writes; acquisition/IRQ recognition and watchdog arming occur only after write 11 (`POWER_CTL`) has completed and CS is HIGH. This is a target sequence, not a measured startup time. The [ADXL345 datasheet](https://www.analog.com/media/en/technical-documentation/data-sheets/adxl345.pdf) describes bus availability with both supplies present and recommends configuration in standby before enabling measurement; the proposed POWER_CTL-last order follows that recommendation. Common reset does **not** prove sensor rail readiness by 20 ms: ramp, bus electrical availability, initialization and first DATA_READY behavior require separate physical validation.
+
+Normal APB transfers are valid only while common reset is deasserted. Its **asynchronous assertion can overlap** SETUP, ACCESS, CAPTURE, E0/E1 or SPI shifting. Assertion aborts in-flight bus/sensor operations and dominates bank/command state. A read not completed before assertion has **no guaranteed valid return or completion and is not an accepted transfer**; an already completed read remains a historical completion. No specific AHB ERROR/OKAY is promised for an aborted transfer beyond actual bridge/CPU reset semantics. While reset is asserted, LIVE/HOLD are zero/invalid and initialization/acquisition are disabled. After synchronous release, APB accesses may resume, but both VALID bits remain zero until the first new complete digital burst (HOLD remains invalid until a later successful CAPTURE). Reset coincident with a clock edge is an asynchronous boundary, **not** the pre-edge STATUS/HOLD read linearization rule used for normal deasserted-reset transfers.
+
+| Reset/transaction order | Contract / independent check |
+|---|---|
+| Read completes before reset assertion | Its old value is a valid historical completion; reset then clears both banks. |
+| Reset assertion before read completion, including SETUP or ACCESS | Abort; no accepted read/command, no guaranteed read value/completion. |
+| Reset overlaps CAPTURE/RELEASE or E0/E1 | Reset wins; no stale HOLD ownership, pending LIVE generation or post-release publication from the old burst. |
+| Reset during a 56-bit SPI transaction | Abort transfer, drive safe idle pins, clear scheduler and restart the 12-write initialization after common release. |
+| Reset during HOLD ownership | Clear HOLD XYZ/SEQ/VALID and LIVE; old owner must not return stale data or issue an unowned RELEASE. |
+
+### Ownership, digital sample identity, and priorities
+
+The P09 target retains one 50 MHz PCLK domain and fixed bank roles. The ADXL345 controller owns acquisition; LIVE `{x,y,z,seq[31:0],valid}` is a continuously overwritten producer bank; HOLD `{x,y,z,seq[31:0],valid}` is a CPU-owned snapshot. HOLD never changes after a successful CAPTURE until RELEASE or reset. Acquisition never waits for CPU consumption; there is no FIFO or promise to preserve intermediate generations. An uninterrupted, locally counted 56-bit SPI read is a **digital completed burst**, not an ACK/CRC/device-ID check or proof of a fresh, physically coherent sensor conversion.
+
+At E0, the existing controller registers all three axes and `gsensor_ready=1` by nonblocking assignments on its last rising sample edge. A wrapper sequential process sees the old ready at E0. At E1 it observes ready=1 and stable axes; this **single E1 `sample_complete`** must atomically publish LIVE XYZ, increment LIVE_SEQ, and set LIVE_VALID. Do not increment a separate controller SEQ at E0. Reset sets both banks' XYZ, valid and seq to zero. The first completed burst publishes seq=1; every completed burst increments modulo 2^32 even for identical XYZ or watchdog rereads. A wrapped seq=0 may be valid.
+
+`LIVE_VALID` means an **unconsumed completed digital burst pending since the last successful CAPTURE**, not “ever initialized.” `HOLD_VALID` means occupied snapshot. Let `C` be an accepted, correctly encoded CAPTURE whose **pre-edge** LIVE_VALID=1 and HOLD_VALID=0, and `E` be E1 `sample_complete`. Except for reset, `live_valid_next = (pre_live_valid && !C) || E`. A successful CAPTURE copies the pre-edge complete LIVE XYZ+SEQ into HOLD and sets HOLD_VALID. An ineligible CAPTURE is OKAY/no-op and does not clear LIVE_VALID. A same-edge E+C copies old LIVE to HOLD, publishes the new burst to LIVE and leaves LIVE_VALID=1; with pre-edge LIVE invalid, C no-ops and E sets pending. RELEASE clears HOLD XYZ/SEQ/VALID but not LIVE; same-edge E+RELEASE publishes LIVE independently. Reset dominates every event, command and read session.
+
+| Edge/transfer | LIVE next | HOLD next | Observable result |
+|---|---|---|---|
+| Reset assertion | XYZ=0, seq=0, valid=0 | XYZ=0, seq=0, valid=0 | pending and ownership cancelled |
+| E only | source XYZ, seq+1, valid=1 | unchanged | one digital generation |
+| eligible C only | XYZ/seq unchanged, valid=0 | pre-edge LIVE XYZ/seq, valid=1 | one atomic snapshot |
+| ineligible C | unchanged | unchanged | OKAY, no side effect |
+| E+C, pre-live valid and HOLD empty | source XYZ, seq+1, valid=1 | pre-edge LIVE XYZ/seq, valid=1 | event wins over pending clear |
+| E+C, pre-live invalid or HOLD occupied | source XYZ, seq+1, valid=1 | unchanged | C no-op; event preserved |
+| RELEASE, with or without E | E publishes if present; otherwise unchanged | XYZ=0, seq=0, valid=0 | idempotent OKAY |
+| malformed SNAP_CTRL, with or without E | E publishes if present; otherwise unchanged | unchanged | ERROR, no command effect |
+| STATUS read concurrent with E | E publishes after edge | unchanged | read returns **pre-edge** registered bits; next read sees E |
+
+STATUS read has no side effects and **no same-edge event-forwarding/bypass**. With reset deasserted, its APB combinational PRDATA corresponds to pre-edge registered state at the completing ACCESS edge. A concurrent E can therefore yield read bit0=0 while setting LIVE_VALID=1 immediately after that edge; the next read sees it. Same-edge forwarding may be recorded later only as an unimplemented engineering optimization, never as an AC. HOLD read data is likewise pre-edge on a normal command collision; asynchronous reset assertion instead follows the aborted-transaction rule above.
+
+### APB ABI and errors
+
+Only naturally aligned 32-bit accesses at base `0x4003_0000`, `PSEL[3]`, and the exact offsets below are valid. The bridge must extend the slot-3 full-offset allowlist from `+0x00/+0x04` to all five listed offsets, while still blocking mirrors, aliases, other offsets, unsupported sizes and reserved slots before any real select. A normal selected transfer is zero-wait (`PREADY=1`). A command fires exactly once at its accepted APB ACCESS completion, never in SETUP or once per ACCESS wait cycle; back-to-back ACCESS completions are distinct commands.
+
+| Offset | Name | Read | Write | Invalid/side-effect policy |
+|---:|---|---|---|---|
+| `+0x00` | HOLD_XY | HOLD_VALID ? `{X[15:0],Y[15:0]}` : `0` | ERROR | no read effect |
+| `+0x04` | HOLD_Z | HOLD_VALID ? `{16'b0,Z[15:0]}` : `0` | ERROR | no read effect |
+| `+0x08` | STATUS | `{30'b0,HOLD_VALID,LIVE_VALID}` | ERROR | side-effect-free, pre-edge |
+| `+0x0C` | HOLD_SEQ | HOLD_VALID ? HOLD_SEQ : `0` | ERROR | valid seq=0 is possible |
+| `+0x10` | SNAP_CTRL | ERROR | exact `32'h1` CAPTURE; exact `32'h2` RELEASE | `0`, `3`, any reserved bit: ERROR/no command effect |
+| other/noncanonical | none | ERROR | ERROR | no bank/command side effect |
+
+Wrong direction at a listed offset and malformed control use wrapper `PSLVERR` at completing ACCESS, routed by top to the existing bridge `PSLVERR` input and project two-cycle AHB ERROR (`HRESP=01,HREADY=0` then `HRESP=01,HREADY=1`). The current top ties that input low: this error behavior is a **target**, not an existing end-to-end feature for G-sensor. Ineligible but well-encoded CAPTURE and RELEASE of empty HOLD are normal OKAY transactions, not traps. Invalid HOLD readback is zero, but zero data or seq alone never means invalid. No generic SPI/configuration writes or CPU/PLIC interrupt are introduced. The historical “G-sensor is read-only / writes no-op OKAY” statements in §§3, 14 and 17 describe the pre-P09 source and must not be used as the P09 ABI.
+
+### Fixed sensor initialization and trigger scheduler
+
+The replacement table uses project-owned constants, **not** the historical redistribution-restricted `spi_param.h`. Every row is one 16-bit SPI register write and must execute exactly once in the order shown; `POWER_CTL` is last. `BW_RATE=0x09` selects nominal 50 Hz normal-power ODR, `INT_MAP=0` routes DATA_READY to INT1, `INT_ENABLE=0x80` enables its output, and `DATA_FORMAT=0` retains the default ±2 g/right-justified format. `OFSZ=+7` is an additive offset of approximately +109 mg (7 × 15.6 mg), approximately 28 output counts in default ±2 g mode; it is **not** +28 mg. Its board calibration suitability remains an external check.
+
+| Index | Register/address | Value |
+|---:|---|---:|
+| 0 | THRESH_ACT `0x24` | `0x20` |
+| 1 | THRESH_INACT `0x25` | `0x03` |
+| 2 | TIME_INACT `0x26` | `0x01` |
+| 3 | ACT_INACT_CTL `0x27` | `0x7F` |
+| 4 | THRESH_FF `0x28` | `0x09` |
+| 5 | TIME_FF `0x29` | `0x46` |
+| 6 | BW_RATE `0x2C` | `0x09` |
+| 7 | INT_MAP `0x2F` | `0x00` |
+| 8 | INT_ENABLE `0x2E` | `0x80` |
+| 9 | DATA_FORMAT `0x31` | `0x00` |
+| 10 | OFSZ `0x20` | `0x07` |
+| 11 | POWER_CTL `0x2D` | `0x08` |
+
+The current RTL maps top `G_SENSOR_INT[1]` through wrapper `GSENSOR_INT[1]` to controller port `iG_INT2`; the port name is misleading. The public pin assignment binds index 1 to `PIN_Y14`, and the DE10-Lite manual identifies Y14 as **INT1** (index 2/Y13 is INT2). This source/document identity does not replace a board electrical/waveform test. ADXL345 DATA_READY is deasserted by reading its axis data registers; the existing 56-bit DATAX0..DATAZ1 burst is the intended clear. A synchronized high level must not be interpreted as one new event per PCLK, and a pulse too short to reach the two-flop synchronizer cannot be guaranteed captured.
+
+Target scheduler contract (one pending request slot, no FIFO): after the twelfth initialization write has fully ended and CS returns high, arm acquisition and zero the elapsed-PCLK counter. On the **next** PCLK edge, an already-high synchronized INT1 is recognized once. Recognize an IRQ when armed and synchronized INT1 is high; disarm IRQ recognition until a synchronized LOW is observed, then rearm. A new LOW→HIGH while the SPI engine is busy is recognized and coalesced into the one pending slot; further events coalesce. This is not a guarantee of one burst per physical DATA_READY pulse. Once recognized, IRQ resets the watchdog on that edge, including while busy; a held HIGH does not repeatedly reset it.
+
+The watchdog independently counts PCLK edges while armed, including SPI-active time. At an arm/restart edge set elapsed=0; the **1,500,000th subsequent rising edge** reaches the 30 ms threshold (50 MHz), not the 1,499,999th. If no IRQ is eligible then, request one fallback acquisition. If busy, hold one FALLBACK pending and saturate the deadline until service, not a new timeout on each subsequent edge. Restart elapsed=0 when fallback is actually accepted/started. IRQ recognition and deadline on the same edge select IRQ, create only one acquisition request and one timer restart; an IRQ arriving before a deferred fallback starts upgrades it to IRQ. A pending request launches only when no init/read/CS-hold transfer is in flight; no transfer is aborted or overlapped. Reset clears sync history, arm state, timer, pending request and transfer. This policy guarantees one bounded request slot, **not** lossless interrupt capture or a precise 20 ms burst cadence. Normal 50 Hz DATA_READY should reset the watchdog before 30 ms; absence/stuck INT permits fallback, which may reread old physical data and still advances digital SEQ.
+
+The pending request is a **single enum `NONE / FALLBACK / IRQ`**, not two independent bits. `IRQ > FALLBACK > NONE`; the table applies after reset and before any launch on the same edge. A recognized IRQ always restarts the watchdog once; a fallback start restarts it once; mere continued INT HIGH or saturated timeout does not. One completed idle launch consumes the pending slot.
+
+| Pending before edge | Recognized IRQ | Watchdog deadline | Pending after arbitration, before optional idle launch |
+|---|---|---|---|
+| any | yes | either | IRQ; any old FALLBACK is upgraded/cancelled, never added |
+| IRQ | no | either | IRQ; timeout cannot enqueue a second fallback |
+| FALLBACK | no | either | FALLBACK; repeated deadline coalesces |
+| NONE | no | yes | FALLBACK |
+| NONE | no | no | NONE |
+
+If the SPI engine is idle at arbitration, it starts at most the one selected request and clears pending; if busy, that one state remains deferred. Recognition of a new IRQ while busy resets elapsed even if another IRQ is already pending. A deadline reached while IRQ is already pending is suppressed, not queued. If that deadline saturates before the deferred IRQ can launch, the eventual IRQ launch consumes the suppressed deadline and restarts elapsed=0 once; otherwise the counter retains its origin at the last recognized IRQ. Thus a long busy interval cannot cause an immediate duplicate fallback after the IRQ read. An IRQ+deadline collision, including with a busy transfer or pending IRQ, must yield **one eventual read, never an extra fallback read**. Synchronized LOW rearms interrupt recognition; a continuously HIGH pin cannot generate another recognized IRQ, although the 30 ms watchdog may separately request a fallback later.
+
+The old `POLL_BITS=14` checks bit14 of an idle counter incremented once per 25 PCLKs: nominal 16,384 × 25 / 50 MHz = 8.192 ms of **idle-count time**, not a precise end-to-end sampling interval. It is historical after P09. The P09 30 ms threshold is from last recognized IRQ or accepted fallback start, **not** from SPI completion. No physical ADXL345 update atomicity, peer setup/hold, ODR one-to-one delivery, orientation/calibration, or board acceptance follows from this digital contract.
+
+### Firmware and acceptance boundary
+
+The single-owner firmware lifecycle and error semantics are specified in `19_firmware_contract.md` and its Korean companion. The following acceptance list is the historical Stage 1 planned-check list. Its `NOT_RUN` labels apply to that gate, not to the later isolated candidate evidence; independently retained negative and physical scope is identified in the closure packet.
+
+| Acceptance IDs | Independent oracle / required observation | Stage 1 execution |
+|---|---|---|
+| AC-01..04 | Reference reset and pre-edge generation state; independently driven 56-bit asymmetric bytes; HOLD tuple fixed through LIVE refresh | NOT_RUN |
+| AC-05..08 | APB command ledger and pre-edge state model; ineligible/malformed controls, release/recapture, E+C/E+RELEASE/pre-edge STATUS, seq wrap through valid zero | NOT_RUN |
+| AC-09..10 | Full-address/size/direction ACCESS ledger and two-cycle fault; reset in SETUP, ACCESS, CAPTURE, 56-bit SPI, E0/E1 and HOLD ownership with no stale accepted command/sample | NOT_RUN |
+| AC-11..12 | Scripted ordered firmware MMIO and actual CPU/AHB/APB result/fault signature, not a driver-derived expectation | NOT_RUN |
+| AC-13..15 | Compiled-path HOLD_Z-from-LIVE_Z mutation rejected; pinned regression exit chain; separate external timing/pin/orientation gate | NOT_RUN |
+| AC-16 (P09B) | Independent 12-write address/value/count/order oracle, including INT_MAP before INT_ENABLE and POWER_CTL last | NOT_RUN |
+| AC-17 (P09B) | Independent 50 MHz edge counter at 1,499,999/1,500,000/1,500,001; initial-high, stuck-high, low rearm, busy IRQ, IRQ+deadline, pending priority and restart | NOT_RUN |
+| AC-18 (P09B) | Negative one-slot oracle: inject IRQ+deadline while busy/IRQ pending, including >30 ms deferral, and reject any second/immediate fallback read; verify launch count/source and saturated-deadline restart | NOT_RUN |
+| AC-19 (P09B) | Independent reset/accepted-transfer ledger: shared-release startup and all abort windows; no completion claim for an interrupted APB read and no old sample after reinit | NOT_RUN |
+
+These IDs preserve P09A AC-01..15 as planned checks, updated to the approved P09B contract; any earlier `NO_SAMPLE` label is replaced by the four-result firmware API. No checker, runner or mutation has been implemented at this gate.
+
+| Requirement | Pinned source evidence → target spec | Planned independent AC |
+|---|---|---|
+| Shared async-assert/sync-release path | `rtl/soc/system_reset_controller.v`, `rtl/soc/AMBA_SoC_TOP.v`, `rtl/bus/AHB_APB_bridge.v` → reset ownership table here and `06_reset_clock.md` | AC-01, AC-10, AC-19 |
+| Remove only local G-sensor delay; preserve reset abort semantics | `rtl/peripherals/gsensor/APB_GSENSOR_MB.v`, `reset_delay.v`, `spi_ee_config.v` → reset/transaction table here | AC-09, AC-10, AC-19 |
+| Full-byte digital XYZ, E0/E1 publish and atomic HOLD | `rtl/peripherals/gsensor/spi_ee_config.v` → §§11 and Ownership above | AC-02..04, AC-07, AC-13 |
+| Exact 12-write startup, INT1 and one-slot IRQ/watchdog | current 11-write `spi_ee_config.v`, pin assignment → initialization/scheduler tables above | AC-16..18, AC-15 physical gate |
+| APB error and single-owner firmware lifecycle | `rtl/bus/AHB_APB_bridge.v`, `rtl/soc/AMBA_SoC_TOP.v`, current wrapper → ABI above and `19_firmware_contract.md` | AC-05, AC-09, AC-11..12, AC-19 |

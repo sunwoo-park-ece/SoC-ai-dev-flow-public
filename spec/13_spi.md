@@ -318,7 +318,7 @@ spi_count 47 .. 0
 
 The receive register shifts one SDO sample into its least-significant end on each `posedge spi_clk` for which the controller is in the read-data phase.
 
-The interpretation of the resulting 48 received bits into X/Y/Z is owned by `gsensor.md` and remains a directed-verification target, especially for the current Z-axis reconstruction expression.
+The interpretation of the 48 received data bits into X/Y/Z is owned by `12_gsensor.md`. This older paragraph is historical: active A6 reconstructs all three axes from complete `completed_rx` byte pairs, with scoped `GS-002` known-pattern digital evidence; P09B must revalidate it after changes.
 
 ## 10. SPI Timing Mode Classification
 
@@ -503,3 +503,11 @@ Earlier sections about two phase-shifted `spi_pll` clocks describe the historica
 User/Chat approved the current tracker `SPI-001` transition to `VERIFIED` for digital transaction/waveform evidence only. The directed `verification/directed/models/gsensor/tb_gsensor_single_pclk.sv` checks mode 3, registered 12/13-PCLK SCLK halves, all eleven 16-bit initialization writes, three complete 56-bit reads, MOSI order, rising-edge MISO capture, exact CS lifetime, non-symmetric known-pattern data, and in-flight reset abort/safe-idle/restart; the focused G-sensor regression passes. No synthesizable RTL or SDC/QSF change, Quartus build, or board test was part of this closure. `SPI-002` remains `IN_PROGRESS` for physical ADXL345 timing; `GS-005`, `STA-002`, `CDC-002`, and `GS-001` retain their separate open gates.
 
 The older §16 heading also labeled “SPI-001” discusses private versus generic SPI as historical pre-A6 context. It is preserved here; the current tracker `SPI-001` is the directed digital waveform-verification row. Terminology cleanup belongs to the later Full Spec Refresh.
+
+## P09B ADXL345 transaction contract — paired publication update
+
+> **Current Public integration:** The 12-write PCLK-only implementation is current with the paired P09B source/documentation commits. Historical 11-write evidence remains historical and `SPI-002` remains open.
+
+> **Publication synchronization:** The 12-write PCLK-only implementation is published only with its matching source commit. Historical 11-write evidence remains historical and `SPI-002` remains open.
+
+The isolated P09B candidate retains the fixed-function PCLK-only mode-3 transport and full 56-bit DATAX0..DATAZ1 read. Its 12 initialization writes, in order, are `(0x24,0x20)`, `(0x25,0x03)`, `(0x26,0x01)`, `(0x27,0x7F)`, `(0x28,0x09)`, `(0x29,0x46)`, `(0x2C,0x09)`, `(0x2F,0x00)`, `(0x2E,0x80)`, `(0x31,0x00)`, `(0x20,0x07)`, `(0x2D,0x08)`. Thus 50 Hz DATA_READY is enabled and mapped to INT1; measurement mode is last. The existing 11-write waveform evidence remains historical and cannot verify this new table. In the isolated candidate the controller reset input is direct `PRESETn`, **not** the historical extra 2^20-PCLK local delay. It starts initialization on common reset release and arms acquisition/watchdog only after all twelve writes end with CS HIGH. Asynchronous reset assertion aborts in-flight SPI, clears scheduler state and restarts this full sequence after synchronous release; no old E0/E1 completion may publish afterward. A completed digital burst is not proof of a new physical conversion. INT1 is the primary trigger and a 30 ms elapsed-PCLK watchdog is the fallback, not the historical nominal 8.192 ms idle poll. Exact coalescing, edge priorities and sample publication are specified in [12_gsensor.md](12_gsensor.md). The Stage 1 `NOT_RUN` labels are historical. The isolated candidate has focused digital and CPU/host evidence, but sensor-supply startup, ADXL345 board timing and physical pin checks remain outside this contract; `SPI-002` is not closed. None of this updates current Public `main` before integration approval.

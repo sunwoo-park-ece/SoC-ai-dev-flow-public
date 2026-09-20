@@ -252,7 +252,7 @@ OPEN, `UART-006` remains optional/OPEN, and `UART-IRQ` remains DEFERRED.
 | ID | Sev | Gate | Current issue | Required outcome | Dependent specs | Verification | Status |
 |---|---|---|---|---|---|---|---|
 | `GS-001` | Blocker | BC | No coherent software sample/VALID/SEQ; first sample undefined. | Resolve through `CDC-002`: atomic XYZ PCLK snapshot + first-sample validity/sequence. | `12_gsensor`, `19_firmware_contract` | async atomic snapshot | OPEN |
-| `GS-002` | High | BC | X/Y/Z reconstruction, especially Z, is unproven. | Run known-pattern 56-bit SPI tests and correct extraction if needed. | `12_gsensor`, `13_spi` | e.g. X=1234,Y=5678,Z=9ABC | VERIFIED |
+| `GS-002` | High | BC | Historical X/Y/Z reconstruction, especially inserted-zero Z, was unproven; active A6 now uses full `completed_rx` bytes. | Preserve source-accurate full-byte extraction; revalidate after P09B changes without claiming physical orientation. | `12_gsensor`, `13_spi` | scoped digital X=1234,Y=5678,Z=9ABC | VERIFIED |
 | `GS-003` | Medium | BC | ~8.192 ms polling vs nominal 50 Hz ODR, INT_ENABLE=0, pin naming ambiguity. | Freeze acquisition policy, correct timing docs/config, verify physical INT mapping. | `12_gsensor` | rate + interrupt/fallback tests | OPEN |
 | `GS-004` | Medium | BC | A6 resets sample regs to zero, but zero is not a VALID indication; fixed hardware-config policy is implicit. | Gate visibility with VALID and explicitly retain/revise fixed initialization policy. | `12_gsensor`, `19_firmware_contract` | pre-first-sample test | OPEN |
 | `GS-005` | High | BC | Cleanup-grade init/acquisition/coherency/axis evidence is missing. | Automated SPI/sensor regression + known-orientation board validation. | `12_gsensor`, `13_spi` | sim + board | IN_PROGRESS |
@@ -521,3 +521,32 @@ evidence. The preceding interval is tracked as
 architectural risk. The accepted VGA functional scope changes `VGA-001..006` to
 VERIFIED only; it does not close CDC/FW work, release Clean Baseline v1, or claim
 full timing/board closure.
+
+## P09B Stage 1 spec-review marker — historical at Stage 1 (no tracker closure)
+
+At Stage 1, the proposed G-sensor contract in `12_gsensor.md` and `19_firmware_contract.md` addressed `GS-001`, `GS-003`, `GS-004`, `GS-005`, `CDC-002` and `FW-008` at the **specification** level only. At that time no P09B production RTL, firmware, testbench, runner, Fitter/TimeQuest or board validation had run, and the tracker states above were unchanged. The prior `SPI-001` verification covered the historical 11-write digital waveform, not the proposed sequence. `GS-IRQ` stayed DEFERRED: external ADXL345 INT1 is an acquisition input, not a CPU/PLIC interrupt source.
+
+The Stage-1 reset correction was likewise **target only**: the pinned A6 source then had ~20 ms shared release qualification **plus** ~20.97152 ms G-sensor-local delay. The historical target proposed direct `PRESETn` and removal only of the local wrapper instance at a later approved RTL stage. AC-18/19 were planned negative/abort checks, **NOT_RUN** at Stage 1. Sensor power-rail readiness, startup, physical INT1, pin timing and board XYZ remained separate gates.
+
+## P09B publication-ready tracker proposal (separate tracker approval required)
+
+> **Current Public integration:** The source/documentation integration is current; this table remains a tracker proposal and does not mutate status or promote any row to `VERIFIED`.
+
+> **Publication synchronization:** The paired source/documentation publication can describe implemented P09B scope, but cannot mutate tracker status or promote any row to `VERIFIED`.
+
+This table is a local proposal for the later isolated candidate, not a change to
+Public `main` or a tracker closure. It distinguishes current candidate evidence
+from the historical Stage 1 marker above. Candidate RTL/FW and patch provenance
+are recorded in the private P09B final-evidence draft. `VERIFIED` is not proposed here.
+
+| Item | Current -> proposed | Evidence / AC disposition | Remaining risk |
+|---|---|---|---|
+| GS-001 | OPEN -> IN_PROGRESS | Stage 4/5 independent HOLD/VALID/SEQ, CPU and host checks; atomic capture/release observed in the candidate | reset/negative coverage and external behavior not closed |
+| GS-002 | VERIFIED -> VERIFIED | existing asymmetric-byte reconstruction evidence retained | no physical orientation claim |
+| GS-003/004 | OPEN/OPEN -> IN_PROGRESS | 12-write/INT1/watchdog source plus focused and CPU evidence | physical INT1 and complete reset-negative coverage incomplete |
+| GS-005 | IN_PROGRESS -> IN_PROGRESS | simulation/CPU evidence; photo `SEQ=0x1450`; user separately observed later `SEQ≈0x7C00`, approximate ±255 XYZ, and manual desk-rest Z+/left-tilt X+/toward-user Y+ direction/sign changes | not a full board acceptance: no quantitative calibration, systematic orientation matrix, physical INT1 waveform, long-duration integrity or external SPI timing |
+| CDC-002 | OPEN -> IN_PROGRESS | single-PCLK source and focused evidence | independent CDC/physical closure not claimed |
+| FW-008 | OPEN -> IN_PROGRESS | isolated-candidate driver lifecycle plus independent host and CPU MMIO/fault checks | Public integration, full API-negative/reset coverage and physical behavior are not closed |
+| STA-002 | BLOCKED -> BLOCKED | no fabricated I/O delays; fresh STA confirms expected internal paths only | external I/O/electrical and ADC/VGA critical warnings |
+| VER-001/002/004/007 | IN_PROGRESS/IN_PROGRESS/IN_PROGRESS/OPEN -> IN_PROGRESS | Stage 5 regressions; fresh fit/STA; source->ELF->MIF->SOF chain | excluded negative branches and warning disposition remain open |
+| VER-005 | OPEN -> IN_PROGRESS | photo `SEQ=0x1450` plus separate user manual-tilt/SEQ≈`0x7C00` observation | not full board acceptance; no approved quantitative procedure, calibration/orientation matrix, long-duration or external timing evidence |

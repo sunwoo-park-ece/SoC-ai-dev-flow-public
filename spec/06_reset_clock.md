@@ -6,7 +6,7 @@
 >
 > **Parent specifications:** `soc_architecture.md`, `ahb_fabric.md`, `apb_subsystem.md`.
 
-> **Implementation note (Phase 4A-GSENSOR, 2026-09-14):** The G-sensor `spi_pll` branches and `spi_clk` rows below record the historical baseline. The Phase 4A-GSENSOR status at the end of this file supersedes those rows for the current public candidate; VGA and ADC clock/reset issues remain in scope.
+> **Current G-sensor reset note:** A6 removed the internal `spi_pll` clocks, but the pinned wrapper still adds a 2^20-PCLK `reset_delay` after the common system reset. P09B proposes removing only that local delay at a later RTL stage; this Stage 1 document is not an implementation claim. Historical VGA/ADC passages retain their own checkpoint context.
 
 ## 1. Purpose
 
@@ -14,7 +14,7 @@ This document defines the clock and reset architecture of the active FPGA baseli
 
 - the board reference clock and active system clock,
 - APB clock/reset derivation,
-- generated VGA and G-sensor clocks,
+- generated VGA/ADC clocks and the G-sensor registered external serial output,
 - the ADC/Qsys-managed clock domain,
 - external reset conditioning and distribution,
 - local reset sequencing,
@@ -40,11 +40,10 @@ DE10-Lite 50 MHz board clock: clk
               |      |
               |      +--> APB peripherals
               |      |
-              |      +--> G-sensor reset delay
+              |      +--> G-sensor reset delay (current only)
               |             |
-              |             +--> spi_pll
-              |                    +--> spi_clk     ~2 MHz
-              |                    +--> spi_clk_out ~2 MHz, phase-shifted
+              |             +--> PCLK-only controller
+              |                    +--> registered external SCLK ~2 MHz
               |
               +--> VGA PLL
                      |
@@ -71,8 +70,7 @@ The active baseline therefore contains one main synchronous SoC domain and sever
 | System | `HCLK` | 50 MHz | board `clk` directly | CPU, AHB fabric, DMEM, AHB-side VGA control/write path | Canonical baseline clock |
 | APB | `PCLK` | 50 MHz | `HCLK` through AHB-APB bridge | APB peripherals | Same clock as HCLK; no CDC at AHB/APB boundary |
 | VGA pixel | `pclk_25` | 25 MHz | `vga_pll`, 50 MHz / 2 | VGA timing, VRAM read port | Generated clock domain |
-| G-sensor SPI | `spi_clk` | 2 MHz | `spi_pll` from PCLK | ADXL345/SPI control logic | Local peripheral clock domain |
-| G-sensor SPI phase clock | `spi_clk_out` | 2 MHz | second `spi_pll` output | SPI timing engine | Local phase-shifted clock |
+| G-sensor controller | `PCLK` | 50 MHz | AHB-APB bridge | ADXL345/SPI control and XYZ registers | Same domain as APB; external registered SCLK is not a clock domain |
 | ADC/Qsys | `adc_sys_clk` | vendor/Qsys-managed | `adc_qsys` from board `clk` | ADC command-channel sequencer / ADC subsystem | Generated vendor-managed domain; exact rate is not a canonical software contract |
 
 The current architecture has no independently clocked AHB or APB bus. `PCLK` and `HCLK` are the same 50 MHz source.
@@ -148,18 +146,7 @@ This behavior is an implementation property, not a preferred future reset/clock 
 
 ## 7. G-Sensor SPI Clocks
 
-`APB_GSENSOR_MB` receives the 50 MHz `PCLK` and creates a local reset sequence before enabling `spi_pll`.
-
-The generated `spi_pll` produces two nominal 2 MHz clocks:
-
-```text
-spi_clk
-spi_clk_out
-```
-
-The second clock is configured with a different phase and is used by the SPI engine together with `spi_clk`.
-
-The exact PLL phase values are an implementation detail of the imported G-sensor block and are not a general SoC clocking contract. Any refactoring of the SPI engine shall specify its required sampling/launch relationship explicitly rather than relying on undocumented phase assumptions.
+`APB_GSENSOR_MB` and `spi_ee_config` use only 50 MHz `PCLK`; the controller drives a registered external mode-3 SCLK with 12/13-PCLK half-periods. The historical two-output `spi_pll` has no active G-sensor instance or Quartus binding. The local reset delay described in §12 remains active in pinned A6 but is **not** a PLL-lock wait.
 
 ## 8. ADC / Qsys Clock Domain
 
@@ -262,7 +249,7 @@ Representative usage:
 
 The G-sensor subsystem adds a second local reset delay after APB/system reset release.
 
-`reset_delay.v` contains a 21-bit counter. While bit 20 remains zero, its active-high `dly_rst` output stays asserted.
+Pinned `reset_delay.v` contains a 20-bit counter. Its active-high `dly_rst` remains asserted through the all-ones count and deasserts on the following PCLK edge.
 
 At 50 MHz, the local delay is approximately:
 
@@ -278,12 +265,10 @@ system PRESETn releases
        v
 ~20.97 ms local delay
        |
-       +--> spi_pll areset deasserts
-       |
        +--> spi_ee_config iRSTN releases
 ```
 
-This delay is specific to the imported ADXL345 subsystem and is not a general APB reset requirement.
+This current local delay is not a general APB reset requirement or a G-sensor PLL lock requirement. Under the P09B target it is removed from the active wrapper; `reset_delay.v` itself remains untouched unless later separately authorized.
 
 ## 13. CDC Inventory
 
@@ -341,15 +326,9 @@ Therefore current operation depends on software timing and physical implementati
 
 A future cleanup shall move buffer-swap commit into a defined pclk25/HCLK handshake or otherwise synchronize the ownership state at a safe frame boundary.
 
-### 13.4 G-Sensor Sample Data: spi_clk -> PCLK — Cleanup Required
+### 13.4 G-Sensor Sample Data: historical CDC removed; CPU snapshot pending
 
-The ADXL345 controller updates `out_acc_x`, `out_acc_y`, and `out_acc_z` in the SPI clock domain.
-
-The APB wrapper reads those multi-bit values directly in PCLK combinational read logic without an explicit multi-bit CDC snapshot/handshake.
-
-This can produce incoherent multi-bit sampling in principle, even if observed board behavior has been acceptable.
-
-A future cleanup shall define an atomic sample-transfer mechanism, such as a handshake, toggle protocol, shadow register update, or equivalent CDC-safe scheme.
+A6 updates `out_acc_x/y/z` together in 50 MHz PCLK, so the former `spi_clk`→PCLK multi-bit CDC is not active. The APB wrapper nevertheless exposes X/Y and Z in separate reads, allowing a later completed burst between them. P09B specifies LIVE/HOLD banks for a coherent software-visible generation; this remains unimplemented at Stage 1. The `CDC-002`/`GS-001` tracker scope is not closed merely by removing the historical clock crossing.
 
 ### 13.5 ADC Response Path: adc_sys_clk -> PCLK — Cleanup Required
 
@@ -484,7 +463,7 @@ The following are current baseline invariants:
 7. System reset release is qualified for approximately 20 ms after synchronization.
 8. G-sensor initialization adds an additional approximately 20.97 ms local reset delay.
 9. VGA VSync uses an explicit multi-flop crossing into HCLK.
-10. Complete CDC correctness is **not** yet established for VGA buffer selection, G-sensor sample data, or ADC response data.
+10. VGA buffer ownership and ADC response CDC remain unresolved; G-sensor's former internal SPI-to-PCLK crossing is removed, but its cross-read XYZ/VALID/SEQ coherency remains unresolved.
 11. The intended internal clocks are represented and constrained at the P05C checkpoint; final P14 stability/exception review and separate STA-002 external-I/O closure remain incomplete.
 12. No new feature may treat an existing CDC/timing gap as an architectural requirement to preserve.
 
@@ -524,3 +503,13 @@ P05B implements the approved policy in the current public candidate. `system_res
 The project-owned ADC command sequencer now receives an `adc_sys_clk`-local synchronized reset and holds `command_valid=0` until release. The generated Qsys reset implementation is unchanged. G-sensor remains wholly PCLK-owned with no active internal SPI PLL domain. The SDC remains unchanged.
 
 P05C fitted evidence confirms that the system reset controller, VGA/ADC local reset synchronizers, and VGA `locked` interface survive fit; all intended internal clocks are constrained; no G-sensor internal generated clock appears; and setup/hold/recovery/removal are positive with TNS 0. `RST-001`, `RST-002`, and `CDC-004` are therefore VERIFIED. `STA-001` remains IN_PROGRESS for final P14 multicorner/stability and exception review. ADC response CDC (`CDC-003`), VGA buffer-ownership CDC (`CDC-001`), and external I/O/electrical closure (`STA-002`) remain separate.
+
+## P09B G-sensor clock/reset contract — paired publication update
+
+> **Current Public integration:** Direct `PRESETn` is the implemented P09B contract. Historical A6 local-delay text remains historical; external reset/timing acceptance is not promoted.
+
+> **Publication synchronization:** The direct `PRESETn` implementation below is paired with the P09B source commit. Historical A6 local-delay text remains historical; external reset/timing acceptance is not promoted.
+
+The isolated P09B candidate retains the A6 single 50 MHz PCLK architecture and registered mode-3 external SCLK. It removes the wrapper's second `reset_delay` instance and obsolete `RESET_DELAY_BITS` parameter, directly connects `spi_ee_config.iRSTN=PRESETn`, and gives LIVE/HOLD banks, IRQ synchronizer/history, one pending slot and watchdog that same `PRESETn`. It does not modify `system_reset_controller`, bridge reset, `reset_delay.v`, clock domains or CDC exemptions. `KEY[0]` LOW still asserts the shared reset asynchronously; release remains two-flop synchronized plus 1,000,000 qualified 50 MHz edges (~20 ms). The former extra ~20.97152 ms (roughly 41 ms total) is historical A6 behavior. After common release, twelve ordered SPI writes must finish and CS return HIGH before acquisition/watchdog arm. This is not measured startup or proven sensor supply readiness, and is not a claim about current Public `main`.
+
+Common synchronous **release** does not prevent asynchronous **assertion** from intersecting APB SETUP/ACCESS, CAPTURE, E0/E1, HOLD ownership or an active 56-bit SPI burst. Assertion aborts unfinished bus/sensor work; no read that failed to complete before assertion is an accepted transfer or has a guaranteed value/completion. A completed read remains historical. Reset dominates and clears both bank payloads/valid/seq, scheduler and pending state; no stale publication survives. During asserted reset, no initialization/acquisition occurs. After release, APB may operate but VALID remains zero until a new complete burst. No stronger response promise is inferred from reset-overlapped bridge/CPU traffic. The precise ownership/priority table and planned directed checks are in [12_gsensor.md](12_gsensor.md). Physical sensor rail/startup, short INT pulses and pin timing remain external NOT_RUN risks; prior P05C fit does not close them or `GS-001`, `GS-005`, `CDC-002`, `STA-002`.

@@ -267,3 +267,13 @@ Target section은 RTL/DV/FPGA 검증 완료 전까지 migration contract로 취�
 A2는 canonical APB aperture, slot 및 전체 register offset/size를 side effect 전에 검증한다. Reserved slot, alias, 비정규 offset/size는 internal/default error responder를 선택하며 실제 peripheral side effect가 없어야 한다. `PSLVERR`는 완료되는 ACCESS에서만 의미가 있고 bridge가 project 2-cycle AHB ERROR(`HRESP=01`, HREADY 0→1)로 변환한다. Cleanup 전 zero/OKAY 구현 gap은 이 버스 fault 범위에서 해소됐다. A4에서 busy UART_DATA write는 한 바이트를 정확히 한 번 수락할 때까지 `PREADY=0`; TX busy만으로 다른 register를 stall하지 않고 UART 전용 hardware timeout도 추가하지 않는다. 안전하지 않은 divisor는 active 설정이 될 수 없다.
 
 **Phase 4A-3A 구현(과거 checkpoint):** bridge/top의 `PSEL[15:0]`, 전체 slot/offset·정렬 word 검증, side-effect gate, `PSLVERR`→AHB ERROR 및 SETUP/ACCESS 안정성을 검증했다. 당시 slot 8/9는 미구현 ERROR였으나 P04가 SW/LED를 활성화하고 전체 16-slot selection을 검증했다. 10–15는 예약 ERROR이고 A4 UART busy-write는 후속 작업이다.
+
+## P09B slot-3 계약 — source/documentation 동시 게시 갱신
+
+> **현행 Public 통합:** 이 구현은 P09B source/documentation 동시 commit과 함께 현행 상태가 된다. 이 절의 이전 후보 표현은 게시 전 provenance 기록일 뿐이다.
+
+> **게시 정합성:** 구현된 slot-3 계약은 대응 P09B source commit과 함께만 적용하며, read-back 전 최종 Public commit SHA를 주장하지 않는다.
+
+격리 P09B 후보는 canonical slot 3만 정렬 word offset `+0x00/+0x04/+0x08/+0x0C/+0x10`으로 확장한다. Bridge는 wrapper select **전에** 전체 주소·size·정렬·허용 offset을 검증하며 mirror와 나머지 offset은 side effect 없이 ERROR다. Wrapper는 read/write 방향과 SNAP_CTRL 명령어의 정확한 encoding을 검증하고 invalid 요청의 완료 ACCESS에서만 PSLVERR를 내며, 나머지는 zero-wait를 유지한다. Top의 G-sensor PSLVERR는 기존 bridge의 2-cycle AHB ERROR 경로로 전달된다. 유효 CAPTURE는 완료 ACCESS마다 한 번 수행되고, 자격 없는 정상 encoding CAPTURE는 OKAY/no-op이다. STATUS는 read-only·side-effect-free이며 sample publish와 같은 edge의 readback은 pre-edge 등록 상태다. 정확한 ABI·우선순위는 [12_gsensor.ko.md](12_gsensor.ko.md)를 따른다. 새 bus slot, PLIC 경로, generic SPI aperture는 배정하지 않는다. 이는 현재 Public `main` 구현 주장이 아닌 격리 후보 사실이다.
+
+격리 후보는 공통 reset 하나를 사용한다. G-sensor controller `iRSTN`, snapshot bank, scheduler는 추가 local delay 없이 bridge의 `PRESETn=HRESETn`을 직접 사용한다. 정상 ACCESS/pre-edge read 규칙은 reset deassert 중에만 적용된다. 비동기 assertion은 SETUP/ACCESS와 겹쳐 미완료 transfer를 중단할 수 있으며 accepted CAPTURE나 유효 read response를 만들면 안 된다. Assertion 전에 완료된 read는 과거 완료다. 이는 현재 Public `main`을 바꾸거나 reset 중단 traffic에 특정 response code를 약속하지 않는다.

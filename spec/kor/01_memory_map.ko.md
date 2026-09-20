@@ -162,3 +162,11 @@ LED_BASE  = 0x4009_0000  -> LEDR[9:0]
 Canonical 주소는 변경하지 않는다. A2에 따라 unmapped AHB, DMEM 상단 alias, VGA gap/alias 및 미지원 접근, APB aperture 밖 alias, reserved slot, 비정규 offset/size는 project 2-cycle ERROR를 반환한다. Cleanup 전 zero/OKAY mirror는 architecture가 아니다. A3 framebuffer는 자연 정렬된 32-bit write-only이며 read/subword는 fault, STATUS/CONTROL은 별도 의미를 유지한다. A1 generic GPIO는 slot 1의 16비트 JP1 GPIO_0–15이고 UART/LoRa pin은 분리한다. A5 COMPARE=N은 START 후 정확히 N PCLK counting edge, N=0은 START edge 완료다. A1/A5는 구현 완료 주장이 아닌 승인 목표다.
 
 **Phase 4A-3A 적용 범위:** 공개 RTL의 DMEM 32 KiB 및 canonical APB decode, A2 비정규 접근 2-cycle ERROR, A3 framebuffer 버스 접근 정책을 지향 테스트로 검증했다. A1 GPIO, A5 Timer, SW/LED slot 이관은 아직 목표 상태다.
+
+## P09B G-sensor 배정 — source/documentation 동시 게시 갱신
+
+> **현행 Public 통합:** 이 구현은 P09B source/documentation 동시 commit과 함께 현행 상태가 된다. 이 절의 이전 후보 표현은 게시 전 provenance 기록일 뿐이다.
+
+> **게시 정합성:** 이 계약은 P09B source와 documentation commit이 모두 게시될 때만 Public 계약이 된다. 그 전 pinned Public main은 역사 상태로 유지된다.
+
+Canonical G-sensor base는 `0x4003_0000`(APB slot 3) 그대로다. 격리 P09B 후보는 자연 정렬 32-bit register offset 다섯 개만 구현한다: `+0x00` HOLD_XY(read), `+0x04` HOLD_Z(read), `+0x08` STATUS(read), `+0x0C` HOLD_SEQ(read), `+0x10` SNAP_CTRL(write). 방향·validity·HOLD invalid zero readback·정확한 command는 [12_gsensor.ko.md](12_gsensor.ko.md)를 따른다. 그 밖의 offset·alias·미지원 size·반대 방향 접근은 wrapper side effect 전에 기존 2-cycle AHB ERROR 경로로 fault 처리한다. 이는 통합 승인 전 pinned base에 머무는 현재 Public `main` 구현 주장이 아니다. APB aperture와 인접 slot은 바꾸지 않는다.

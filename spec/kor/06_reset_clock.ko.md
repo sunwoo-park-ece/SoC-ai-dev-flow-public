@@ -6,13 +6,15 @@
 >
 > **상위 명세:** `soc_architecture.md`, `ahb_fabric.md`, `apb_subsystem.md`.
 
+> **현행 G-sensor reset 주석:** A6에서 내부 `spi_pll`은 제거됐지만 pinned wrapper에는 공통 system reset 뒤 2^20-PCLK `reset_delay`가 남아 있다. P09B는 별도 RTL 단계에서 이 local delay만 제거하는 목표이며 Stage 1 문서는 구현 주장이 아니다.
+
 ## 1. 목적
 
 이 문서는 현재 FPGA baseline의 clock/reset architecture를 정의한다. 주요 범위는 다음과 같다.
 
 - board reference clock과 active system clock
 - APB clock/reset derivation
-- VGA 및 G-sensor generated clock
+- VGA/ADC generated clock 및 G-sensor registered 외부 serial output
 - ADC/Qsys-managed clock domain
 - external reset conditioning 및 distribution
 - local reset sequencing
@@ -38,11 +40,10 @@ DE10-Lite 50 MHz board clock: clk
               |      |
               |      +--> APB peripherals
               |      |
-              |      +--> G-sensor reset delay
+              |      +--> G-sensor reset delay (현행에만 존재)
               |             |
-              |             +--> spi_pll
-              |                    +--> spi_clk     ~2 MHz
-              |                    +--> spi_clk_out ~2 MHz, phase-shifted
+              |             +--> PCLK-only controller
+              |                    +--> registered 외부 SCLK ~2 MHz
               |
               +--> VGA PLL
                      |
@@ -69,8 +70,7 @@ HRESETn / PRESETn
 | System | `HCLK` | 50 MHz | board `clk` 직접 사용 | CPU, AHB fabric, DMEM, AHB-side VGA control/write path | Canonical baseline clock |
 | APB | `PCLK` | 50 MHz | `HCLK` | APB peripherals | HCLK와 동일, AHB/APB 경계 자체는 CDC 아님 |
 | VGA pixel | `pclk_25` | 25 MHz | `vga_pll`, 50 MHz / 2 | VGA timing, VRAM read port | Generated clock domain |
-| G-sensor SPI | `spi_clk` | 2 MHz | `spi_pll` from PCLK | ADXL345/SPI control logic | Local peripheral clock domain |
-| G-sensor SPI phase clock | `spi_clk_out` | 2 MHz | second `spi_pll` output | SPI timing engine | Local phase-shifted clock |
+| G-sensor controller | `PCLK` | 50 MHz | AHB-APB bridge | ADXL345/SPI control 및 XYZ register | APB와 동일 domain; registered 외부 SCLK는 내부 clock domain 아님 |
 | ADC/Qsys | `adc_sys_clk` | vendor/Qsys-managed | `adc_qsys` from board `clk` | ADC command sequencer / ADC subsystem | Generated vendor-managed domain, exact rate는 software contract가 아님 |
 
 현재 AHB와 APB는 서로 다른 clock을 사용하지 않는다. `PCLK`와 `HCLK`는 동일한 50 MHz source이다.
@@ -148,18 +148,7 @@ PLL은 50 MHz reference를 divide-by-2 하여 25 MHz를 생성한다.
 
 ## 7. G-Sensor SPI Clock
 
-`APB_GSENSOR_MB`는 50 MHz `PCLK`를 입력으로 받고, local reset delay 이후 `spi_pll`을 활성화한다.
-
-`spi_pll`은 두 개의 nominal 2 MHz clock을 생성한다.
-
-```text
-spi_clk
-spi_clk_out
-```
-
-두 번째 clock은 다른 phase로 구성되어 SPI engine에서 `spi_clk`과 함께 사용된다.
-
-정확한 PLL phase 값은 imported G-sensor block의 implementation detail이며 일반 SoC clock contract로 승격하지 않는다. 향후 SPI engine을 재설계할 경우 launch/sample relationship을 별도 specification으로 명시해야 한다.
+`APB_GSENSOR_MB`와 `spi_ee_config`는 50 MHz `PCLK`만 사용한다. Controller는 12/13-PCLK half-period의 registered 외부 mode-3 SCLK를 구동한다. 과거 2-output `spi_pll`은 현행 G-sensor instance나 Quartus binding에 없다. §12의 local reset delay는 pinned A6에서 여전히 활성이나 **PLL lock 대기는 아니다**.
 
 ## 8. ADC / Qsys Clock Domain
 
@@ -260,7 +249,7 @@ Source comment는 reset low가 즉시 적용되는 것처럼 표현하지만, `P
 
 G-sensor subsystem은 system/APB reset release 이후 별도의 local delay를 추가한다.
 
-`reset_delay.v`는 21-bit counter를 사용하며 bit 20이 0인 동안 active-high `dly_rst`를 유지한다.
+Pinned `reset_delay.v`는 20-bit counter를 사용한다. Active-high `dly_rst`는 counter가 all-ones인 동안에도 유지되고 다음 PCLK edge에서 deassert된다.
 
 50 MHz 기준:
 
@@ -276,12 +265,10 @@ system PRESETn release
        v
 ~20.97 ms local delay
        |
-       +--> spi_pll areset deassert
-       |
        +--> spi_ee_config iRSTN release
 ```
 
-이 delay는 imported ADXL345 subsystem의 local requirement이며 일반 APB reset requirement가 아니다.
+현행 local delay는 일반 APB reset 요구나 G-sensor PLL lock 요구가 아니다. P09B 목표에서는 active wrapper에서 제거하지만 `reset_delay.v` 자체는 별도 승인 없이는 그대로 둔다.
 
 ## 13. CDC Inventory
 
@@ -339,15 +326,9 @@ CPU write domain과 VGA read domain 사이의 framebuffer data crossing은 vendo
 
 Cleanup 시 frame boundary에서 commit되는 handshake/toggle 구조 등으로 수정해야 한다.
 
-### 13.4 G-Sensor Sample Data: spi_clk -> PCLK — Cleanup Required
+### 13.4 G-Sensor Sample Data: 과거 CDC 제거, CPU snapshot 미완료
 
-ADXL345 controller의 `out_acc_x/y/z`는 SPI clock domain에서 갱신된다.
-
-APB wrapper는 이 multi-bit 값을 별도의 snapshot/handshake 없이 PCLK combinational read logic에서 직접 읽는다.
-
-이론적으로 multi-bit incoherent sample이 발생할 수 있다.
-
-향후 shadow register, handshake, toggle protocol 등 atomic sample-transfer mechanism으로 변경해야 한다.
+A6는 `out_acc_x/y/z`를 50 MHz PCLK에서 함께 갱신하므로 과거 `spi_clk`→PCLK multi-bit CDC는 현행 경로가 아니다. 그러나 APB wrapper는 X/Y와 Z를 별도 read로 노출하므로 그 사이 다음 완료 burst가 올 수 있다. P09B는 software-visible 한 세대를 위해 LIVE/HOLD bank를 명세하지만 Stage 1에서는 미구현이다. 과거 clock crossing 제거만으로 tracker `CDC-002`/`GS-001`은 닫히지 않는다.
 
 ### 13.5 ADC Response: adc_sys_clk -> PCLK — Cleanup Required
 
@@ -482,7 +463,7 @@ create_clock -name {clk} -period {20.0} [get_ports {clk}]
 7. System reset release는 synchronization 이후 약 20 ms qualification을 거친다.
 8. G-sensor는 추가로 약 20.97 ms local reset delay를 사용한다.
 9. VGA VSync에는 explicit multi-flop HCLK synchronizer가 있다.
-10. VGA buffer selection, G-sensor sample data, ADC response의 CDC correctness는 아직 완전히 입증되지 않았다.
+10. VGA buffer ownership과 ADC response CDC는 미해결이다. G-sensor의 과거 내부 SPI-to-PCLK crossing은 제거됐지만 cross-read XYZ/VALID/SEQ coherency는 미해결이다.
 11. P05C checkpoint에서 의도한 내부 clock은 모두 표현·제약되었지만 최종 P14 stability/exception 검토와 별도 STA-002 외부 I/O closure는 미완료다.
 12. 향후 feature는 현재 CDC/timing gap을 보존해야 하는 architectural requirement로 취급해서는 안 된다.
 
@@ -518,3 +499,13 @@ P05B는 승인된 policy를 현재 public candidate에 구현했다. `system_res
 Project-owned ADC command sequencer는 이제 `adc_sys_clk` local synchronized reset을 사용하고 release 전 `command_valid=0`을 유지한다. Generated Qsys reset 구현은 변경하지 않았다. G-sensor는 active internal SPI PLL domain 없이 PCLK-only 구조를 유지한다. SDC도 변경하지 않았다.
 
 P05C fitted evidence는 system reset controller, VGA/ADC local reset synchronizer와 VGA `locked` interface가 fit에 유지되고, 의도한 내부 clock이 모두 constrained이며, G-sensor 내부 generated clock이 없고, setup/hold/recovery/removal이 양수이고 TNS가 0임을 확인했다. 따라서 `RST-001`, `RST-002`, `CDC-004`는 VERIFIED다. `STA-001`은 최종 P14 multicorner/stability/exception 검토를 위해 IN_PROGRESS를 유지한다. ADC response CDC(`CDC-003`), VGA buffer-ownership CDC(`CDC-001`), 외부 I/O/electrical closure(`STA-002`)는 별도다.
+
+## P09B G-sensor clock/reset 계약 — source/documentation 동시 게시 갱신
+
+> **현행 Public 통합:** direct `PRESETn`은 구현된 P09B 계약이다. Historical A6 local-delay 설명은 역사 기록이며 외부 reset/timing acceptance를 승격하지 않는다.
+
+> **게시 정합성:** 아래 direct `PRESETn` 구현은 P09B source commit과 동시 게시된다. Historical A6 local-delay 설명은 역사 기록이며 외부 reset/timing acceptance를 승격하지 않는다.
+
+격리 P09B 후보는 A6의 단일 50 MHz PCLK와 registered mode-3 외부 SCLK를 유지한다. Wrapper의 두 번째 `reset_delay` instance와 obsolete `RESET_DELAY_BITS` parameter를 제거하고 `spi_ee_config.iRSTN=PRESETn`으로 직접 연결하며, LIVE/HOLD bank·IRQ synchronizer/history·단일 pending slot·watchdog도 같은 `PRESETn`을 사용한다. `system_reset_controller`, bridge reset, `reset_delay.v`, clock domain, CDC 면제는 수정하지 않는다. `KEY[0]` LOW는 여전히 공통 reset을 비동기 assert하고 release는 2-flop 동기화와 1,000,000개 qualified 50 MHz edge(~20 ms)를 따른다. 이전 추가 ~20.97152 ms(총 약 41 ms)는 historical A6 동작이다. 공통 release 후 12개 SPI write가 순서대로 끝나고 CS가 HIGH가 된 후에 acquisition/watchdog을 arm한다. 이는 측정된 기동 시간이나 sensor supply 준비의 증명이 아니며 현재 Public `main` 구현 주장이 아니다.
+
+공통 reset의 동기 **release**는 비동기 **assertion**이 APB SETUP/ACCESS, CAPTURE, E0/E1, HOLD 점유 또는 56-bit SPI burst와 겹치는 것을 막지 못한다. Assertion은 미완료 bus/sensor 작업을 중단하며, assertion 전에 완료되지 않은 read는 accepted transfer가 아니고 유효 값·완료 보장도 없다. 완료된 read는 과거 완료다. Reset은 두 bank payload/valid/seq, scheduler/pending보다 우선하고 old publication을 남기지 않는다. Assert 중 초기화/acquisition은 동작하지 않는다. Release 후 APB 접근은 가능하지만 새 완전 burst 전 VALID=0이다. 중단된 bridge/CPU traffic의 응답에 대한 더 강한 보장은 주장하지 않는다. 소유권·우선순위 표와 예정 검사는 [12_gsensor.ko.md](12_gsensor.ko.md)를 따른다. 물리 sensor rail/startup, 짧은 INT pulse, pin timing은 외부 NOT_RUN 위험이며 기존 P05C fit은 이를 또는 `GS-001`, `GS-005`, `CDC-002`, `STA-002`를 종료하지 않는다.

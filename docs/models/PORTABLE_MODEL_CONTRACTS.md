@@ -1,5 +1,7 @@
 # Portable Model and Replacement Contracts
 
+**Current Public integration state:** P09B source and its contract documentation are published together. Earlier candidate-oriented wording is retained only as historical provenance.
+
 Status: Phase 3 implementation contract. These models are project-owned and derived from the public SoC specifications and module interfaces. They are not copies of excluded vendor or reference HDL.
 
 ## Build profiles
@@ -73,10 +75,14 @@ Project-owned replacements retain the compatibility names `reset_delay` and `spi
 - `reset_delay` asserts `oRST=1` when `iRSTN=0`, counts `2^DELAY_BITS` input-clock cycles after release, then deasserts without clearing external storage.
 - The GSensor transport is dedicated ADXL345 four-wire SPI, not a generic APB SPI controller.
 - SCLK idles high and transactions use mode 3 semantics: MOSI changes on the falling edge and MISO is sampled on the rising edge. Data is MSB first and CS is active low.
-- Initialization performs the eleven writes defined by `spec/12_gsensor.md`, ending with `POWER_CTL=0x08`.
+- The P09B paired publication update initialization performs twelve ordered writes defined by `spec/12_gsensor.md`, ending with `POWER_CTL=0x08`; the historical eleven-write sequence is not its contract.
 - Acquisition sends command `0xF2` (`read | multi-byte | DATAX0`) and receives DATAX0..DATAZ1. Outputs are little-endian 16-bit axis samples.
 - A read begins from the configured interrupt input or a periodic fallback. The reset state drives CS high, SCLK high, MOSI low, and axis outputs zero.
 - The controller updates/samples state on `iSPI_CLK` and gates the phase-related `iSPI_CLK_OUT` onto SCLK. The required phase relationship places the state/sample edge after the external rising edge and before the following falling launch edge.
+
+The two `iSPI_CLK` sentences above describe the **archived pre-A6 PLL model**, not the active G-sensor controller. The P09B paired publication update is PCLK-only with registered mode-3 SCLK and implements the 12-write 50 Hz/INT1 sequence and LIVE/HOLD snapshot in `spec/12_gsensor.md`. Focused and CPU/host checks exist for that update; historical model evidence is not reused as its acceptance. It becomes the Public state only with the paired publication commits.
+
+The archived clock model also is **not** evidence for reset-overlapped APB/SPI behavior. Pinned A6 instantiated a G-sensor-local `reset_delay`; the isolated candidate directly uses common `PRESETn` for controller/banks/scheduler. This does not claim current Public `main` integration or physical reset acceptance.
 
 ## Diagnostics and non-goals
 

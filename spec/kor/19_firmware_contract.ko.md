@@ -767,3 +767,17 @@ firmware fail-stop handling에 의존한다. 모든 rebuild는 startup opcode
 있으며 `RESET_WINDOW_UNPROTECTED_BEFORE_MTVEC_COMMIT`이라는 미검증
 risk이다. Rejected VGA store를 retry/skip/`mepc` 증가/blind `mret` 또는
 recoverable driver 결과로 처리하지 않는다.
+
+## P09B G-sensor firmware 계약 — source/documentation 동시 게시 갱신
+
+> **현행 Public 통합:** 이 API는 P09B source/documentation 동시 commit과 함께 현행 상태가 된다. tracker 종료나 물리 acceptance를 주장하지 않는다.
+
+> **게시 정합성:** 이 API는 대응 P09B source commit과 함께 게시될 때만 현행 Public 문서가 된다. 최종 commit SHA, tracker 종료 또는 물리 acceptance를 주장하지 않는다.
+
+이 절은 현재 Public `main` 구현 주장이 아닌 격리 P09B 후보 driver/RTL 계약이다. 공개 API는 정확히 `gsensor_status_t gsensor_read_sample(gsensor_sample_t *out)`이다. `gsensor_sample_t`는 `int16_t x, y, z` 및 `uint32_t seq` field를 갖고, `gsensor_status_t`의 결과는 정확히 `GSENSOR_OK`, `GSENSOR_NO_NEW`, `GSENSOR_BUSY`, `GSENSOR_ERROR` 네 가지다. Enum 숫자값과 padding은 MMIO ABI가 아니다. null `out`은 MMIO 없이 `GSENSOR_ERROR`를 반환한다. API는 단일 소유자·비재진입이며 다른 문맥의 HOLD를 RELEASE하지 않는다. 여기서 PLIC/센서 interrupt firmware 처리는 도입하지 않는다.
+
+Polling은 순서가 보장된 volatile 32-bit MMIO를 사용한다: STATUS 1회 read → `HOLD_VALID=1`이면 CAPTURE/RELEASE 없이 `BUSY` → 아니면 `LIVE_VALID=0`이면 `NO_NEW` → `SNAP_CTRL=1` CAPTURE write → STATUS read로 `HOLD_VALID=1` 확인 → HOLD_SEQ → HOLD_XY_DATA → HOLD_Z_DATA → `SNAP_CTRL=2` RELEASE write → sample과 `OK` 반환이다. 두 조건이 모두 참이면 BUSY가 NO_NEW보다 우선한다. 새 LIVE가 없어 자격을 잃은 정상 CAPTURE는 APB OKAY no-op이며 CAPTURE 후 HOLD_VALID=0이면 RELEASE 없이 `NO_NEW`로 처리한다. 이전 HOLD를 새 sample로 반환하지 않는다. 예상 밖 protocol state나 알려진 로컬 driver 오류는 `ERROR`다. 잘못된/unmapped MMIO에서 발생하는 AHB ERROR는 trap policy상 CPU fault이지 통상적인 복구 가능 `GSENSOR_ERROR` 반환이 아니다. 호출자 측 경쟁 guard도 MMIO 전에 `BUSY`를 반환할 수 있다. 해당 호출이 성공적으로 획득한 HOLD만 해제한다. SEQ는 세대 식별·진단용으로 반환하고 last-seq 필터를 필수로 쓰지 않는다. STATUS read와 sample completion이 같은 edge면 pre-edge STATUS를 반환하고 다음 read에서 새 LIVE 세대가 보인다.
+
+레지스터 폭, 동시 이벤트 우선순위, reset, 잘못된 접근 fault는 [G-sensor ABI](../12_gsensor.md)를 따른다. Stage 1 `NOT_RUN` 표시는 역사 기록이며, 격리 후보 host/RV32I test는 존재하지만 외부·reset-negative 범위를 승격하지 않는다.
+
+P09B 공통 reset은 release가 clock-qualified여도 assertion은 비동기다. Firmware는 완료 전에 reset으로 중단된 MMIO read를 `OK`, `NO_NEW` 또는 유효한 과거 sample로 취급하거나 반드시 반환된다고 가정하지 않는다. CPU 자체가 그 transfer 중 reset될 수 있다. 이미 완료된 read는 이전 완료로 남는다. HOLD 소유 중 reset이면 HW가 HOLD/LIVE를 clear하고 sensor를 재초기화한다. 재부팅 뒤 stale sample/이전 소유권을 사용하거나 무소유 RELEASE를 실행하지 않는다. Controller는 historical 추가 local delay 없이 공통 `PRESETn` release에 12-write 초기화를 시작한다. APB는 첫 완료 sample 이전에도 접근할 수 있으나 VALID=0이다. 이는 격리 후보 동작이며 현행 Public `main` 동작이나 CPU reset을 건너는 software recovery 보장이 아니다.
