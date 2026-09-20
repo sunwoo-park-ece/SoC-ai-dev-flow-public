@@ -8,7 +8,7 @@
 
 > **Current A6 clocking:** The active G-sensor RTL has no `spi_pll` instance or internal SPI clock domain. Controller, sample registers, and APB wrapper use 50 MHz PCLK; external mode-3 SCLK is a registered output. Historical PLL/CDC descriptions below are identified as such; they are not current defects. Separate APB reads still lack an atomic XYZ snapshot and software-visible VALID/SEQ.
 
-> **P09B isolated-candidate status (2026-09-20, review pending):** The final P09B candidate, reconstructed from Public `fe2daa7...` plus the approved private patch chain, implements the final-section LIVE/HOLD/VALID/SEQ ABI, 12 initialization writes, INT1/30 ms scheduler and direct shared reset. This is not a claim about the current Public `main`: it is uncommitted isolated-candidate provenance pending User/Chat review and public-source integration. Focused/CPU/host evidence, a fresh private fit/STA and one board display observation exist; external timing/electrical, physical INT1/orientation, calibration and the explicitly retained NOT_RUN cases remain open.
+> **P09B Public integration status:** The Public P09B implementation provides the final-section LIVE/HOLD/VALID/SEQ ABI, 12 initialization writes, INT1/30 ms scheduler and direct shared reset. Focused/CPU/host evidence, a fresh private fit/STA and one board display observation exist; external timing/electrical, physical INT1/orientation, calibration and the explicitly retained NOT_RUN cases remain open.
 
 ## 1. Purpose
 
@@ -449,7 +449,7 @@ Focused/open tests pass, and the user-run `gsensor_pclk_01` Quartus fit has two 
 
 > **Publication synchronization:** The implementation below becomes the Public contract only with the paired source and documentation commits. Scoped evidence does not promote physical acceptance or retained NOT_RUN checks.
 
-The isolated, unintegrated P09B candidate implements the final P09B contract in
+The P09B Public implementation implements the final P09B contract in
 this document: direct shared `PRESETn`, twelve ordered initialization writes,
 INT1-triggered/30 ms fallback acquisition, and the LIVE/HOLD/VALID/SEQ APB ABI.
 Focused, host and CPU checker evidence, a fit/STA review and one board-display
@@ -563,7 +563,7 @@ The old `POLL_BITS=14` checks bit14 of an idle counter incremented once per 25 P
 
 ### Firmware and acceptance boundary
 
-The single-owner firmware lifecycle and error semantics are specified in `19_firmware_contract.md` and its Korean companion. The following acceptance list is the historical Stage 1 planned-check list. Its `NOT_RUN` labels apply to that gate, not to the later isolated candidate evidence; independently retained negative and physical scope is identified in the closure packet.
+The single-owner firmware lifecycle and error semantics are specified in `19_firmware_contract.md` and its Korean companion. The following acceptance list is the historical Stage 1 planned-check list. Its `NOT_RUN` labels apply to that gate, not to the later Public implementation evidence; independently retained negative and physical scope is identified in the closure packet.
 
 | Acceptance IDs | Independent oracle / required observation | Stage 1 execution |
 |---|---|---|

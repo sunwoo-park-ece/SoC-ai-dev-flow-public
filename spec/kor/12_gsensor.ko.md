@@ -8,7 +8,7 @@
 
 > **현행 A6 clocking:** 현재 G-sensor RTL에는 `spi_pll` instance나 내부 SPI clock domain이 없다. Controller·sample register·APB wrapper는 50 MHz PCLK를 사용하고 외부 mode-3 SCLK는 registered output이다. 아래의 과거 PLL/CDC 설명은 현행 결함이 아니다. 별도 APB read 사이의 atomic XYZ snapshot과 software-visible VALID/SEQ는 아직 없다.
 
-> **P09B 격리 후보 상태(2026-09-20, 검토 대기):** Public `fe2daa7...`와 승인된 private patch chain에서 재구성한 최종 P09B 후보는 마지막 절의 LIVE/HOLD/VALID/SEQ ABI, 12회 초기화, INT1/30 ms scheduler 및 direct shared reset을 구현한다. 이는 현재 Public `main` 구현 주장이나 승인 상태가 아니라 User/Chat 검토와 public-source integration을 기다리는 uncommitted isolated-candidate provenance이다. focused/CPU/host evidence, fresh private fit/STA 및 한 건의 board display 관측은 있으나 외부 timing/electrical, 물리 INT1/orientation, calibration 및 명시적으로 남긴 NOT_RUN 항목은 열려 있다.
+> **P09B Public 통합 상태:** Public P09B 구현은 마지막 절의 LIVE/HOLD/VALID/SEQ ABI, 12회 초기화, INT1/30 ms scheduler 및 direct shared reset을 제공한다. Focused/CPU/host evidence, fresh private fit/STA 및 한 건의 board display 관측은 있으나 외부 timing/electrical, 물리 INT1/orientation, calibration 및 명시적으로 남긴 NOT_RUN 항목은 열려 있다.
 
 ## 1. 목적
 
@@ -381,7 +381,7 @@ A6 증거 시점에는 fixed-function ADXL345 FSM과 X/Y/Z 결과 register가 �
 
 > **게시 정합성:** 아래 구현은 source/documentation 동시 commit이 게시될 때만 Public 계약이 된다. 제한된 증거는 물리 acceptance나 남은 NOT_RUN을 승격하지 않는다.
 
-격리되어 아직 통합되지 않은 P09B 후보는 이 문서의 최종 P09B 계약, 즉
+P09B Public 구현은 이 문서의 최종 P09B 계약, 즉
 direct shared `PRESETn`, 순서 있는 12회 초기화, INT1-trigger/30 ms fallback
 acquisition 및 LIVE/HOLD/VALID/SEQ APB ABI를 구현한다. 이 후보에 대해서는
 focused/host/CPU checker 증거, fit/STA 검토 및 한 건의 board-display 관측이
@@ -493,7 +493,7 @@ SPI engine이 idle이면 선택된 요청 최대 1개를 시작하고 pending을
 
 ### Firmware와 수락 경계
 
-단일 소유 firmware 수명주기/오류는 `19_firmware_contract.md` 및 국문 대응본을 따른다. 아래 acceptance 목록은 Historical Stage 1의 planned-check 목록이다. 그 `NOT_RUN` 표시는 당시 gate에 관한 것이며 이후 격리 후보 증거를 뜻하지 않는다. 독립적으로 남겨진 음성·물리 범위는 closure packet에 명시한다.
+단일 소유 firmware 수명주기/오류는 `19_firmware_contract.md` 및 국문 대응본을 따른다. 아래 acceptance 목록은 Historical Stage 1의 planned-check 목록이다. 그 `NOT_RUN` 표시는 당시 gate에 관한 것이며 이후 Public 구현 증거를 뜻하지 않는다. 독립적으로 남겨진 음성·물리 범위는 closure packet에 명시한다.
 
 | 수락 ID | 독립 oracle / 관측 조건 | Stage 1 실행 |
 |---|---|---|

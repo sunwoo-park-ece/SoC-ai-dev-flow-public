@@ -169,4 +169,4 @@ Canonical 주소는 변경하지 않는다. A2에 따라 unmapped AHB, DMEM 상�
 
 > **게시 정합성:** 이 계약은 P09B source와 documentation commit이 모두 게시될 때만 Public 계약이 된다. 그 전 pinned Public main은 역사 상태로 유지된다.
 
-Canonical G-sensor base는 `0x4003_0000`(APB slot 3) 그대로다. 격리 P09B 후보는 자연 정렬 32-bit register offset 다섯 개만 구현한다: `+0x00` HOLD_XY(read), `+0x04` HOLD_Z(read), `+0x08` STATUS(read), `+0x0C` HOLD_SEQ(read), `+0x10` SNAP_CTRL(write). 방향·validity·HOLD invalid zero readback·정확한 command는 [12_gsensor.ko.md](12_gsensor.ko.md)를 따른다. 그 밖의 offset·alias·미지원 size·반대 방향 접근은 wrapper side effect 전에 기존 2-cycle AHB ERROR 경로로 fault 처리한다. 이는 통합 승인 전 pinned base에 머무는 현재 Public `main` 구현 주장이 아니다. APB aperture와 인접 slot은 바꾸지 않는다.
+Canonical G-sensor base는 `0x4003_0000`(APB slot 3) 그대로다. P09B Public 구현은 자연 정렬 32-bit register offset 다섯 개만 제공한다: `+0x00` HOLD_XY(read), `+0x04` HOLD_Z(read), `+0x08` STATUS(read), `+0x0C` HOLD_SEQ(read), `+0x10` SNAP_CTRL(write). 방향·validity·HOLD invalid zero readback·정확한 command는 [12_gsensor.ko.md](12_gsensor.ko.md)를 따른다. 그 밖의 offset·alias·미지원 size·반대 방향 접근은 wrapper side effect 전에 기존 2-cycle AHB ERROR 경로로 fault 처리한다. APB aperture와 인접 slot은 바꾸지 않는다.
