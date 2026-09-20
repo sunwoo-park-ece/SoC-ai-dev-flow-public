@@ -15,7 +15,53 @@ module tb_soc_bus_fault_decode;
     reg [1:0] drive_trans = 0;
     reg [2:0] drive_size = 3'b010;
     integer checks = 0;
+    integer sensor_frames = 0, sensor_reads = 0, sensor_bit;
+    reg [47:0] sensor_bytes;
+    reg [15:0] init_word [0:11];
+    reg [55:0] sensor_tx, expected_tx;
     always #5 clk = ~clk;
+
+    // External-pin ADXL345 peer: the expected bytes are fixed independent
+    // stimulus, not sampled from controller outputs or snapshot bank state.
+    initial begin : sensor_peer
+        init_word[0]=16'h2420; init_word[1]=16'h2503;
+        init_word[2]=16'h2601; init_word[3]=16'h277f;
+        init_word[4]=16'h2809; init_word[5]=16'h2946;
+        init_word[6]=16'h2c09; init_word[7]=16'h2f00;
+        init_word[8]=16'h2e80; init_word[9]=16'h3100;
+        init_word[10]=16'h2007; init_word[11]=16'h2d08;
+        forever begin
+            @(negedge G_SENSOR_CS_N);
+            sensor_tx = 0;
+            if (sensor_frames < 12) begin
+                expected_tx = {40'h0, init_word[sensor_frames]};
+                for (sensor_bit=0; sensor_bit<16; sensor_bit=sensor_bit+1) begin
+                    @(negedge G_SENSOR_SCLK); #1;
+                    if (G_SENSOR_SDI !== expected_tx[15-sensor_bit])
+                        $fatal(1,"SoC sensor init MOSI frame=%0d bit=%0d",sensor_frames,sensor_bit);
+                    G_SENSOR_SDO=0;
+                    @(posedge G_SENSOR_SCLK); #1;
+                    sensor_tx={sensor_tx[54:0],G_SENSOR_SDI};
+                end
+            end else begin
+                expected_tx={8'hf2,48'h0};
+                sensor_bytes=(sensor_reads==0) ? 48'h3412_7856_bc9a : 48'hbc9a_f0de_3412;
+                sensor_reads=sensor_reads+1;
+                for (sensor_bit=0; sensor_bit<56; sensor_bit=sensor_bit+1) begin
+                    @(negedge G_SENSOR_SCLK); #1;
+                    if (G_SENSOR_SDI !== expected_tx[55-sensor_bit])
+                        $fatal(1,"SoC sensor read MOSI bit=%0d",sensor_bit);
+                    if (sensor_bit>=8) G_SENSOR_SDO=sensor_bytes[55-sensor_bit];
+                    else G_SENSOR_SDO=0;
+                    @(posedge G_SENSOR_SCLK); #1;
+                    sensor_tx={sensor_tx[54:0],G_SENSOR_SDI};
+                end
+            end
+            if (sensor_tx !== expected_tx) $fatal(1,"SoC sensor SPI frame mismatch");
+            @(posedge G_SENSOR_CS_N);
+            sensor_frames=sensor_frames+1;
+        end
+    end
 
     AMBA_SoC_TOP dut (
         .clk(clk), .KEY(KEY), .SW(SW), .LEDR(LEDR),
@@ -31,6 +77,84 @@ module tb_soc_bus_fault_decode;
             @(negedge clk);
             drive_addr=addr; drive_write=wr; drive_trans=trans; drive_size=size;
             #1;
+        end
+    endtask
+    task check_gsensor_local_error(input [31:0] addr, input wr, input [31:0] data);
+        begin
+            drive_data = data;
+            set_bus(addr,wr,2'b10,3'b010);
+            if (!dut.HSEL_APB) $fatal(1,"G-sensor request missed APB %h",addr);
+            @(posedge clk); #1;
+            if (dut.PSEL !== 16'h0008 || dut.PENABLE !== 0 || dut.HREADY !== 0)
+                $fatal(1,"G-sensor local-error SETUP %h",addr);
+            set_bus(0,0,0,3'b010);
+            @(posedge clk); #1;
+            if (dut.PSEL !== 16'h0008 || dut.PENABLE !== 1 ||
+                dut.GSENSOR_SLVERR !== 1 || dut.HRESP !== 2'b01 || dut.HREADY !== 0)
+                $fatal(1,"G-sensor local-error first AHB ERROR %h",addr);
+            @(posedge clk); #1;
+            if (dut.HRESP !== 2'b01 || dut.HREADY !== 1 || dut.PSEL !== 0)
+                $fatal(1,"G-sensor local-error final AHB ERROR %h",addr);
+            @(posedge clk); #1;
+            if (dut.HRESP !== 0 || dut.HREADY !== 1)
+                $fatal(1,"G-sensor malformed request caused side effect %h",addr);
+            check_populated_banks();
+            checks=checks+1;
+        end
+    endtask
+    task check_populated_banks;
+        begin
+            if (dut.u_gsensor.live_x !== 16'h9abc ||
+                dut.u_gsensor.live_y !== 16'hdef0 ||
+                dut.u_gsensor.live_z !== 16'h1234 ||
+                dut.u_gsensor.live_seq !== 32'd2 ||
+                dut.u_gsensor.live_valid !== 1'b1 ||
+                dut.u_gsensor.hold_x !== 16'h1234 ||
+                dut.u_gsensor.hold_y !== 16'h5678 ||
+                dut.u_gsensor.hold_z !== 16'h9abc ||
+                dut.u_gsensor.hold_seq !== 32'd1 ||
+                dut.u_gsensor.hold_valid !== 1'b1)
+                $fatal(1,"populated G-sensor LIVE/HOLD state changed unexpectedly");
+            checks=checks+1;
+        end
+    endtask
+    task gsensor_capture_first;
+        begin
+            drive_data=32'h1;
+            set_bus(32'h40030010,1,2'b10,3'b010);
+            @(posedge clk); #1;
+            if (dut.PSEL !== 16'h0008 || dut.PENABLE !== 0)
+                $fatal(1,"G-sensor CAPTURE SETUP missing");
+            set_bus(0,0,0,3'b010);
+            @(posedge clk); #1;
+            if (dut.PSEL !== 16'h0008 || dut.PENABLE !== 1 ||
+                dut.HRESP !== 0 || dut.HREADY !== 1)
+                $fatal(1,"G-sensor CAPTURE ACCESS response");
+            @(posedge clk); #1;
+            if (dut.u_gsensor.hold_x !== 16'h1234 ||
+                dut.u_gsensor.hold_y !== 16'h5678 ||
+                dut.u_gsensor.hold_z !== 16'h9abc ||
+                dut.u_gsensor.hold_seq !== 32'd1 ||
+                dut.u_gsensor.hold_valid !== 1 ||
+                dut.u_gsensor.live_valid !== 0)
+                $fatal(1,"legal CAPTURE did not copy first scripted generation");
+            checks=checks+1;
+        end
+    endtask
+    task gsensor_write_ok(input [31:0] command);
+        begin
+            drive_data=command;
+            set_bus(32'h40030010,1,2'b10,3'b010);
+            @(posedge clk); #1;
+            if (dut.PSEL !== 16'h0008 || dut.PENABLE !== 0)
+                $fatal(1,"G-sensor legal command SETUP missing");
+            set_bus(0,0,0,3'b010);
+            @(posedge clk); #1;
+            if (dut.PSEL !== 16'h0008 || dut.PENABLE !== 1 ||
+                dut.HRESP !== 0 || dut.HREADY !== 1)
+                $fatal(1,"G-sensor legal command ACCESS failed");
+            @(posedge clk); #1;
+            checks=checks+1;
         end
     endtask
     task check_idle;
@@ -109,6 +233,7 @@ module tb_soc_bus_fault_decode;
             if (dut.u_gpio.data_out !== gpio_out_before ||
                 dut.u_gpio.direction !== gpio_dir_before)
                 $fatal(1, "invalid APB store changed actual GPIO state at %h", addr);
+            if (addr[31:16] == 16'h4003) check_populated_banks();
         end
     endtask
 
@@ -167,6 +292,42 @@ module tb_soc_bus_fault_decode;
         check_apb_error(32'h40010020,3'b010,1); // Beyond the eight canonical GPIO registers.
         check_apb_error(32'h40010000,3'b000,1); // Unsupported APB subword write.
         check_apb_error(32'h400a0000,3'b010,1); // Reserved slot write.
+        wait (sensor_frames == 12);
+        @(negedge clk); G_SENSOR_INT[1]=1;
+        wait (sensor_frames == 13);
+        gsensor_capture_first();
+        @(negedge clk); G_SENSOR_INT[1]=0;
+        repeat (4) @(posedge clk);
+        @(negedge clk); G_SENSOR_INT[1]=1;
+        wait (sensor_frames == 14);
+        check_populated_banks(); // HOLD occupied and newer LIVE pending.
+        check_apb_error(32'h40030014,3'b010,1); // G-sensor unlisted offset.
+        check_apb_error(32'h40030100,3'b010,0); // Full-offset mirror blocked.
+        check_apb_error(32'h40030010,3'b001,1); // Unsupported G-sensor halfword.
+        check_apb_error(32'h40030002,3'b010,0); // Misaligned alias.
+        check_gsensor_local_error(32'h40030000,1,32'h1); // RO write.
+        check_gsensor_local_error(32'h40030010,0,32'h0); // WO read.
+        check_gsensor_local_error(32'h40030010,1,32'h0);
+        check_gsensor_local_error(32'h40030010,1,32'h3);
+        check_gsensor_local_error(32'h40030010,1,32'h8000_0001);
+        gsensor_write_ok(32'h1); // Occupied CAPTURE is legal no-op.
+        check_populated_banks();
+        gsensor_write_ok(32'h2); // RELEASE clears HOLD, not LIVE.
+        if (dut.u_gsensor.hold_x !== 0 || dut.u_gsensor.hold_y !== 0 ||
+            dut.u_gsensor.hold_z !== 0 || dut.u_gsensor.hold_seq !== 0 ||
+            dut.u_gsensor.hold_valid !== 0 || dut.u_gsensor.live_valid !== 1 ||
+            dut.u_gsensor.live_seq !== 2)
+            $fatal(1,"legal RELEASE failed or consumed LIVE");
+        gsensor_write_ok(32'h2); // Empty RELEASE stays OKAY/no-op.
+        if (dut.u_gsensor.hold_valid !== 0 || dut.u_gsensor.live_valid !== 1)
+            $fatal(1,"empty RELEASE changed bank validity");
+        gsensor_write_ok(32'h1); // Recapture second generation.
+        if (dut.u_gsensor.hold_x !== 16'h9abc ||
+            dut.u_gsensor.hold_y !== 16'hdef0 ||
+            dut.u_gsensor.hold_z !== 16'h1234 ||
+            dut.u_gsensor.hold_seq !== 2 ||
+            dut.u_gsensor.hold_valid !== 1 || dut.u_gsensor.live_valid !== 0)
+            $fatal(1,"legal recapture did not copy second generation");
         $display("SUMMARY: PASS SoC bus decode/error checks=%0d",checks);
         $finish;
     end

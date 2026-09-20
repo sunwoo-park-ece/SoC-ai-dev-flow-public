@@ -36,8 +36,9 @@ module tb_ahb_apb_bridge_fault;
                 $fatal(1, "SETUP PSEL/PWDATA got=%h/%h expected=%h/%h", PSEL, PWDATA, select, HWDATA);
             @(posedge HCLK); #1;
             if (PSEL !== select || PENABLE !== 1 || PADDR !== HADDR ||
-                PWDATA !== HWDATA || HRESP !== 0 || HREADY !== PREADY)
-                $fatal(1, "ACCESS mismatch select=%h", select);
+                (PWRITE && PWDATA !== HWDATA) || HRESP !== 0 || HREADY !== PREADY)
+                $fatal(1, "ACCESS mismatch select=%h got PSEL=%h PENABLE=%b PADDR=%h PWDATA=%h HRESP=%b HREADY=%b expected PWDATA=%h",
+                       select, PSEL, PENABLE, PADDR, PWDATA, HRESP, HREADY, HWDATA);
             @(posedge HCLK); #1;
             if (PSEL !== 0 || HRESP !== 0 || HREADY !== 1)
                 $fatal(1, "valid transfer did not retire");
@@ -69,6 +70,17 @@ module tb_ahb_apb_bridge_fault;
             else expect_error();
         end
         issue(32'h4001001c, 0, 3'b010, 0); expect_ok(16'h0002);
+        // P09B slot 3 has exactly five canonical word offsets.
+        issue(32'h40030000, 0, 3'b010, 0); expect_ok(16'h0008);
+        issue(32'h40030004, 0, 3'b010, 0); expect_ok(16'h0008);
+        issue(32'h40030008, 0, 3'b010, 0); expect_ok(16'h0008);
+        issue(32'h4003000c, 0, 3'b010, 0); expect_ok(16'h0008);
+        issue(32'h40030010, 1, 3'b010, 1); expect_ok(16'h0008);
+        issue(32'h40030014, 0, 3'b010, 0); expect_error();
+        issue(32'h40030018, 1, 3'b010, 1); expect_error();
+        issue(32'h40030100, 0, 3'b010, 0); expect_error();
+        issue(32'h40030002, 0, 3'b010, 0); expect_error();
+        issue(32'h40030000, 0, 3'b001, 0); expect_error();
         issue(32'h40080004, 0, 3'b010, 0); expect_ok(16'h0100);
         issue(32'h40080008, 0, 3'b010, 0); expect_ok(16'h0100);
         issue(32'h40090000, 0, 3'b010, 0); expect_ok(16'h0200);

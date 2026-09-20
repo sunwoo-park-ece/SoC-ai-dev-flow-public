@@ -248,6 +248,7 @@ wire GPIO_READY;
 wire UART0_READY;
 wire UART1_READY;
 wire GSENSOR_READY;
+wire GSENSOR_SLVERR;
 wire VGA_READY;
 wire AES_READY;
 wire JOYSTICK_READY;
@@ -411,7 +412,7 @@ AHB_APB_bridge u_bridge (
 .PWDATA     (PWDATA),
 .PRDATA     (PRDATA),
 .PREADY      (APB_SLAVE_PREADY),
-.PSLVERR     (1'b0)
+.PSLVERR     (PSEL[3] && GSENSOR_SLVERR)
 );
 
 
@@ -505,6 +506,7 @@ APB_GSENSOR_MB u_gsensor (
     .PWDATA  (PWDATA),
     .PRDATA  (PRDATA_GSENSOR),
 	 .PREADY  (GSENSOR_READY),
+	 .PSLVERR (GSENSOR_SLVERR),
 		//////////// Accelerometer ////////////
 		.GSENSOR_CS_N(G_SENSOR_CS_N),
 		.GSENSOR_INT(G_SENSOR_INT),

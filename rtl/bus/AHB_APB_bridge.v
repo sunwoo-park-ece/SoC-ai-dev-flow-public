@@ -81,7 +81,9 @@ endfunction
                     4'h1:
                         canonical_offset = (off <= 16'h001c && off[1:0] == 2'b00);
                     4'h3:
-                        canonical_offset = (off == 16'h0000 || off == 16'h0004);
+                        canonical_offset = (off == 16'h0000 || off == 16'h0004 ||
+                                            off == 16'h0008 || off == 16'h000c ||
+                                            off == 16'h0010);
                     4'h8:
                         canonical_offset = (off == 16'h0000 || off == 16'h0004 ||
                                             off == 16'h0008);

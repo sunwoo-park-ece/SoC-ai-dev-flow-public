@@ -62,13 +62,17 @@ run_test p05b_uart_rx tb_p05b_uart_rx_regression \
     verification/directed/reset_clock/tb_p05b_uart_rx_regression.sv
 run_test adc tb_adc_qsys \
     verification/models/adc/adc_qsys.sv verification/directed/models/adc/tb_adc_qsys.sv
-run_test gsensor tb_gsensor_replacements \
-    rtl/peripherals/gsensor/reset_delay.v rtl/peripherals/gsensor/spi_ee_config.v \
-    verification/directed/models/gsensor/tb_gsensor_replacements.sv
 run_test gsensor_single_pclk tb_gsensor_single_pclk \
     rtl/peripherals/gsensor/APB_GSENSOR_MB.v \
-    rtl/peripherals/gsensor/reset_delay.v rtl/peripherals/gsensor/spi_ee_config.v \
+    rtl/peripherals/gsensor/spi_ee_config.v \
     verification/directed/models/gsensor/tb_gsensor_single_pclk.sv
+run_test gsensor_snapshot tb_gsensor_snapshot \
+    rtl/peripherals/gsensor/APB_GSENSOR_MB.v \
+    rtl/peripherals/gsensor/spi_ee_config.v \
+    verification/directed/models/gsensor/tb_gsensor_snapshot.sv
+run_test gsensor_scheduler tb_gsensor_scheduler \
+    rtl/peripherals/gsensor/spi_ee_config.v \
+    verification/directed/models/gsensor/tb_gsensor_scheduler.sv
 run_test register_file tb_register_file \
     rtl/core/v/id_stage/Register_File.v verification/directed/cpu/tb_register_file.sv
 run_test cpu_commit_minstret tb_commit_minstret \

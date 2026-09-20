@@ -121,6 +121,12 @@ module RV32I46F5SPMMIO(
     wire [3:0] ID_fault_raw_cause;
     wire EX_fault_raw;
     wire [3:0] EX_fault_raw_cause;
+    // Declared here because the bus-fault combinational predicate below uses
+    // the MEM-stage transport signals before the EX/MEM declaration section.
+    wire MEM_valid;
+    wire MEM_memory_read;
+    wire MEM_memory_write;
+    reg MEM_exc_valid;
     reg access_fault_active;
     wire bus_fault_final = HREADY_FROM_AHB && (HRESP_FROM_AHB == 2'b01) && MEM_valid &&
                            (MEM_memory_read || MEM_memory_write) && !MEM_exc_valid &&
@@ -189,9 +195,6 @@ module RV32I46F5SPMMIO(
     wire [XLEN-1:0] MEM_pc;
     wire [XLEN-1:0] MEM_pc_plus_4;
     wire [31:0] MEM_instruction;
-    wire MEM_valid;
-    wire MEM_memory_read;
-    wire MEM_memory_write;
     wire [2:0] MEM_register_file_write_data_select;
     wire MEM_register_write_enable;
     wire MEM_csr_write_enable;
@@ -251,7 +254,7 @@ module RV32I46F5SPMMIO(
     reg [XLEN-1:0] retired_csr_read_data;
 
     // 3B2A transport metadata follows the exact stage hold/flush decisions.
-    reg EX_exc_valid, MEM_exc_valid, WB_exc_valid;
+    reg EX_exc_valid, WB_exc_valid;
     reg [3:0] EX_exc_cause, MEM_exc_cause, WB_exc_cause;
     reg EX_serial_valid, MEM_serial_valid, WB_serial_valid;
     reg fault_pending;
