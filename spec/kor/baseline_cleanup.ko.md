@@ -286,9 +286,9 @@ UART/LoRa, external-I/O electrical acceptance가 아니다. `UART-005`는 OPEN,
 
 | ID | Sev | Gate | 핵심 작업 | Status |
 |---|---|---|---|---|
-| `HEX-001` | High | BC | stale HEXx[7] QSF 제거 | IN_PROGRESS |
-| `HEX-002` | Medium | BC | raw mode proof | OPEN |
-| `HEX-003` | Medium | BC | CTRL/reset/shadow ownership | OPEN |
+| `HEX-001` | High | BC | 과거 local QSF의 HEXx[7]; 승인된 공개 pin Tcl은 이미 [6:0] | IN_PROGRESS |
+| `HEX-002` | Medium | BC | retained RAW mode의 cleanup-grade directed proof | OPEN |
+| `HEX-003` | Medium | BC | RAZ/WI CTRL, exact local decode, sole-owner Shadow/resync는 승인 target이며 구현 evidence 아님 | OPEN |
 | `HEX-004` | Low | OPT | DP/PWM/blink 등 별도 spec 전 금지 | DEFERRED |
 
 ---

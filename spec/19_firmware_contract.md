@@ -332,6 +332,19 @@ The existing LEFT/RIGHT-to-ASCII mapping shall be treated as a board/application
 ## 14. HEX Display Rules
 
 The HEX driver owns the software control shadow when that driver is used.
+The Owner-approved cleanup target makes `hex_display.c` the sole software
+writer of `HEX_CTRL`: application/ISR direct writes and uncontrolled
+concurrent writers are prohibited. Shadow and CTRL writes retain only bits
+`[1:0]` (`& 0x3`); normal helpers remain Shadow-based rather than
+hardware read-modify-write. Normal system reset plus firmware initialization
+sets hardware CTRL and Shadow to `0x1`.
+
+Define an explicit initialization/resynchronization procedure or API. After a
+HEX-only reset during execution, or a suspected out-of-band change, the caller
+must read hardware CTRL, mask `& 0x3`, and update Shadow **before the next
+CTRL update**. This does not imply automatic reset detection, authorize
+external writes, or claim that the API is implemented. A future
+ISR/multi-context owner must serialize driver access.
 
 Decoded-value mode packs:
 
@@ -642,9 +655,12 @@ Board-specific axis polarity and ASCII/control mapping shall be separated from t
 
 ## 28. Target HEX Contract
 
-The HEX driver remains the owner of control state. Direct application writes to `HEX_CTRL` shall be prohibited while the driver uses a control shadow.
-
-Alternatively, a future driver revision may remove the software shadow and use safe read-modify-write semantics; either design must have one authoritative state owner.
+The HEX driver remains the sole owner of control state; application/ISR direct
+writes to `HEX_CTRL` are prohibited. The approved target retains Shadow
+rather than routine hardware RMW, retains only `[1:0]`, and requires
+explicit resynchronization after a HEX-only reset or suspected out-of-band
+change. Any future multi-context use must serialize this one authoritative
+owner.
 
 Decimal-point behavior shall remain unavailable unless RTL/top-level/QSF are intentionally extended and the HEX specification is revised.
 

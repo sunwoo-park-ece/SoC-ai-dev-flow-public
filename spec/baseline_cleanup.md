@@ -300,9 +300,9 @@ Phase 4A-GSENSOR evidence (private local evidence archive): the **G-sensor inter
 
 | ID | Sev | Gate | Current issue | Required outcome | Dependent specs | Verification | Status |
 |---|---|---|---|---|---|---|---|
-| `HEX-001` | High | BC | QSF constrains stale `HEXx[7]` decimal-point pins while RTL exposes `[6:0]`. | Remove stale assignments unless a DP feature is newly specified. | `16_hex_display` | pin report + board HEX test | IN_PROGRESS |
-| `HEX-002` | Medium | BC | Raw mode lacks directed proof. | If retained, verify all six fields, active-low polarity, packing, disable behavior. | `16_hex_display` | raw-mode TB | OPEN |
-| `HEX-003` | Medium | BC | Reserved CTRL storage, reset 000000-vs-blank policy, and firmware shadow ownership need normalization. | Freeze reserved/read-zero, reset policy, and driver ownership/RMW behavior. | `16_hex_display`, `19_firmware_contract` | reset/CTRL/shadow tests | OPEN |
+| `HEX-001` | High | BC | Historical local QSF had `HEXx[7]`; approved public pin Tcl already has `[6:0]`. | Retain public Tcl; distinguish historical QSF from generated-QSF/Pin Report and board evidence. | `16_hex_display` | generated QSF/pin report + source-matched board HEX test | IN_PROGRESS |
+| `HEX-002` | Medium | BC | Raw mode is retained but lacks cleanup-grade directed proof. | Verify six fields, active-low polarity, packing/masking/readback, disable/enable, and reset. | `16_hex_display` | raw-mode TB | OPEN |
+| `HEX-003` | Medium | BC | RAZ/WI CTRL, exact local decode, and sole-owner Shadow/resynchronization are approved targets, not current implementation evidence. | Implement and verify CTRL `[31:2]` RAZ/WI, exact offsets, reset `000000`, and explicit Shadow init/resync without routine HW RMW. | `16_hex_display`, `19_firmware_contract` | reset/CTRL/local-offset/shadow tests | OPEN |
 | `HEX-004` | Low | OPT | DP/PWM/blink/per-digit features are unspecified. | Do not implement without a separate specification. | `16_hex_display` | n/a | DEFERRED |
 
 ---

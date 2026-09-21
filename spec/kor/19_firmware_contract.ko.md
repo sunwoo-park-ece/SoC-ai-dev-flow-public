@@ -297,7 +297,17 @@ LEFT/RIGHT ASCII mapping은 physical polarity 확인 전까지 board/application
 
 ## 14. HEX Display
 
-HEX driver를 사용할 때 driver가 CTRL shadow ownership을 갖는다.
+HEX driver를 사용할 때 driver가 CTRL shadow ownership을 갖는다. Owner-approved
+cleanup target에서 `hex_display.c`는 `HEX_CTRL`의 단일 software writer이며
+application/ISR direct write와 무단 concurrent writer는 금지한다. Shadow와
+CTRL write는 `[1:0]`만 (`& 0x3`) 유지하고 normal helper는 hardware RMW가
+아닌 Shadow 방식을 유지한다. 정상 system reset과 firmware initialization 후
+hardware CTRL/Shadow는 `0x1`이다.
+
+HEX-only reset 또는 out-of-band change가 의심되면 **다음 CTRL update 전**
+hardware CTRL을 읽고 `& 0x3`으로 Shadow를 명시적으로 resynchronize하는
+절차/API를 사용한다. 자동 reset detection, direct write의 허용, API 구현
+완료를 뜻하지 않으며 future ISR/multi-context는 driver access를 직렬화한다.
 
 Decoded mode packing:
 
@@ -543,9 +553,11 @@ Board axis polarity/WASD mapping은 generic ADC acquisition과 가능하면 분�
 
 ## 28. Target HEX
 
-HEX driver가 CTRL state owner다. Shadow 사용 중에는 application direct `HEX_CTRL` write를 금지한다.
-
-향후 read-modify-write 구조로 바꾸더라도 authoritative state owner는 하나여야 한다.
+HEX driver가 CTRL의 단일 state owner다. application/ISR direct `HEX_CTRL`
+write는 금지한다. 승인된 target은 routine hardware RMW 대신 Shadow를
+유지하고 `[1:0]`만 보존하며, HEX-only reset 또는 out-of-band change 후
+명시적 resynchronization을 요구한다. future multi-context에서는 이 단일
+owner의 access를 직렬화해야 한다.
 
 DP는 RTL/top/QSF가 명시적으로 확장되기 전까지 unavailable이다.
 
