@@ -42,7 +42,7 @@ The top exposes `HEX0[6:0]` through `HEX5[6:0]`, and no eighth decimal-point bit
 
 The Owner confirms that a **historical local QSF** contained stale `HEXx[7]` assignments, although the actual top-level ports are seven bits. This is a historical source, **not a statement that the current public constraints still contain bit 7**.
 
-The current public `fpga/quartus/constraints/de10_lite_pins.tcl` assigns only `HEX0..HEX5[6:0]`; the Owner has reviewed and approved retaining it unchanged. `scripts/wsl/private_quartus.py` generates the private Quartus QSF and includes that public pin Tcl via a `source` path. Do not add a speculative removal patch for absent public `HEXx[7]` lines or reintroduce DP support.
+The current public `fpga/quartus/constraints/de10_lite_pins.tcl` assigns only `HEX0..HEX5[6:0]`; the Owner has reviewed and approved retaining it unchanged. `scripts/wsl/private_quartus.py` generates the private Quartus QSF and includes that public pin Tcl via a `source` statement. Do not add a speculative removal patch for absent public `HEXx[7]` lines or reintroduce DP support.
 
 This approves the public pin-width/configuration policy only. A generated-QSF/Pin Report check and source-matched physical HEX board acceptance are separate evidence and are **not claimed performed here**.
 
