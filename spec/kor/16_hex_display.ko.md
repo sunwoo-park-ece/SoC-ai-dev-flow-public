@@ -193,12 +193,13 @@ Write `[31:24]`는 버려지고 read에서는 0으로 반환된다.
 |---:|---|---|
 | 0 | `ENABLE` | `1`: display 출력, `0`: 6개 digit 모두 blank |
 | 1 | `RAW_MODE` | `0`: decoder mode, `1`: raw segment mode |
-| 31:2 | Reserved | Owner-approved RAZ/WI: write 무시, read는 항상 0 |
+| 31:2 | Reserved | Owner-approved RAZ/WI: 예약 bit는 write 무시·항상 0 read, 같은 valid write의 `[1:0]`은 정상 반영 |
 
 **Current RTL**은 CTRL 전체 32-bit를 저장하지만 실제 출력에는 bit 0,1만
 영향을 준다. 이는 구현 gap이다. Cleanup target은 valid write에서
-`PWDATA[1:0]`만 저장하고 `{30'b0, CTRL[1:0]}`을 read한다. 예약 bit write는
-state/output/readback을 바꾸지 않는다.
+`PWDATA[1:0]`만 저장하고 `{30'b0, CTRL[1:0]}`을 read한다. 예약 bit 값은
+write-ignored이지만 같은 valid write의 기능 bit `[1:0]`은 정상 반영된다.
+예약 bit 값은 state/output/readback을 바꾸지 않는다.
 
 ### 6.1 Disable
 
@@ -345,7 +346,17 @@ static uint32_t hex_ctrl_shadow = HEX_CTRL_ENABLE;
 
 를 유지한다.
 
-따라서 driver 외부 코드가 `HEX_CTRL`을 직접 MMIO write하면 shadow가 stale해질 수 있다. Baseline firmware에서는 `hex_display.c`가 CTRL의 단일 owner가 되어야 한다.
+Owner-approved target에서 `hex_display.c`는 `HEX_CTRL`의 단일 software
+writer다. application/ISR direct write와 무단 concurrent writer는 금지한다.
+Shadow와 CTRL write는 `[1:0]`만 (`& 0x3`) 유지하고 normal helper는 hardware
+RMW가 아닌 Shadow 방식을 유지한다. 정상 system reset과 firmware
+initialization 후 hardware CTRL/Shadow는 `0x1`이다.
+
+HEX-only reset 또는 out-of-band change가 의심되면 **다음 CTRL update 전**
+hardware CTRL을 읽고 `& 0x3`으로 Shadow를 명시적으로 resynchronize하는
+절차/API를 사용한다. 자동 reset detection은 없으며 resynchronization이
+driver 외 direct write를 허용하지 않는다. API 이름/구현은 아직 존재한다고
+주장하지 않으며 future ISR/multi-context는 driver access를 직렬화한다.
 
 ## 11. Monitor Packing
 
@@ -401,18 +412,21 @@ scan:    000000 -> 111111 -> ... -> FFFFFF
 
 또 VALUE register readback mismatch를 별도 error code로 확인한다.
 
-관련 board-result 기록은 diagnostic SOF가 physical board에서 문제없이 동작했다고 기록하고 있으며, 해당 범위에서 VGA/HEX/LED board-level 동작 evidence가 있다.
+역사적 board-result 진술은 diagnostic 동작 성공을 기록하지만, public
+snapshot에는 원래 board-result provenance가 충분하지 않다. 따라서 이를
+fresh, source-matched HEX Cleanup board acceptance로 취급할 수 없다.
 
-따라서 현재 evidence는 적어도:
+이 역사적 evidence는 다음을 지원한다:
 
 - APB HEX access
 - VALUE packing
 - decoded HEX output
-- HEX0..HEX5 physical display path
+- historical decoded-path physical operation
 
 를 지원한다.
 
-반면 raw mode, disable behavior, decimal point, register alias 등은 별도 directed verification이 필요하다.
+raw mode, disable behavior, decimal point, reserved-bit RAZ/WI, local mirror
+rejection, generated pin assignment는 별도 directed verification이 필요하다.
 
 ## 14. Interrupt / Error
 
@@ -428,34 +442,22 @@ PREADY       1
 
 일반 display update만을 위해 PLIC interrupt를 추가할 필요는 없다. 향후 autonomous display engine이나 DMA/event 기능을 추가할 경우에만 별도 interrupt contract를 정의한다.
 
-## 15. Baseline Cleanup Targets
+## 15. Owner-Approved Cleanup Scope (Issue #3, 2026-09-21)
 
-통합 `baseline_cleanup.md`로 넘길 항목:
+1. **HEX-001:** 승인된 공개 `[6:0]` pin Tcl을 유지한다. 가상의 공개 pin
+   삭제 patch를 만들지 않으며 generated-QSF/Pin Report와 current board
+   evidence는 미검증이다.
+2. **HEX-002:** RAW mode를 유지하고 여섯 field/mapping/active-low,
+   masking/readback, disable/enable, reset을 독립 검증한다.
+3. **HEX-003:** CTRL `[31:2]`은 RAZ/WI, reset visible state는 decoded
+   `000000`으로 유지하며 explicit initialization/resynchronization을 가진
+   sole-owner firmware Shadow를 사용한다. routine hardware RMW는 사용하지
+   않는다.
+4. **Local decode / APB-005:** full-offset exact check로 내부 16-byte
+   mirror를 제거하되 production bridge 동작은 유지한다.
+5. **HEX-004:** DP/PWM/blink/per-digit/atomic-RAW 추가는 DEFERRED다.
 
-1. **QSF/RTL width mismatch 해결 — HIGH**
-   - RTL은 `HEXx[6:0]`.
-   - QSF는 `HEXx[7]`까지 constraint.
-   - stale DP pin assignment 제거 또는 정식 DP feature로 재설계.
-
-2. **Raw mode directed verification — HIGH if feature retained**
-   - 6개 digit field packing
-   - active-low polarity
-   - RAW_LOW/HIGH mapping
-
-3. 16-byte register mirroring 제거.
-
-4. CTRL[31:2]를 true reserved/read-zero로 정리하는 방안 검토.
-
-5. reset visible state를 `000000`으로 유지할지 blank로 바꿀지 cleanup 단계에서 의도적으로 결정.
-
-6. firmware CTRL shadow ownership 제약을 문서화하거나 read-modify-write 방식으로 개선.
-
-7. 필요 시 별도 spec 후 추가 가능한 optional feature:
-   - decimal point
-   - brightness/PWM
-   - blink
-   - per-digit enable
-   - atomic raw update
+이는 Owner-approved requirement이며 구현 또는 verification 완료 상태가 아니다.
 
 ## 16. Directed Verification
 
@@ -494,4 +496,7 @@ PREADY       1
 12. reset은 enabled decoder mode + `000000`이다.
 13. decimal-point control은 active RTL에 없다.
 14. interrupt source는 없다.
-15. QSF의 `HEXx[7]` assignment는 architectural feature가 아니라 cleanup target이다.
+15. 과거 local QSF의 `HEXx[7]` assignment는 architectural feature가 아니다.
+    승인된 공개 `[6:0]` pin configuration은 유지한다.
+16. exact local-offset decoding과 explicit firmware Shadow resynchronization은
+    RTL/FW verification이 구현을 입증할 때까지 cleanup target이다.

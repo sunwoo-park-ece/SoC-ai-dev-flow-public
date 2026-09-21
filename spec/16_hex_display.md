@@ -219,13 +219,15 @@ Functional bits are:
 |---:|---|---|
 | 0 | `ENABLE` | `1`: drive selected display pattern, `0`: blank all six digits |
 | 1 | `RAW_MODE` | `0`: hexadecimal decoder mode, `1`: raw segment mode |
-| 31:2 | Reserved | Owner-approved RAZ/WI: ignore writes and always read zero |
+| 31:2 | Reserved | Owner-approved RAZ/WI: those bits are write-ignored and always read zero; a valid write still updates `[1:0]` |
 
 **Current RTL** stores the full 32-bit CTRL value, although only bits 0 and 1
 affect outputs. This is an implementation gap, not the approved behavior.
 The **cleanup target** retains only `PWDATA[1:0]` on a valid CTRL write and
-reads `{30'b0, CTRL[1:0]}`. Writes with reserved bits set must not alter
-stored state, output, or later reads. Firmware writes reserved bits as zero.
+reads `{30'b0, CTRL[1:0]}`. Reserved-bit values in a write are ignored, but
+that same valid write updates functional bits `[1:0]` normally. Reserved-bit
+values must not alter stored state, output, or later reads. Firmware writes
+reserved bits as zero.
 
 ### 6.1 Display Disable
 
@@ -501,7 +503,6 @@ It does **not** independently prove:
 - every raw bit pattern,
 - display-disable behavior,
 - decimal-point behavior,
-- reserved-bit behavior,
 - reserved-bit RAZ/WI, local mirror rejection, or generated pin assignments.
 
 Those items require separate directed verification if they become important to a future milestone.
