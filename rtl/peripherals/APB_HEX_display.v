@@ -29,7 +29,8 @@ module APB_HEX_display (
     localparam CTRL_RAW_MODE = 1;
 
     reg [23:0] value_reg;
-    reg [31:0] ctrl_reg;
+    // CTRL has only ENABLE and RAW_MODE.  Reserved bits [31:2] are RAZ/WI.
+    reg [1:0] ctrl_reg;
     reg [20:0] raw_low_reg;
     reg [20:0] raw_high_reg;
 
@@ -87,13 +88,13 @@ module APB_HEX_display (
     always @(posedge PCLK or negedge PRESETn) begin
         if (!PRESETn) begin
             value_reg    <= 24'h000000;
-            ctrl_reg     <= 32'h00000001; // enable=1, raw_mode=0
+            ctrl_reg     <= 2'b01; // enable=1, raw_mode=0
             raw_low_reg  <= {3{7'b1111111}};
             raw_high_reg <= {3{7'b1111111}};
         end else if (PSEL && PENABLE && PWRITE) begin
             case (PADDR[3:2])
                 REG_VALUE:    value_reg    <= PWDATA[23:0];
-                REG_CTRL:     ctrl_reg     <= PWDATA;
+                REG_CTRL:     ctrl_reg     <= PWDATA[1:0];
                 REG_RAW_LOW:  raw_low_reg  <= PWDATA[20:0];
                 REG_RAW_HIGH: raw_high_reg <= PWDATA[20:0];
                 default: ;
@@ -105,7 +106,7 @@ module APB_HEX_display (
         if (PSEL && PENABLE && !PWRITE) begin
             case (PADDR[3:2])
                 REG_VALUE:    PRDATA = {8'h00, value_reg};
-                REG_CTRL:     PRDATA = ctrl_reg;
+                REG_CTRL:     PRDATA = {30'b0, ctrl_reg};
                 REG_RAW_LOW:  PRDATA = {11'h000, raw_low_reg};
                 REG_RAW_HIGH: PRDATA = {11'h000, raw_high_reg};
                 default:      PRDATA = 32'h00000000;
