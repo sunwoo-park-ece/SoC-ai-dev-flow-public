@@ -20,10 +20,10 @@ module APB_HEX_display (
     output wire [6:0]  HEX4,
     output wire [6:0]  HEX5
 );
-    localparam [1:0] REG_VALUE    = 2'b00; // 0x00: VALUE_REG[23:0], HEX5..HEX0
-    localparam [1:0] REG_CTRL     = 2'b01; // 0x04: CTRL_REG[0]=enable, [1]=raw_mode
-    localparam [1:0] REG_RAW_LOW  = 2'b10; // 0x08: RAW_LOW,  HEX2..HEX0 raw segments
-    localparam [1:0] REG_RAW_HIGH = 2'b11; // 0x0C: RAW_HIGH, HEX5..HEX3 raw segments
+    localparam [15:0] REG_VALUE    = 16'h0000; // VALUE_REG[23:0], HEX5..HEX0
+    localparam [15:0] REG_CTRL     = 16'h0004; // CTRL_REG[0]=enable, [1]=raw_mode
+    localparam [15:0] REG_RAW_LOW  = 16'h0008; // RAW_LOW,  HEX2..HEX0 raw segments
+    localparam [15:0] REG_RAW_HIGH = 16'h000c; // RAW_HIGH, HEX5..HEX3 raw segments
 
     localparam CTRL_ENABLE   = 0;
     localparam CTRL_RAW_MODE = 1;
@@ -92,7 +92,7 @@ module APB_HEX_display (
             raw_low_reg  <= {3{7'b1111111}};
             raw_high_reg <= {3{7'b1111111}};
         end else if (PSEL && PENABLE && PWRITE) begin
-            case (PADDR[3:2])
+            case (PADDR[15:0])
                 REG_VALUE:    value_reg    <= PWDATA[23:0];
                 REG_CTRL:     ctrl_reg     <= PWDATA[1:0];
                 REG_RAW_LOW:  raw_low_reg  <= PWDATA[20:0];
@@ -104,7 +104,7 @@ module APB_HEX_display (
 
     always @(*) begin
         if (PSEL && PENABLE && !PWRITE) begin
-            case (PADDR[3:2])
+            case (PADDR[15:0])
                 REG_VALUE:    PRDATA = {8'h00, value_reg};
                 REG_CTRL:     PRDATA = {30'b0, ctrl_reg};
                 REG_RAW_LOW:  PRDATA = {11'h000, raw_low_reg};
