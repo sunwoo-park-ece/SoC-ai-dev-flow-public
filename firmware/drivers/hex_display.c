@@ -4,6 +4,23 @@
 
 static uint32_t hex_ctrl_shadow = HEX_CTRL_ENABLE;
 
+static void hex_display_write_ctrl(void)
+{
+    hex_ctrl_shadow &= HEX_CTRL_MASK;
+    mmio_write32(HEX_DISPLAY_BASE + HEX_CTRL, hex_ctrl_shadow);
+}
+
+void hex_display_init(void)
+{
+    hex_ctrl_shadow = HEX_CTRL_ENABLE;
+    hex_display_write_ctrl();
+}
+
+void hex_display_resync(void)
+{
+    hex_ctrl_shadow = mmio_read32(HEX_DISPLAY_BASE + HEX_CTRL) & HEX_CTRL_MASK;
+}
+
 void hex_display_enable(int enable)
 {
     if (enable) {
@@ -11,7 +28,7 @@ void hex_display_enable(int enable)
     } else {
         hex_ctrl_shadow &= ~HEX_CTRL_ENABLE;
     }
-    mmio_write32(HEX_DISPLAY_BASE + HEX_CTRL, hex_ctrl_shadow);
+    hex_display_write_ctrl();
 }
 
 void hex_display_set_raw_mode(int enable)
@@ -21,7 +38,7 @@ void hex_display_set_raw_mode(int enable)
     } else {
         hex_ctrl_shadow &= ~HEX_CTRL_RAW_MODE;
     }
-    mmio_write32(HEX_DISPLAY_BASE + HEX_CTRL, hex_ctrl_shadow);
+    hex_display_write_ctrl();
 }
 
 void hex_display_write_value(uint32_t value)
@@ -57,5 +74,5 @@ uint32_t hex_display_read_value(void)
 
 uint32_t hex_display_read_ctrl(void)
 {
-    return mmio_read32(HEX_DISPLAY_BASE + HEX_CTRL);
+    return mmio_read32(HEX_DISPLAY_BASE + HEX_CTRL) & HEX_CTRL_MASK;
 }
