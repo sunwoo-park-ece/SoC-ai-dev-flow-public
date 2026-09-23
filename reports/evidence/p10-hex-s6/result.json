@@ -1,0 +1,49 @@
+{
+  "schema_version": "1.0",
+  "evidence_id": "P10-HEX-S6-EV-01",
+  "title": "P10 HEX S6 firmware-driven six-digit board acceptance",
+  "status": "CONDITIONAL_PASS",
+  "review_status": "OWNER_CONFIRMED",
+  "evidence_date": "2026-09-24",
+  "source_identity": {
+    "repository": "https://github.com/sunwoo-park-ece/SoC-ai-dev-flow-public",
+    "base_commit": "128fc195aaf08c37a627835f185e5ae0400ac289",
+    "acceptance_app_sha256": "6a1564f2e8e66289db841a8125d0fc340535975a2297e804beeac21bec691d69"
+  },
+  "requirements": ["S6 HEX functional acceptance", "HEX-001 physical pin evidence"],
+  "criteria": [
+    {"id": "HEX-S6-AC-01", "result": "PASS", "evidence_layer": "final Quartus effective Pin report: 42 HEX[0:6], zero HEX[7]"},
+    {"id": "HEX-S6-AC-02", "result": "PHOTO_OBSERVED", "evidence_layer": "B0 reset 000000"},
+    {"id": "HEX-S6-AC-03", "result": "PHOTO_OBSERVED", "evidence_layer": "B1 123456 and B2 ABCDEF decoder order"},
+    {"id": "HEX-S6-AC-04", "result": "PHOTO_OBSERVED", "evidence_layer": "B3 single-segment and B4 multi-segment RAW patterns"},
+    {"id": "HEX-S6-AC-05", "result": "PHOTO_OBSERVED", "evidence_layer": "B5 blank and B6 retained B4 restoration"},
+    {"id": "HEX-S6-AC-06", "result": "PHOTO_OBSERVED", "evidence_layer": "B7 repeated decoder 123456 regression check"},
+    {"id": "HEX-S6-AC-07", "result": "PHOTO_OBSERVED", "evidence_layer": "B8 repeated decoder ABCDEF"}
+  ],
+  "final_image": {
+    "elf_sha256": "b204313326fcd8966495a55e5b1ab631ee74622e9bcb4d9f6bf2e5fcf45b0f9f",
+    "imem_mif_sha256": "32b3b7aad4292b8bf426dd63875b6d6abdea7bef69cfa2a94ce2a226d3ef8dce",
+    "dmem_mif_sha256": "5bb95f76bdf77ef5e577e948bfea9c8b60b1bb3a9a05acf7a1e6a92e6b4f4c15",
+    "sof_sha256": "8ccfbbe74128e661d0a5e8892de0032eb3ca851fe3e1adb581121f2a31983607",
+    "programmer_identity": "OWNER_CONFIRMED / raw JTAG log retained outside public repository"
+  },
+  "board_photos": [
+    {"file": "board/B0.jpg", "sha256": "c01b4c1ef77ebced2664eb1e32ea2c50d0b6de921e7e747a86f2dffc5d051d99"},
+    {"file": "board/B1.jpg", "sha256": "848b9a0716cce00fd0255b316cf82078a87b900013d16d13d16e6160f94c7c70"},
+    {"file": "board/B2.jpg", "sha256": "83e812821aeac155a97cd196222574656ce085681ba8a025d91fe7278a2e04f9"},
+    {"file": "board/B3.jpg", "sha256": "123d3df6e022d100abf1598ed0d55fc74a4762c896dd8be942a2fb2000c1efeb"},
+    {"file": "board/B4.jpg", "sha256": "121c1f117c0b2095ba695580356addf49abbba8bab97e8e6014a8581d6653f1a"},
+    {"file": "board/B5.jpg", "sha256": "cdadbfa771df46c01639992fdd3fa2f75482ba096493d8a2d69712ae65baab90"},
+    {"file": "board/B6.jpg", "sha256": "2beb4dc9ef4bd5dfbc222533de166dff61fcbeeea885913927175f34d7b40182"},
+    {"file": "board/B7.jpg", "sha256": "a78e9698ac646df35d2bfc11135a87ada6a6cfa777b8e3597ac8724bd1fdd458"},
+    {"file": "board/B8.jpg", "sha256": "798e0d83ee14b22392bb4650fa7633fec4e9077cf8c4bb3c0bd8f5b03cfd6c2b"}
+  ],
+  "limitations": [
+    "external I/O timing/electrical STA-002 NOT_CLOSED",
+    "ADC/VGA proximity and PLL/CDC scope OPEN",
+    "physical transient/glitch measurement NOT_RUN",
+    "no public raw Quartus, private IP, MIF, SOF, or JTAG-log payload"
+  ],
+  "private_raw_evidence_retained": true,
+  "sanitization": {"absolute_paths_removed": true, "vendor_generated_payload_included": false, "raw_logs_included": false, "binaries_included": false}
+}
