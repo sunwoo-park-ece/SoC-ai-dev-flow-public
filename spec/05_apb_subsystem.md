@@ -401,3 +401,11 @@ A2 requires canonical APB aperture, complete slot and full register-offset valid
 The P09B Public implementation expands only canonical slot 3 to aligned word offsets `+0x00/+0x04/+0x08/+0x0C/+0x10`. The bridge validates the full address, size, alignment and listed offset **before** selecting the wrapper; mirrors and every other offset remain ERROR with no wrapper side effect. The wrapper checks read/write direction and exact SNAP_CTRL command encoding, raises PSLVERR only on completing ACCESS for invalid requests, and otherwise remains zero-wait. Top-level PSLVERR reaches the existing bridge two-cycle AHB ERROR path. An eligible CAPTURE is one command per completed ACCESS; an ineligible but well-encoded CAPTURE is OKAY/no-op. STATUS is read-only and side-effect-free, with pre-edge registered readback on a same-edge sample publication. The exact ABI and priorities are in [12_gsensor.md](12_gsensor.md). No new bus slot, PLIC route or generic SPI aperture is allocated.
 
 The P09B Public implementation uses one common reset: G-sensor controller `iRSTN`, snapshot banks and scheduler use bridge-provided `PRESETn=HRESETn` directly, without the extra local delay. Normal ACCESS/pre-edge read rules apply only while reset is deasserted. Asynchronous assertion can overlap SETUP or ACCESS and abort an unfinished transfer; it must not create an accepted CAPTURE or a guaranteed read response. A read completed before assertion remains a historical completion. No particular response code is promised for reset-aborted traffic.
+
+## P10-HEX slot-7 contract — implementation update
+
+The P10-HEX implementation confirms canonical slot 7 (`0x4007_0000..0x4007_000C`):
+- The AHB/APB bridge slot-7 allowlist forwards only the four canonical offsets `+0x00`, `+0x04`, `+0x08`, and `+0x0C` as aligned 32-bit transfers.
+- Noncanonical CPU requests to slot 7 are blocked at the bridge without asserting `PSEL[7]` and terminate with 2-cycle AHB ERROR (`HRESP=01`).
+- The peripheral slave itself (`APB_HEX_display.v`) implements exact decode on `PADDR[15:0]`. Any unmapped or noncanonical local offset reads zero and ignores writes without side effects (`PREADY=1`, no `PSLVERR`).
+- Driver and verification details are defined in [16_hex_display.md](16_hex_display.md) and [19_firmware_contract.md](19_firmware_contract.md).

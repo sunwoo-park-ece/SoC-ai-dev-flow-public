@@ -80,7 +80,7 @@ When new specifications are inserted later, renumbering is allowed if it improve
 
 ## Implemented Baseline vs Target Contracts
 
-Most documents through `16_hex_display.md` reconstruct and document the currently implemented FPGA baseline. The GPIO/SW/LED and APB topology described below were implemented and verified during Phase 4A-P04; older target-only wording inside individual documents remains historical context until the full specification refresh.
+Most documents through `16_hex_display.md` reconstruct and document the currently implemented FPGA baseline. In particular, `16_hex_display.md` has been fully cleaned up and verified across RTL (CTRL RAZ/WI, exact offset decode), firmware (Shadow sync), multi-tier simulation, Quartus build, and physical board acceptance (P10-HEX S0..S6). The GPIO/SW/LED and APB topology described below were implemented and verified during Phase 4A-P04; older target-only wording inside individual documents remains historical context until the full specification refresh.
 
 `17_sw.md`, `18_led.md`, and `20_board_io_architecture.md` define the contract implemented by Phase 4A-P04. Their requirements are active only where implementation and verification evidence exist; they shall not be used to imply completion of unrelated board, firmware, PLIC, or final timing acceptance.
 

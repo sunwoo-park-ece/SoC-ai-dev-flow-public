@@ -277,3 +277,11 @@ A2는 canonical APB aperture, slot 및 전체 register offset/size를 side effec
 P09B Public 구현은 canonical slot 3만 정렬 word offset `+0x00/+0x04/+0x08/+0x0C/+0x10`으로 확장한다. Bridge는 wrapper select **전에** 전체 주소·size·정렬·허용 offset을 검증하며 mirror와 나머지 offset은 side effect 없이 ERROR다. Wrapper는 read/write 방향과 SNAP_CTRL 명령어의 정확한 encoding을 검증하고 invalid 요청의 완료 ACCESS에서만 PSLVERR를 내며, 나머지는 zero-wait를 유지한다. Top의 G-sensor PSLVERR는 기존 bridge의 2-cycle AHB ERROR 경로로 전달된다. 유효 CAPTURE는 완료 ACCESS마다 한 번 수행되고, 자격 없는 정상 encoding CAPTURE는 OKAY/no-op이다. STATUS는 read-only·side-effect-free이며 sample publish와 같은 edge의 readback은 pre-edge 등록 상태다. 정확한 ABI·우선순위는 [12_gsensor.ko.md](12_gsensor.ko.md)를 따른다. 새 bus slot, PLIC 경로, generic SPI aperture는 배정하지 않는다.
 
 P09B Public 구현은 공통 reset 하나를 사용한다. G-sensor controller `iRSTN`, snapshot bank, scheduler는 추가 local delay 없이 bridge의 `PRESETn=HRESETn`을 직접 사용한다. 정상 ACCESS/pre-edge read 규칙은 reset deassert 중에만 적용된다. 비동기 assertion은 SETUP/ACCESS와 겹쳐 미완료 transfer를 중단할 수 있으며 accepted CAPTURE나 유효 read response를 만들면 안 된다. Assertion 전에 완료된 read는 과거 완료다. Reset 중단 traffic에 특정 response code를 약속하지 않는다.
+
+## P10-HEX slot-7 계약 — 구현 갱신
+
+P10-HEX 구현은 canonical slot 7 (`0x4007_0000..0x4007_000C`)의 동작을 확정한다:
+- AHB/APB bridge의 slot-7 allowlist는 정규 4개 오프셋(`+0x00`, `+0x04`, `+0x08`, `+0x0C`)만 aligned 32-bit 전송으로 전달한다.
+- Slot 7로 향하는 비정규 CPU 요청은 `PSEL[7]` 인가 없이 bridge에서 차단되며 2-cycle AHB ERROR(`HRESP=01`)로 종료된다.
+- 주변장치 슬레이브 자체(`APB_HEX_display.v`)는 `PADDR[15:0]` 완전 일치 디코드를 구현한다. 미매핑 또는 비정규 로컬 오프셋은 읽기 시 0을 반환하고 쓰기 시 side effect 없이 무시된다 (`PREADY=1`, `PSLVERR` 없음).
+- 드라이버 및 검증 세부사항은 [16_hex_display.ko.md](16_hex_display.ko.md) 및 [19_firmware_contract.ko.md](19_firmware_contract.ko.md)를 따른다.

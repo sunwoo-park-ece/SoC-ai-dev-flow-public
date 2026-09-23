@@ -149,7 +149,7 @@ The CPU policy choices in `21_cpu_core.md` are no longer blocking architecture q
 | `APB-002` | High | BC | Ignored `PADDR[27:20]` creates repeated APB aliases. | Decode only canonical `0x4000_0000..0x400F_FFFF`. | `01_memory_map`, `04_ahb_fabric`, `05_apb_subsystem` | alias-negative tests | VERIFIED |
 | `APB-003` | High | BC | New `PWDATA` is not guaranteed valid throughout APB SETUP. | Keep write address/control/data stable from SETUP through ACCESS. | `05_apb_subsystem` | SETUP/ACCESS assertions | VERIFIED |
 | `APB-004` | High | BC | Reserved slots/invalid accesses can inherit silent zero/ready behavior. | Implement frozen A2 canonical full-offset validation, side-effect gating, default `PSLVERR`, and bridge ERROR propagation. | `05_apb_subsystem`, `20_board_io_architecture` | reserved slot/offset tests | VERIFIED |
-| `APB-005` | Medium | BC | Low-bit peripheral decoders create register mirrors; P06B closes the Timer sub-scope and P07 closes the UART sub-scope only. | When a peripheral is touched, decode only canonical offsets and use approved reserved behavior elsewhere. | peripheral specs | Timer and both UARTs: full slot-offset decode/mirrors removed; UART architectural invalid requests produce bridge ERROR/no real PSEL/no side effect, and actual UART backpressure passes; remaining peripherals require noncanonical-offset tests | OPEN |
+| `APB-005` | Medium | BC | Low-bit peripheral decoders create register mirrors; P06B closes Timer, P07 closes UART, and P10-HEX closes the HEX Display sub-scope. | When a peripheral is touched, decode only canonical offsets and use approved reserved behavior elsewhere. | peripheral specs | Timer, both UARTs, and HEX Display: full slot-offset decode/mirrors removed; HEX PADDR[15:0] exact decode and bridge suppression/2-cycle ERROR verified; remaining peripherals require noncanonical-offset tests | OPEN |
 | `APB-006` | Medium | AXI | No `PSTRB`; generic partial-register writes are unsupported. | Preserve aligned 32-bit APB MMIO in cleanup; decide strobes later. | `05_apb_subsystem`, `19_firmware_contract` | no firmware dependency on partial APB writes | DEFERRED |
 
 Phase 4A-3A evidence (local review archive `PHASE_4A_3A_BUS_CPU_APB_REPORT.md` and `verification_matrix_bus_cpu_apb.json`): the focused HSIZE, bridge, SoC decode, MEM/APB/VGA transition, CPU harness, and CPU+SoC fault tests pass, as do the existing open regression lanes and whole-SoC elaboration. At that checkpoint, `APB-001` and `TRAP-003` were still `IN_PROGRESS`: slot 8/9 integration and later ISA/trap coverage had not yet landed. Subsequent Phase 4A-3B/3B3R evidence closed `TRAP-003`; P04 open verification plus the user-run post-fit review closed `APB-001`. Both are now `VERIFIED`. This does not close the global cleanup exit gate.
@@ -300,10 +300,12 @@ Phase 4A-GSENSOR evidence (private local evidence archive): the **G-sensor inter
 
 | ID | Sev | Gate | Current issue | Required outcome | Dependent specs | Verification | Status |
 |---|---|---|---|---|---|---|---|
-| `HEX-001` | High | BC | Historical local QSF had `HEXx[7]`; approved public pin Tcl already has `[6:0]`. | Retain public Tcl; distinguish historical QSF from generated-QSF/Pin Report and board evidence. | `16_hex_display` | generated QSF/pin report + source-matched board HEX test | IN_PROGRESS |
-| `HEX-002` | Medium | BC | Raw mode is retained but lacks cleanup-grade directed proof. | Verify six fields, active-low polarity, packing/masking/readback, disable/enable, and reset. | `16_hex_display` | raw-mode TB | OPEN |
-| `HEX-003` | Medium | BC | RAZ/WI CTRL, exact local decode, and sole-owner Shadow/resynchronization are approved targets, not current implementation evidence. | Implement and verify CTRL `[31:2]` RAZ/WI, exact offsets, reset `000000`, and explicit Shadow init/resync without routine HW RMW. | `16_hex_display`, `19_firmware_contract` | reset/CTRL/local-offset/shadow tests | OPEN |
+| `HEX-001` | High | BC | Historical local QSF had `HEXx[7]`; approved public pin Tcl already has `[6:0]`. | Retain public Tcl; distinguish historical QSF from generated-QSF/Pin Report and board evidence. | `16_hex_display` | final Quartus Fitter Pin report (42 HEX[0:6], zero HEX[7]) + board test (P10-HEX-S6-EV-01 / B0~B8) | VERIFIED |
+| `HEX-002` | Medium | BC | Raw mode is retained but lacks cleanup-grade directed proof. | Verify six fields, active-low polarity, packing/masking/readback, disable/enable, and reset. | `16_hex_display` | S0/S4 directed TB (1,774 checks, 3 mutations) + S5 bus/CPU + S6 board photos (B3/B4 RAW polarity, B5/B6 blank/restore) | VERIFIED |
+| `HEX-003` | Medium | BC | RAZ/WI CTRL, exact local decode, and sole-owner Shadow/resynchronization are approved targets, not current implementation evidence. | Implement and verify CTRL `[31:2]` RAZ/WI, exact offsets, reset `000000`, and explicit Shadow init/resync without routine HW RMW. | `16_hex_display`, `19_firmware_contract` | S1 CTRL RAZ/WI + S2 exact PADDR[15:0] decode + S3 driver Shadow init/resync (& 0x3) host TB + S5 CPU E2E + S6 board test | VERIFIED |
 | `HEX-004` | Low | OPT | DP/PWM/blink/per-digit features are unspecified. | Do not implement without a separate specification. | `16_hex_display` | n/a | DEFERRED |
+
+P10-HEX evidence: standalone APB baseline (S0), CTRL RAZ/WI (S1), exact local offset decode (S2), firmware Shadow synchronization and sole-owner contract (S3), directed functional regression and mutation detection (S4), bridge suppression, bus interconnect, and CPU E2E integration (S5), Quartus Fitter Pin report (42 pins [6:0], zero [7]) and Owner-confirmed board acceptance (S6, `reports/evidence/p10-hex-s6/summary.md`, `P10-HEX-S6-EV-01`, photos B0~B8) are complete. `HEX-001`, `HEX-002`, and `HEX-003` are now `VERIFIED`. This closes the HEX functional cleanup scope only; external I/O timing (`STA-002`) and whole-SoC physical closure remain open.
 
 ---
 
@@ -352,7 +354,7 @@ Phase 4A-GSENSOR evidence (private local evidence archive): the **G-sensor inter
 | VGA | render, VSync/swap, HW clear after arbitration/CDC fix |
 | UART1 | PC serial TX/RX |
 | UART0 | LoRa or electrical UART peer TX/RX/AUX |
-| HEX | decoded mode; raw mode if retained |
+| HEX | decoded mode; raw mode if retained (`P10-HEX-S6-EV-01` B0~B8 observed, OWNER_CONFIRMED) |
 | SW | all ten switches + local `sw_irq` instrumentation |
 | LED | all ten LEDs including LEDR9 under software control |
 | GPIO | selected expansion-header inputs/outputs; IRQ if practical |
@@ -550,3 +552,14 @@ are recorded in the private P09B final-evidence draft. `VERIFIED` is not propose
 | STA-002 | BLOCKED -> BLOCKED | no fabricated I/O delays; fresh STA confirms expected internal paths only | external I/O/electrical and ADC/VGA critical warnings |
 | VER-001/002/004/007 | IN_PROGRESS/IN_PROGRESS/IN_PROGRESS/OPEN -> IN_PROGRESS | Stage 5 regressions; fresh fit/STA; source->ELF->MIF->SOF chain | excluded negative branches and warning disposition remain open |
 | VER-005 | OPEN -> IN_PROGRESS | photo `SEQ=0x1450` plus separate user manual-tilt/SEQ≈`0x7C00` observation | not full board acceptance; no approved quantitative procedure, calibration/orientation matrix, long-duration or external timing evidence |
+
+## P10-HEX Implementation and Board Acceptance Note
+
+The six-digit seven-segment HEX Display cleanup scope is **VERIFIED** across RTL, firmware, directed simulation, and physical FPGA board acceptance (Issue #3):
+
+1. **RTL Implementation:** S1 completed `HEX_CTRL[31:2]` RAZ/WI (`ctrl_reg[1:0]` storage only, `PWDATA[1:0]` latched on write, upper bits read 0). S2 completed `PADDR[15:0]` exact decode for `0x0000`, `0x0004`, `0x0008`, `0x000C`; unmapped local offsets read zero with no write side effect.
+2. **Firmware Contract:** S3 completed `firmware/drivers/hex_display.c` and `firmware/include/hex_display.h` updates: `hex_display_init()` establishes boot Shadow and hardware `CTRL=1`, `hex_display_resync()` resynchronizes software Shadow after a HEX-only reset or out-of-band change, and `HEX_CTRL_MASK` (`0x3`) enforces the sole-owner contract without routine hardware RMW.
+3. **Verification:** S0 standalone APB baseline (71 checks), S1 CTRL RAZ/WI, S2 exact decode, S3 host driver shadow/resync, S4 directed functional regression (1,774 checks, 3 mutations detected), and S5 multi-tier integration (L1 bridge suppression/2-cycle ERROR, L2 SoC bus interconnect immutability, L3 RV32I CPU E2E) all pass with zero regressions.
+4. **Build and Physical Acceptance:** S6 Quartus Prime Lite 19.1 build completed cleanly (0 errors, 42 unique pins `HEX0..HEX5[0:6]`, zero `HEX[7]`). Physical board acceptance on MAX 10 DE10-Lite with `firmware/apps/s6_hex_board_acceptance.c` confirmed states B0 (reset `000000`), B1 (decoder `123456`), B2 (decoder `ABCDEF`), B3 (active-low single-segment RAW), B4 (multi-segment RAW `543210`), B5 (blank on ENABLE=0), B6 (retained B4 pattern on re-enable), and B7/B8 (repeated decoder loop regression check) as recorded in `reports/evidence/p10-hex-s6/summary.md` (`P10-HEX-S6-EV-01`, `OWNER_CONFIRMED`).
+
+This closes `HEX-001`, `HEX-002`, and `HEX-003` as `VERIFIED`. External I/O timing/electrical sign-off (`STA-002`) and ADC/VGA proximity/CDC scope remain open.

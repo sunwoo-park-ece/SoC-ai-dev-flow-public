@@ -297,17 +297,26 @@ LEFT/RIGHT ASCII mapping은 physical polarity 확인 전까지 board/application
 
 ## 14. HEX Display
 
-HEX driver를 사용할 때 driver가 CTRL shadow ownership을 갖는다. Owner-approved
-cleanup target에서 `hex_display.c`는 `HEX_CTRL`의 단일 software writer이며
-application/ISR direct write와 무단 concurrent writer는 금지한다. Shadow와
-CTRL write는 `[1:0]`만 (`& 0x3`) 유지하고 normal helper는 hardware RMW가
+HEX driver를 사용할 때 driver가 CTRL shadow ownership을 갖는다.
+`hex_display.c`는 `HEX_CTRL`의 단일 software writer이며 application/ISR
+direct write와 무단 concurrent writer는 금지한다. Shadow와 CTRL write는
+`[1:0]`만 (`& HEX_CTRL_MASK`, `0x3`) 유지하고 normal helper는 hardware RMW가
 아닌 Shadow 방식을 유지한다. 정상 system reset과 firmware initialization 후
 hardware CTRL/Shadow는 `0x1`이다.
 
-HEX-only reset 또는 out-of-band change가 의심되면 **다음 CTRL update 전**
-hardware CTRL을 읽고 `& 0x3`으로 Shadow를 명시적으로 resynchronize하는
-절차/API를 사용한다. 자동 reset detection, direct write의 허용, API 구현
-완료를 뜻하지 않으며 future ISR/multi-context는 driver access를 직렬화한다.
+드라이버는 명시적인 부팅 초기화 및 재동기화 API를 공식 제공한다:
+
+```c
+void hex_display_init(void);
+void hex_display_resync(void);
+```
+
+부팅 시 펌웨어는 `hex_display_init()`을 호출하여 부팅 Shadow(`0x1`)를 확립하고
+하드웨어 `CTRL = 0x1`을 쓴다. 실행 중 HEX 단독 리셋이 발생하거나 out-of-band 변경이
+의심되는 경우, 호출자는 **다음 CTRL update 전** `hex_display_resync()`를 호출하여
+하드웨어 CTRL을 읽고 `& HEX_CTRL_MASK`로 마스킹하여 Shadow를 갱신한다. 자동 reset
+detection을 뜻하지 않으며 드라이버 외 직접 쓰기를 허용하지 않는다. 향후
+multi-context/ISR 사용 시에는 드라이버 접근을 직렬화해야 한다.
 
 Decoded mode packing:
 
@@ -551,13 +560,13 @@ Target driver는 coherent X/Y + valid/sequence contract를 사용한다.
 
 Board axis polarity/WASD mapping은 generic ADC acquisition과 가능하면 분리한다.
 
-## 28. Target HEX
+## 28. Verified HEX Contract (Active Baseline)
 
 HEX driver가 CTRL의 단일 state owner다. application/ISR direct `HEX_CTRL`
-write는 금지한다. 승인된 target은 routine hardware RMW 대신 Shadow를
-유지하고 `[1:0]`만 보존하며, HEX-only reset 또는 out-of-band change 후
-명시적 resynchronization을 요구한다. future multi-context에서는 이 단일
-owner의 access를 직렬화해야 한다.
+write는 금지한다. 검증된 계약은 routine hardware RMW 대신 Shadow를 유지하고
+`HEX_CTRL_MASK`(`0x3`)를 통해 `[1:0]`만 보존하며, `hex_display_init()` 및
+`hex_display_resync()`를 통한 명시적 Shadow 초기화/재동기화를 제공한다.
+future multi-context에서는 이 단일 owner의 access를 직렬화해야 한다.
 
 DP는 RTL/top/QSF가 명시적으로 확장되기 전까지 unavailable이다.
 

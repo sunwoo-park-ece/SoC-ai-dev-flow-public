@@ -143,7 +143,7 @@ Phase F — regression / Quartus / board / report
 | `APB-002` | High | BC | `[27:20]` ignored -> alias. | `0x4000_0000..0x400F_FFFF`만 canonical decode. | `01_memory_map`, `04_ahb_fabric`, `05_apb_subsystem` | alias negative | VERIFIED |
 | `APB-003` | High | BC | SETUP에서 new PWDATA stable 미보장. | SETUP→ACCESS address/control/data stable. | `05_apb_subsystem` | APB assertion | VERIFIED |
 | `APB-004` | High | BC | reserved/invalid silent zero/ready. | 승인된 A2 전체 offset 검증, side-effect gate, default `PSLVERR`, bridge ERROR 구현. | `05_apb_subsystem`, `20_board_io_architecture` | reserved/offset tests | VERIFIED |
-| `APB-005` | Medium | BC | peripheral register mirror; P06B Timer와 P07 UART sub-scope만 종결. | touched block은 canonical offset만 decode. | peripheral specs | Timer와 두 UART full slot-offset decode/mirror 제거; UART invalid request bridge ERROR·no real PSEL·no side effect 및 실제 backpressure PASS; 나머지 peripheral test 필요 | OPEN |
+| `APB-005` | Medium | BC | peripheral register mirror; P06B Timer, P07 UART 및 P10-HEX Display sub-scope 종결. | touched block은 canonical offset만 decode. | peripheral specs | Timer, 두 UART, HEX Display: full slot-offset decode/mirror 제거; HEX PADDR[15:0] exact decode 및 bridge 억제/2사이클 ERROR 검증; 나머지 peripheral test 필요 | OPEN |
 | `APB-006` | Medium | AXI | PSTRB 없음. | cleanup은 aligned32 유지. | `05_apb_subsystem`, `19_firmware_contract` | partial-write dependency 없음 | DEFERRED |
 
 Phase 4A-3A 시점에는 slot 8/9와 후속 ISA/trap 근거가 남아 `APB-001`과 `TRAP-003`이 `IN_PROGRESS`였다. 이후 3B/3B3R이 `TRAP-003`을, P04 공개 검증·사용자 post-fit 검토가 `APB-001`을 종결하여 현재 둘 다 `VERIFIED`다. 전체 baseline cleanup 종료를 뜻하지 않는다.
@@ -286,10 +286,12 @@ UART/LoRa, external-I/O electrical acceptance가 아니다. `UART-005`는 OPEN,
 
 | ID | Sev | Gate | 핵심 작업 | Status |
 |---|---|---|---|---|
-| `HEX-001` | High | BC | 과거 local QSF의 HEXx[7]; 승인된 공개 pin Tcl은 이미 [6:0] | IN_PROGRESS |
-| `HEX-002` | Medium | BC | retained RAW mode의 cleanup-grade directed proof | OPEN |
-| `HEX-003` | Medium | BC | RAZ/WI CTRL, exact local decode, sole-owner Shadow/resync는 승인 target이며 구현 evidence 아님 | OPEN |
-| `HEX-004` | Low | OPT | DP/PWM/blink 등 별도 spec 전 금지 | DEFERRED |
+| `HEX-001` | High | BC | 과거 local QSF의 HEXx[7]; 승인된 공개 pin Tcl은 이미 [6:0] | 최종 Quartus Fitter Pin 리포트 (42개 HEX[0:6], 0개 HEX[7]) + 보드 수락 (P10-HEX-S6-EV-01 / B0~B8) | VERIFIED |
+| `HEX-002` | Medium | BC | retained RAW mode의 cleanup-grade directed proof | S0/S4 디렉티드 TB (1,774개 체크, 3종 변이 검출) + S5 버스/CPU + S6 보드 사진 (B3/B4 RAW 극성, B5/B6 블랭킹/복구) | VERIFIED |
+| `HEX-003` | Medium | BC | RAZ/WI CTRL, exact local decode, sole-owner Shadow/resync는 승인 target이며 구현 evidence 아님 | S1 CTRL RAZ/WI + S2 exact PADDR[15:0] decode + S3 드라이버 Shadow init/resync (& 0x3) 호스트 TB + S5 CPU E2E + S6 보드 검증 | VERIFIED |
+| `HEX-004` | Low | OPT | DP/PWM/blink 등 별도 spec 전 금지 | n/a | DEFERRED |
+
+P10-HEX 근거: 독립 APB 베이스라인(S0), CTRL RAZ/WI(S1), exact local offset decode(S2), 펌웨어 Shadow 동기화 및 단일 소유자 계약(S3), 디렉티드 기능 회귀 및 변이 검출(S4), 브리지 억제/SoC 버스 상호연결/CPU E2E 통합(S5), Quartus Fitter Pin 리포트(42개 핀 [6:0], [7] 0개) 및 Owner 확인 보드 수락(S6, `reports/evidence/p10-hex-s6/summary.md`, `P10-HEX-S6-EV-01`, 사진 B0~B8) 완료. `HEX-001`, `HEX-002`, `HEX-003`이 `VERIFIED`로 종결됨. 이는 HEX 기능 클린업 범위에 한하며, 외부 I/O 타이밍(`STA-002`) 및 전체 SoC 물리 클로저는 미종결 상태를 유지함.
 
 ---
 
@@ -338,7 +340,7 @@ UART/LoRa, external-I/O electrical acceptance가 아니다. `UART-005`는 OPEN,
 - VGA render/VSync/swap/HW clear,
 - UART1 PC TX/RX,
 - UART0 LoRa/electrical TX/RX/AUX,
-- HEX decoded/raw(if retained),
+- HEX decoded/raw (`P10-HEX-S6-EV-01` B0~B8 관측, OWNER_CONFIRMED 완료),
 - SW[9:0] + sw_irq instrumentation,
 - LEDR[9:0],
 - selected GPIO I/O + IRQ,
@@ -479,3 +481,14 @@ private final-evidence draft에 기록한다. 여기서는 `VERIFIED`를 제안�
 | STA-002 | BLOCKED -> BLOCKED | 임의 I/O delay 없음; fresh STA는 내부 path만 확인 | 외부 I/O/electrical, ADC/VGA critical warning |
 | VER-001/002/004/007 | IN_PROGRESS/IN_PROGRESS/IN_PROGRESS/OPEN -> IN_PROGRESS | Stage 5 regression, fresh fit/STA, source->ELF->MIF->SOF chain | 제외 negative branch 및 warning 처분 미종결 |
 | VER-005 | OPEN -> IN_PROGRESS | 사진 `SEQ=0x1450` 및 사용자 별도 수동 기울임/SEQ≈`0x7C00` 관측 | 전체 board acceptance가 아님: 승인된 정량 절차, calibration/orientation matrix, 장시간·외부 timing 근거 부족 |
+
+## P10-HEX 구현 및 보드 수락 노트
+
+6자리 7세그먼트 HEX Display 클린업 범위는 RTL, 펌웨어, 디렉티드 시뮬레이션, 물리 FPGA 보드 수락(Issue #3) 전반에 걸쳐 **VERIFIED**로 검증 완료됨:
+
+1. **RTL 구현:** S1에서 `HEX_CTRL[31:2]` RAZ/WI 완료(`ctrl_reg[1:0]`만 저장, 쓰기 시 `PWDATA[1:0]` 래치, 상위 비트 읽기 0). S2에서 `PADDR[15:0]` 4개 오프셋(`0x0000`, `0x0004`, `0x0008`, `0x000C`) 완전 일치 디코드 완료(미매핑 로컬 오프셋 접근 시 읽기 0, 쓰기 side effect 없음).
+2. **펌웨어 계약:** S3에서 `firmware/drivers/hex_display.c` 및 `firmware/include/hex_display.h` 갱신 완료: `hex_display_init()`은 부팅 Shadow 및 하드웨어 `CTRL=1`을 확립하고, `hex_display_resync()`는 HEX 단독 리셋 또는 out-of-band 변경 후 소프트웨어 Shadow를 재동기화하며, `HEX_CTRL_MASK`(`0x3`)를 통해 루틴 하드웨어 RMW 없이 단일 소유자 Shadow 계약을 적용함.
+3. **검증:** S0 독립 APB 베이스라인(71 checks), S1 CTRL RAZ/WI, S2 exact decode, S3 호스트 드라이버 shadow/resync, S4 디렉티드 기능 회귀(1,774 checks, 3종 뮤테이션 검출), S5 다계층 통합(L1 브리지 억제/2사이클 ERROR, L2 SoC 버스 불변성, L3 RV32I CPU E2E) 모두 회귀 없이 통과.
+4. **빌드 및 물리 수락:** S6 Quartus Prime Lite 19.1 빌드 클린 완료(오류 0, 42개 유효 핀 `HEX0..HEX5[0:6]`, 0개 `HEX[7]`). MAX 10 DE10-Lite 보드에서 `firmware/apps/s6_hex_board_acceptance.c` 실행을 통해 B0(리셋 `000000`), B1(디코더 `123456`), B2(디코더 `ABCDEF`), B3(active-low 단일 세그먼트 RAW), B4(멀티 세그먼트 RAW `543210`), B5(ENABLE=0 시 블랭킹), B6(재활성화 시 B4 패턴 보존 복구), B7/B8(디코더 반복 루프 회귀 확인) 상태를 `reports/evidence/p10-hex-s6/summary.md`(`P10-HEX-S6-EV-01`, `OWNER_CONFIRMED`)로 확인.
+
+이를 통해 `HEX-001`, `HEX-002`, `HEX-003`이 `VERIFIED`로 종결됨. 외부 I/O 타이밍/전기적 서명(`STA-002`) 및 ADC/VGA proximity/CDC 범위는 미종결 상태를 유지함.

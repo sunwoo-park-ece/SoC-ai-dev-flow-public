@@ -1,6 +1,6 @@
 # Baseline SoC HEX Display Specification
 
-> **Status:** DRAFT — current RTL is distinguished from the Owner-approved HEX Cleanup target (private Issue #3, 2026-09-21). Target behavior is not implementation or verification evidence.
+> **Status:** VERIFIED / ACTIVE BASELINE — Issue #3 HEX cleanup target is implemented in RTL/firmware and verified through directed simulation, Quartus build, and physical FPGA board acceptance (2026-09-24).
 >
 > **Canonical language:** English. If this file and `spec/kor/16_hex_display.ko.md` conflict, this file is authoritative.
 >
@@ -118,9 +118,10 @@ only `HEX0..HEX5[6:0]`. `scripts/wsl/private_quartus.py` generates the
 private QSF and includes that public pin Tcl with a `source` statement.
 
 Do not create a speculative deletion patch for absent public `HEXx[7]`
-lines or reintroduce DP support. Generated-QSF/Pin Report checks and
-source-matched physical-board acceptance remain separate, unperformed
-evidence.
+lines or reintroduce DP support. In P10-HEX S6, the final Quartus Fitter Pin
+report verified 42 unique pins `HEX0..HEX5[0:6]` with zero `HEX[7]` pins, and
+physical board acceptance confirmed correct six-digit operation
+(`reports/evidence/p10-hex-s6/summary.md`, `P10-HEX-S6-EV-01`).
 
 ## 4. Register Map
 
@@ -133,26 +134,24 @@ The canonical software-visible register offsets are:
 | `0x08` | `HEX_RAW_LOW` | R/W | `[20:0]` | Raw segment patterns for HEX2..HEX0 |
 | `0x0C` | `HEX_RAW_HIGH` | R/W | `[20:0]` | Raw segment patterns for HEX5..HEX3 |
 
-**Current RTL** decodes only:
+The active RTL (`APB_HEX_display.v`) implements exact offset decode on the
+full 16-bit slot offset:
 
 ```verilog
-PADDR[3:2]
+PADDR[15:0]
 ```
 
-so a testbench that directly selects the HEX slave can trigger a 16-byte
-local mirror. The **current production path** is distinct: the AHB/APB
-bridge's slot-7 allowlist forwards only the four exact canonical offsets.
-Noncanonical CPU accesses are blocked without HEX `PSEL` and follow the
-bridge's AHB ERROR path; software has no supported alias.
+The slave compares `PADDR[15:0]` with exactly `16'h0000`, `16'h0004`,
+`16'h0008`, and `16'h000C`. Every other local offset, including unaligned and
+previously mirrored offsets, reads zero and has no write side effect,
+without altering registers or physical HEX outputs. `PREADY=1` is preserved
+and no `PSLVERR` port is added.
 
-The **Owner-approved cleanup target** is for the HEX slave itself to compare
-the complete `PADDR[15:0]` offset with exactly `0x0000`, `0x0004`,
-`0x0008`, and `0x000C`. Every other offset, including unaligned and
-previously mirrored offsets, shall read zero and have no write side effect,
-without changing registers or HEX outputs. Preserve `PREADY=1`; do not add
-a `PSLVERR` port. Preserve the production bridge allowlist, `PSEL`
-suppression, and AHB ERROR behavior. Local-slave and CPU-through-bridge
-rejection require distinct tests.
+At the SoC interconnect level, the AHB/APB bridge's slot-7 allowlist
+forwards only these four exact canonical offsets. Noncanonical CPU accesses
+are blocked without asserting HEX `PSEL` and follow the bridge's 2-cycle AHB
+ERROR path (`HRESP=01`). Both the local-slave exact decode and the
+CPU-through-bridge ERROR paths are verified (S2, S5).
 
 The current APB subsystem has no `PSTRB`, so these registers are defined as 32-bit MMIO accesses even though only subsets of each register are functional.
 
@@ -221,13 +220,12 @@ Functional bits are:
 | 1 | `RAW_MODE` | `0`: hexadecimal decoder mode, `1`: raw segment mode |
 | 31:2 | Reserved | Owner-approved RAZ/WI: those bits are write-ignored and always read zero; a valid write still updates `[1:0]` |
 
-**Current RTL** stores the full 32-bit CTRL value, although only bits 0 and 1
-affect outputs. This is an implementation gap, not the approved behavior.
-The **cleanup target** retains only `PWDATA[1:0]` on a valid CTRL write and
-reads `{30'b0, CTRL[1:0]}`. Reserved-bit values in a write are ignored, but
-that same valid write updates functional bits `[1:0]` normally. Reserved-bit
-values must not alter stored state, output, or later reads. Firmware writes
-reserved bits as zero.
+The active RTL stores only the 2-bit functional field `ctrl_reg[1:0]`.
+Reserved bits `[31:2]` are RAZ/WI (Read-As-Zero / Write-Ignored): writes to
+`HEX_CTRL` latch only `PWDATA[1:0]` while bits `[31:2]` are ignored; reads
+return `{30'b0, ctrl_reg[1:0]}`. A write containing nonzero values in
+`[31:2]` updates functional bits `[1:0]` normally without corrupting stored
+state or outputs. Firmware driver writes enforce `& HEX_CTRL_MASK` (`0x3`).
 
 ### 6.1 Display Disable
 
@@ -419,20 +417,28 @@ static uint32_t hex_ctrl_shadow = HEX_CTRL_ENABLE;
 
 and uses it to preserve `ENABLE` and `RAW_MODE` across helper calls.
 
-The Owner-approved target makes `hex_display.c` the sole software writer of
-`HEX_CTRL`; direct application/ISR writes and uncontrolled concurrent
-writers are prohibited. Keep the Shadow design rather than making normal
-helpers use hardware read-modify-write. Shadow and CTRL writes contain only
-functional bits `[1:0]` (`& 0x3`). After a normal system reset and firmware
-initialization, hardware CTRL and Shadow are both `0x1`.
+The firmware driver (`hex_display.c`) is the sole software writer of
+`HEX_CTRL`; direct application/ISR writes are prohibited. The driver
+maintains the Shadow architecture rather than routine hardware
+read-modify-write. Shadow and hardware writes strictly enforce
+`& HEX_CTRL_MASK` (`0x3`).
 
-Define an explicit initialization/resynchronization procedure or API. If the
-HEX hardware alone resets during execution, or an out-of-band change is
-suspected, the caller resynchronizes **before the next CTRL update** by
-reading hardware CTRL, masking `& 0x3`, and updating Shadow. No automatic
-reset detection is implied, and resynchronization does not authorize direct
-out-of-driver writes. The API name and implementation are not claimed to
-exist yet. A future multi-context/ISR owner must serialize driver accesses.
+The initialization and resynchronization APIs are implemented:
+
+```c
+/* firmware/include/hex_display.h */
+void hex_display_init(void);
+void hex_display_resync(void);
+```
+
+- `hex_display_init()`: Establishes boot Shadow (`0x1`) and writes hardware `CTRL = 0x1`.
+- `hex_display_resync()`: If the HEX hardware alone resets during execution,
+  or an out-of-band change is suspected, the caller invokes `hex_display_resync()`
+  before the next CTRL update. It reads hardware `HEX_CTRL`, masks `& HEX_CTRL_MASK`,
+  and updates `hex_ctrl_shadow`.
+
+This does not imply automatic reset detection or authorize out-of-driver
+writes. Any future multi-context/ISR usage must serialize driver access.
 
 ## 11. Monitor Packing Used by Baseline Firmware
 
@@ -477,35 +483,20 @@ Physical display correctness requires board observation or pin-level measurement
 
 ## 13. Validation Evidence
 
-The current `display_smoke` diagnostic explicitly exercises the decoded HEX path.
+The HEX display peripheral has a complete multi-tier verification and acceptance chain across S0 through S6:
 
-Its firmware:
-
-1. enables the HEX display,
-2. selects decoder mode,
-3. writes startup marker `b00701`,
-4. cycles the six digits through `000000`, `111111`, ... `FFFFFF`,
-5. reads back the `HEX_VALUE` register and emits an error marker on mismatch.
-
-A historical board-result statement reports successful diagnostic behavior,
-but the public snapshot lacks sufficient original provenance to make it fresh,
-source-matched HEX Cleanup board acceptance.
-
-This evidence supports:
-
-- APB access to the active HEX peripheral,
-- 24-bit decoder-mode value packing,
-- historical decoder-path physical operation.
-
-It does **not** independently prove:
-
-- raw segment mode,
-- every raw bit pattern,
-- display-disable behavior,
-- decimal-point behavior,
-- reserved-bit RAZ/WI, local mirror rejection, or generated pin assignments.
-
-Those items require separate directed verification if they become important to a future milestone.
+1. **S0 Standalone APB Baseline (`tb_hex_s0_apb.sv`):** 71 checks verifying reset values, PREADY, canonical register access, ACCESS-only writes, ENABLE blanking/restoration, and active-low decoder mapping with intentional fault-injection rejection.
+2. **S1 CTRL RAZ/WI (`tb_hex_s1_ctrl_razwi.sv`):** Confirmed `[31:2]` write-ignored and read-as-zero without side effects on `[1:0]`.
+3. **S2 Exact Offset Decode (`tb_hex_s2_exact_decode.sv`):** Confirmed full `PADDR[15:0]` decode for `0x0000`, `0x0004`, `0x0008`, `0x000C`, and read-zero/write-no-side-effect for all unmapped/unaligned/mirrored offsets.
+4. **S3 Firmware Shadow Host Suite (`hex_s3_shadow_host.c`):** Verified boot initialization (`hex_display_init()`), post-reset resynchronization (`hex_display_resync()`), mask enforcement (`& 0x3`), and sole-owner Shadow integrity.
+5. **S4 Directed Functional Suite (`tb_hex_s4_functional.sv`):** 1,774 checks covering all 16 hexadecimal patterns per digit, active-low raw polarity, single/multi-segment packing, blanking, mode switching, and 100% detection across 3 mutation suites.
+6. **S5 Interconnect & CPU E2E Suite (`tb_hex_s5_*.sv`):**
+   - Tier L1 (Bridge): 4 canonical offsets forward with zero wait; noncanonical offsets suppressed with 2-cycle AHB ERROR.
+   - Tier L2 (SoC Bus): Verified bus interconnect and continuous register immutability during cross-slave traffic.
+   - Tier L3 (CPU E2E): RV32I load/store execution, cycle-accurate access-fault exceptions (cause 5/7) on invalid offsets, and precise MEPC alignment.
+7. **S6 FPGA Build and Physical Acceptance (`P10-HEX-S6-EV-01`):**
+   - Quartus Prime Lite 19.1 Fitter Pin report verified 42 unique pins `HEX0..HEX5[0:6]` with zero `HEX[7]` pins.
+   - Owner-confirmed board acceptance application (`firmware/apps/s6_hex_board_acceptance.c`) on MAX 10 DE10-Lite verified states B0 through B6 plus repeated B1/B2 regression checks, documented with photo sequence B0~B8 in `reports/evidence/p10-hex-s6/summary.md`.
 
 ## 14. Interrupt and Error Behavior
 
@@ -517,31 +508,21 @@ error status = none
 PREADY       = 1
 ```
 
-The target invalid-local-offset behavior is read-zero/write-ignore. The
-existing production bridge remains responsible for blocking noncanonical CPU
-requests and returning AHB ERROR. Do not add an IRQ or change bus-error
-topology in HEX Cleanup.
+Invalid local offsets read zero and ignore writes without side effects.
+The production bridge blocks noncanonical CPU requests without asserting
+HEX `PSEL` and returns 2-cycle AHB ERROR (`HRESP=01`). Do not add an IRQ
+or change bus-error topology in HEX display.
 
-The display is therefore a polling/configuration-style output peripheral and shall not be assigned a PLIC source in the baseline.
+The display is a polling/configuration-style output peripheral and is not
+assigned a PLIC source in the baseline.
 
-There is no reason to add an interrupt solely for ordinary display updates unless a future architecture adds autonomous scan/DMA/event behavior that requires one.
+## 15. Owner-Approved Cleanup Scope (Issue #3) — Status Resolution
 
-## 15. Owner-Approved Cleanup Scope (Issue #3, 2026-09-21)
-
-1. **HEX-001:** retain the approved public `[6:0]` pin Tcl; no imaginary
-   public pin patch. Generated-QSF/Pin Report and current board evidence are
-   unverified.
-2. **HEX-002:** retain RAW mode and independently verify six fields, mapping,
-   active-low output, masking/readback, disable/enable, and reset.
-3. **HEX-003:** CTRL reserved `[31:2]` is RAZ/WI; retain reset decoded
-   `000000`; use sole-owner firmware Shadow with explicit initialization
-   and resynchronization, not routine hardware RMW.
-4. **Local decode / APB-005 sub-scope:** remove the internal 16-byte mirror
-   by exact full-offset checks while retaining the bridge behavior.
-5. **HEX-004 remains deferred:** do not add DP, PWM, blink, per-digit, or
-   atomic-RAW features.
-
-These are approved requirements, not implementation or verification status.
+1. **HEX-001 (VERIFIED):** Retained approved public `[6:0]` pin Tcl; verified by final Quartus Fitter Pin report (42 pins, zero `[7]`) and physical board acceptance B0~B8.
+2. **HEX-002 (VERIFIED):** Retained RAW mode; independently verified all six fields, active-low polarity, packing, masking, readback, disable/enable, and reset in S0, S4, S5, and S6.
+3. **HEX-003 (VERIFIED):** CTRL reserved `[31:2]` RAZ/WI implemented in RTL; reset decoded `000000` verified; sole-owner firmware Shadow with `hex_display_init()` and `hex_display_resync()` implemented and verified.
+4. **Local decode / APB-005 sub-scope (VERIFIED):** RTL decodes exact `PADDR[15:0]` offsets; internal mirrors removed; bridge AHB ERROR verified.
+5. **HEX-004 (DEFERRED):** DP, PWM, blink, per-digit, and atomic-RAW features remain deferred without a separate specification.
 
 ## 16. Directed Verification Requirements
 
@@ -586,5 +567,6 @@ Until superseded by an approved future specification:
 14. No interrupt source exists.
 15. Historical QSF `HEXx[7]` assignments are not an architectural feature;
     the approved public `[6:0]` configuration is retained.
-16. Exact local-offset decoding and explicit firmware Shadow resynchronization
-    remain cleanup targets until RTL/FW verification proves them implemented.
+16. Exact local-offset decoding (`PADDR[15:0]`) and explicit firmware Shadow
+    resynchronization (`hex_display_init()`, `hex_display_resync()`) are
+    verified active baseline invariants.

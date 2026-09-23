@@ -332,19 +332,25 @@ The existing LEFT/RIGHT-to-ASCII mapping shall be treated as a board/application
 ## 14. HEX Display Rules
 
 The HEX driver owns the software control shadow when that driver is used.
-The Owner-approved cleanup target makes `hex_display.c` the sole software
-writer of `HEX_CTRL`: application/ISR direct writes and uncontrolled
-concurrent writers are prohibited. Shadow and CTRL writes retain only bits
-`[1:0]` (`& 0x3`); normal helpers remain Shadow-based rather than
-hardware read-modify-write. Normal system reset plus firmware initialization
-sets hardware CTRL and Shadow to `0x1`.
+`hex_display.c` is the sole software writer of `HEX_CTRL`: application/ISR
+direct writes and uncontrolled concurrent writers are prohibited. Shadow and
+CTRL writes retain only bits `[1:0]` (`& HEX_CTRL_MASK`, `0x3`); normal
+helpers remain Shadow-based rather than hardware read-modify-write. Normal
+system reset plus firmware initialization sets hardware CTRL and Shadow to `0x1`.
 
-Define an explicit initialization/resynchronization procedure or API. After a
-HEX-only reset during execution, or a suspected out-of-band change, the caller
-must read hardware CTRL, mask `& 0x3`, and update Shadow **before the next
-CTRL update**. This does not imply automatic reset detection, authorize
-external writes, or claim that the API is implemented. A future
-ISR/multi-context owner must serialize driver access.
+The driver implements explicit boot initialization and resynchronization APIs:
+
+```c
+void hex_display_init(void);
+void hex_display_resync(void);
+```
+
+At boot, firmware calls `hex_display_init()` to establish the boot shadow (`0x1`)
+and write hardware `CTRL = 0x1`. After a HEX-only reset during execution, or a
+suspected out-of-band change, the caller invokes `hex_display_resync()` **before
+the next CTRL update** to read hardware CTRL, mask `& HEX_CTRL_MASK`, and update
+Shadow. This does not imply automatic reset detection or authorize out-of-driver
+writes. Any future ISR/multi-context owner must serialize driver access.
 
 Decoded-value mode packs:
 
@@ -653,16 +659,17 @@ The target driver shall consume a coherent X/Y publication with validity/sequenc
 
 Board-specific axis polarity and ASCII/control mapping shall be separated from the generic ADC acquisition layer where practical.
 
-## 28. Target HEX Contract
+## 28. Verified HEX Contract (Active Baseline)
 
-The HEX driver remains the sole owner of control state; application/ISR direct
-writes to `HEX_CTRL` are prohibited. The approved target retains Shadow
-rather than routine hardware RMW, retains only `[1:0]`, and requires
-explicit resynchronization after a HEX-only reset or suspected out-of-band
-change. Any future multi-context use must serialize this one authoritative
-owner.
+The HEX driver is the sole owner of control state; application/ISR direct
+writes to `HEX_CTRL` are prohibited. The verified contract retains Shadow
+rather than routine hardware RMW, retains only `[1:0]` via `HEX_CTRL_MASK` (`0x3`),
+and provides `hex_display_init()` and `hex_display_resync()` for explicit
+Shadow initialization and resynchronization. Any future multi-context use
+must serialize this one authoritative owner.
 
-Decimal-point behavior shall remain unavailable unless RTL/top-level/QSF are intentionally extended and the HEX specification is revised.
+Decimal-point behavior shall remain unavailable unless RTL/top-level/QSF are
+intentionally extended and the HEX specification is revised.
 
 ## 29. Target AES-GCM Contract
 
