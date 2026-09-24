@@ -155,7 +155,7 @@ Phase 4A-3A 시점에는 slot 8/9와 후속 ISA/trap 근거가 남아 `APB-001`�
 | `RST-001` | High | BC | 과거 domain별 assertion/release 불일치와 cold-start 비결정성은 P05 reset architecture로 해결됨. | 필요한 곳의 async assertion, HCLK/destination-sync release, deterministic LOW power-up, 1,000,000-cycle qualification을 보존. | P05 all-domain reset + fitted synchronizer/power-up + positive recovery/removal | VERIFIED |
 | `RST-002` | High | BC | 과거 generated-domain release/PLL-ready gap은 baseline VGA, ADC project logic, PCLK-only G-sensor에서 해결됨. | VGA `locked` qualification, pclk_25/adc_sys_clk local release sync, vendor-managed ADC/Qsys reset, G-sensor 내부 SPI clock 부재를 보존. | P05 lock/reset + fitted PLL/reset/clock inventory | VERIFIED |
 | `CDC-001` | High | BC | 활성 VGA ownership crossing의 정적 CDC closure가 확립되지 않음. | frame-safe CDC/ownership handshake. | static CDC sign-off NOT_RUN / unresolved | OPEN |
-| `CDC-002` | Blocker | BC | Gsensor XYZ direct CDC. | atomic XYZ + VALID/SEQ. | async pattern | OPEN |
+| `CDC-002` | Blocker | BC | 과거 spi_clk->PCLK multi-bit CDC는 A6에서 제거됨; P09B가 LIVE/HOLD 발행으로 torn sample을 해결함; 독립 CDC/negative/물리 closure 잔여. | LIVE/HOLD를 통한 PCLK 소프트웨어 XYZ snapshot + VALID/SEQ 보존; 잔여 closure evidence 완료. | first-sample validity, APB read/refresh 및 atomic XYZ 시험; async reset-negative/timing 잔여 | IN_PROGRESS |
 | `CDC-003` | Blocker | BC | ADC response direct CDC. | coherent XY publication. | torn-sample | OPEN |
 | `CDC-004` | Medium | BC | P05가 external async-input policy audit을 완료하고 reset/AUX 동작을 수정했으며 승인된 synchronizer를 보존함. | UART RX/AUX, G-sensor INT, reset button, SW, GPIO 구조와 level/pulse 제한을 보존. | P05 directed regression + fitted 36-chain/minimum-2-register review | VERIFIED |
 | `STA-001` | High | BC | generated clock/uncertainty constraint 부족. | 남은 VGA/ADC generated clock·관계·uncertainty, A6 active SPI PLL 제거, TimeQuest/CDC warning 검토. | TimeQuest clock/CDC | IN_PROGRESS |
@@ -241,12 +241,14 @@ UART/LoRa, external-I/O electrical acceptance가 아니다. `UART-005`는 OPEN,
 
 | ID | Sev | Gate | 핵심 작업 | Status |
 |---|---|---|---|---|
-| `GS-001` | Blocker | BC | atomic XYZ + VALID/SEQ | OPEN |
+| `GS-001` | Blocker | BC | HOLD snapshot + VALID/SEQ 원자적 발행 보존; 비동기 리셋/경합 잔여 검증 | IN_PROGRESS |
 | `GS-002` | High | BC | Phase 3 known-pattern X/Y/Z extraction 검증 완료; GS-001/CDC-002는 별개 | VERIFIED |
-| `GS-003` | Medium | BC | acquisition rate/INT policy | OPEN |
-| `GS-004` | Medium | BC | pre-first-sample validity | OPEN |
-| `GS-005` | High | BC | sim + board evidence | IN_PROGRESS |
+| `GS-003` | Medium | BC | 12-write 초기화 및 INT1/30ms watchdog 스케줄러 보존; 물리 INT1 파형 및 센서 ODR/IRQ 검증 | IN_PROGRESS |
+| `GS-004` | Medium | BC | 명시적 VALID 게이팅 및 리셋 시맨틱 보존; SPI/APB 경계 리셋-abort 코너 검증 | IN_PROGRESS |
+| `GS-005` | High | BC | 통합 디지털 경로/CPU/보드 기능 동작 확인(사진 SEQ=0x1450, 기울임 SEQ≈0x7C00); 정량 캘리브레이션/매트릭스/외부 SPI 타이밍 잔여 | IN_PROGRESS |
 | `GS-IRQ` | Medium | PLIC | PLIC source 선택 시 정의 | DEFERRED |
+
+`GS-002` 검증 근거(Phase 3): spec 기반 `rtl/peripherals/gsensor/spi_ee_config.v`와 `tb_gsensor_replacements.sv`가 56-bit `X=1234, Y=5678, Z=9ABC` 테스트를 통과함. P09B 기능 구현, 디지털 검증, RV32I CPU 통합 및 실질적인 FPGA 보드 G-sensor 동작은 베이스라인 사용 사례에 대해 사실상 완료됨. `GS-001`, `GS-003`, `GS-004`, `GS-005`는 엄격한 엔지니어링 종결 기준(철저한 리셋-negative/경합 커버리지, 물리 INT1 파형/ODR 특성 분석, 정량적 캘리브레이션/방향 매트릭스, 외부 SPI 타이밍 종결) 잔여로 인해 `IN_PROGRESS`를 유지함.
 
 ## 14. Private SPI
 
@@ -308,7 +310,7 @@ P10-HEX 근거: 독립 APB 베이스라인(S0), CTRL RAZ/WI(S1), exact local off
 | `FW-005` | High | BC | P04 driver 분리/host PASS, 필수 board evidence 없음 | OPEN |
 | `FW-006` | High | BC | SW/LED constants + 16-slot map migration | VERIFIED |
 | `FW-007` | High | BC | true GPIO/IRQ driver/host 구현; BOARDIO-001/002 dependency 해소, 명시적 GPIO board test 잔여 | IN_PROGRESS |
-| `FW-008` | High | BC | coherent Gsensor API | OPEN |
+| `FW-008` | High | BC | P09B gsensor_read_sample() 단일 소유자 API 구현; 리셋-negative/오용 코너 검증 잔여 | IN_PROGRESS |
 | `FW-009` | High | BC | coherent ADC API | OPEN |
 | `FW-010` | High | BC | AES hardening | OPEN |
 | `FW-011` | Medium | BC | stale LED/GPIO assumption 제거 | VERIFIED |
@@ -454,33 +456,27 @@ evidence로 유지한다. 그 이전 구간은
 risk이다. 승인된 VGA 기능 범위는 `VGA-001..006`만 VERIFIED로 바꾸며,
 CDC/FW 작업, Clean Baseline v1 release, 전체 timing/board closure를 뜻하지 않는다.
 
-## P09B Stage 1 spec 검토 표시 — Historical Stage 1 당시 기준 (tracker 종료 없음)
+## P09B 구현 및 트래커 통합 노트
 
-Stage 1 당시 `12_gsensor.ko.md`와 `19_firmware_contract.ko.md`의 G-sensor 제안 계약은 `GS-001`, `GS-003`, `GS-004`, `GS-005`, `CDC-002`, `FW-008`을 **명세 수준에서만** 다뤘다. 당시에는 P09B 생산 RTL·firmware·testbench·runner·Fitter/TimeQuest·board 검증이 수행되지 않았으며 위 tracker 상태도 그대로였다. 이전 `SPI-001` 검증은 역사적 11-write 디지털 파형에 한정되며 새 순서의 증거가 아니었다. `GS-IRQ`는 DEFERRED였고 ADXL345 외부 INT1은 acquisition 입력이지 CPU/PLIC interrupt source가 아니다.
+P09B 기능 구현, 디지털 검증, 실제 RV32I 통합, Quartus/Fitter/TimeQuest 내부 타이밍 검토 및 실질적인 FPGA 보드 G-sensor 동작은 베이스라인 사용 사례에 대해 사실상 완료됨:
 
-Stage 1 reset 수정도 당시에는 **목표일 뿐**이었다. Pinned A6에는 약 20 ms 공통 release qualification **뒤에** 약 20.97152 ms G-sensor local delay가 있었다. AC-18/19는 당시 예정된 부정/abort 검사로 **NOT_RUN**이었다. Sensor rail 준비, startup, 물리 INT1, pin timing, board XYZ는 별도 gate였다.
+- **구현 상태:** Public 베이스라인에 완료/통합됨 (PCLK 단일 도메인 컨트롤러, 공통 `PRESETn`, 12-write 초기화, INT1/30ms watchdog 스케줄러, LIVE/HOLD 코히어런트 스냅샷 ABI, `gsensor_read_sample()` 펌웨어 드라이버).
+- **베이스라인 기능적 FPGA 보드 가용성:** 현재 프로젝트 용도로 입증 및 실질적 수락 완료 (사진 `SEQ=0x1450`, 사용자 별도 관측 `SEQ≈0x7C00`, 동적 기울임 반응).
+- **트래커 종결:** `GS-001`, `GS-003`, `GS-004`, `GS-005`, `CDC-002`, `FW-008`은 단순 보드 동작보다 엄격한 공학 종결 기준을 적용하므로 `IN_PROGRESS`를 유지함 (`STA-002`는 `BLOCKED` 유지). P09B 통합 전에는 `GS-001`, `GS-003`, `GS-004`, `CDC-002`, `FW-008`이 `OPEN`으로 기록되어 있었음.
 
-## P09B 게시 준비 tracker 제안 (별도 tracker 승인 필요)
+남은 비-VERIFIED 상태는 좁게 정의된 잔여 증거 갭에 기인함:
+1. **GS-001 (코히어런트 XYZ / VALID / SEQ):** 기능이 구현되고 정상/focused/CPU 경로에서 검증됨. 잔여 갭은 비동기 리셋의 APB 수명주기 중첩, CAPTURE/RELEASE 대비 리셋, 샘플 완료 경계 리셋 등 견고성 증거임.
+2. **GS-003 (획득 정책):** 12-write 구성, INT1 트리거 획득 및 30ms watchdog 정책이 구현되고 디지털 검증됨. 잔여 갭은 물리 INT1 파형/매핑 검증, 센서 ODR 대 IRQ 동작 분석 등 물리 특성 분석임.
+3. **GS-004 (첫 샘플 유효성 / 리셋 시맨틱):** VALID/리셋 동작이 존재하며 정상 동작이 검증됨. 잔여 갭은 활성 SPI 트랜잭션, APB SETUP/ACCESS, HOLD 소유권 및 CAPTURE/RELEASE 경계 전반의 리셋-abort 코너 커버리지임.
+4. **GS-005 (전체 G-sensor 클린업/수락):** 보드 기능 동작 확인. 정량적 캘리브레이션, 체계적 방향 매트릭스, 물리 INT1 파형 증거, 장시간 SEQ 무결성 스트레스 및 외부 ADXL345 SPI 타이밍/전기적 종결(`STA-002`) 미완료.
+5. **CDC-002:** 과거 안전하지 않은 `spi_clk -> PCLK` 크로싱은 이미 제거됨; P09B는 LIVE/HOLD 발행을 통해 torn XYZ를 해결함. 보수적인 검증 범위로 인해 IN_PROGRESS를 유지하며 활성 CDC 결함 때문이 아님.
+6. **FW-008 (코히어런트 G-sensor 펌웨어 API):** 코히어런트 드라이버가 존재하고 RV32I CPU 통합이 수행됨. 리셋-negative 커버리지, 소유권 오용/동시 호출자 코너 등 철저한 API 견고성 증거 잔여.
+7. **STA-002:** 외부 보드 I/O 타이밍 및 전기적 종결은 물리 측정 및 핀 타이밍 대기로 BLOCKED 유지.
 
-> **현행 Public 통합:** source/documentation 통합은 현행 상태가 되지만 이 표는 tracker 제안으로 남으며 어떤 행도 `VERIFIED`로 승격하지 않는다.
+### 역사적 Stage 1 및 Pre-P09 노트
 
-> **게시 정합성:** source/documentation 동시 게시는 구현된 P09B 범위를 설명할 수 있지만 tracker 상태를 변경하거나 어떤 행도 `VERIFIED`로 승격하지 않는다.
+Stage 1 당시 제안된 G-sensor 계약은 생산 RTL·펌웨어·테스트벤치·Quartus·보드 검증 전 명세 수준에서만 다루어졌음. 이전 A6 베이스라인은 ~20ms 공통 릴리스 뒤에 추가 ~20.97ms G-sensor 로컬 지연(`reset_delay.v`), `INT_ENABLE=0x00`을 포함한 11-write 시퀀스, ~8.192ms 폴링 폴백을 가졌음. 이러한 동작과 과거 OPEN 상태는 P09B 통합으로 대체됨.
 
-이 표는 이후 격리 후보의 로컬 제안이며 Public `main` 또는 tracker closure 변경이 아니다.
-위 Historical Stage 1 표시와 현재 후보 증거를 분리한다. RTL/FW 및 patch provenance는
-private final-evidence draft에 기록한다. 여기서는 `VERIFIED`를 제안하지 않는다.
-
-| 항목 | 현재 -> 제안 | 근거 / AC 처분 | 잔여 위험 |
-|---|---|---|---|
-| GS-001 | OPEN -> IN_PROGRESS | Stage 4/5 독립 HOLD/VALID/SEQ, CPU/host checker | reset/negative 및 외부 동작 미종결 |
-| GS-002 | VERIFIED -> VERIFIED | 기존 asymmetric-byte reconstruction 근거 유지 | 물리 orientation 주장 없음 |
-| GS-003/004 | OPEN/OPEN -> IN_PROGRESS | 12-write/INT1/watchdog source 및 focused/CPU 근거 | 물리 INT1 및 완전한 reset-negative coverage 미종결 |
-| GS-005 | IN_PROGRESS -> IN_PROGRESS | simulation/CPU 근거, 사진 `SEQ=0x1450`, 사용자 별도 관측 `SEQ≈0x7C00`·XYZ 약 ±255·desk-rest Z+/left-tilt X+/toward-user Y+ 수동 기울임 방향/부호 변화 | 전체 board acceptance가 아님: 정량 calibration, 체계적 orientation matrix, 물리 INT1 waveform, 장시간 무결성, 외부 SPI timing 미검증 |
-| CDC-002 | OPEN -> IN_PROGRESS | single-PCLK source와 focused 근거 | 독립 CDC/물리 closure 주장 없음 |
-| FW-008 | OPEN -> IN_PROGRESS | 격리 후보 driver lifecycle 및 독립 host/CPU MMIO·fault checker | Public integration, 전체 API-negative/reset coverage, 물리 동작 미종결 |
-| STA-002 | BLOCKED -> BLOCKED | 임의 I/O delay 없음; fresh STA는 내부 path만 확인 | 외부 I/O/electrical, ADC/VGA critical warning |
-| VER-001/002/004/007 | IN_PROGRESS/IN_PROGRESS/IN_PROGRESS/OPEN -> IN_PROGRESS | Stage 5 regression, fresh fit/STA, source->ELF->MIF->SOF chain | 제외 negative branch 및 warning 처분 미종결 |
-| VER-005 | OPEN -> IN_PROGRESS | 사진 `SEQ=0x1450` 및 사용자 별도 수동 기울임/SEQ≈`0x7C00` 관측 | 전체 board acceptance가 아님: 승인된 정량 절차, calibration/orientation matrix, 장시간·외부 timing 근거 부족 |
 
 ## P10-HEX 구현 및 보드 수락 노트
 

@@ -1,5 +1,7 @@
 # SoC Firmware Contract
 
+> **P09 closure note (2026-09-17):** Section 12 defines the active coherent G-sensor firmware contract (`gsensor_read_sample()`) and supersedes the historical raw telemetry description. RV32I builds and host mock-MMIO tests pass; `FW-008` is `IN_PROGRESS` for residual negative/race coverage.
+
 > **P07 closure note (2026-09-16):** Section 38 is the current UART/LoRa
 > firmware contract and supersedes the historical UART-specific statements in
 > §§7–8. User/Chat approved P07B for Open Verification; the UART/LoRa sub-scope
@@ -155,6 +157,7 @@ The repository already provides dedicated drivers for several peripherals. Curre
 UART0/UART1   -> uart driver
 GPIO          -> gpio driver
 Timer         -> timer driver
+G-Sensor      -> gsensor driver
 VGA/VRAM      -> vram/display support
 AES-GCM       -> aes_gcm driver
 ADC Joystick  -> joystick driver
@@ -292,23 +295,71 @@ LEDR[9]        -> reset indicator, not GPIO controlled
 
 GPIO register readback proves register/latch state, not physical LED pin state.
 
-## 12. G-sensor / Private SPI Rules
+## 12. G-Sensor Firmware Contract
 
-The current G-sensor subsystem performs sensor configuration and SPI acquisition in hardware. Firmware does not command the private SPI engine directly.
+The G-sensor subsystem provides a coherent software-visible sample publication ABI using LIVE and HOLD banks. Firmware accesses accelerometer data through the production driver API:
 
-Firmware shall use only the canonical sensor data registers and aligned 32-bit reads.
+```c
+gsensor_status_t gsensor_read_sample(gsensor_sample_t *out);
+```
 
-Current limitations that software must respect:
+The sample structure returns coherent signed 16-bit axes and sequence identification:
 
-- no software-visible first-sample VALID bit,
-- sample registers are not architecturally guaranteed valid immediately after reset,
-- X/Y/Z cross the SPI-to-PCLK boundary without the target coherent snapshot mechanism,
-- X/Y and Z require separate APB reads,
-- repeated samples can occur because internal polling can run faster than sensor ODR.
+```c
+typedef struct {
+    int16_t x;
+    int16_t y;
+    int16_t z;
+    uint32_t seq;
+} gsensor_sample_t;
+```
 
-Therefore current firmware shall treat G-sensor samples as best-effort telemetry and shall not claim atomic XYZ sampling or a formal sample timestamp/sequence.
+### 12.1 Driver Lifecycle and Polling Protocol
 
-No production G-sensor driver currently strengthens this contract beyond the raw register interface.
+The driver enforces a strict single-owner, non-reentrant lifecycle:
+
+```text
+STATUS read
+    |
+    +--> if HOLD_VALID == 1 -> return GSENSOR_BUSY
+    +--> if LIVE_VALID == 0 -> return GSENSOR_NO_NEW
+    |
+write SNAP_CTRL = 1 (CAPTURE)
+    |
+STATUS read
+    |
+    +--> if HOLD_VALID != 1 -> return GSENSOR_NO_NEW (capture failed / no new data)
+    |
+read HOLD_SEQ
+read HOLD_XY_DATA
+read HOLD_Z_DATA
+    |
+write SNAP_CTRL = 2 (RELEASE)
+    |
+return GSENSOR_OK (sample populated in *out)
+```
+
+### 12.2 Result Semantics
+
+| Status | Meaning | Driver action |
+|---|---|---|
+| `GSENSOR_OK` | Successful coherent sample acquired | Sample copied to `*out`, HOLD released |
+| `GSENSOR_NO_NEW` | No new complete sample available | No CAPTURE or failed capture; HOLD remains/released |
+| `GSENSOR_BUSY` | HOLD bank is currently occupied or caller contention | No MMIO modification; caller must retry later |
+| `GSENSOR_ERROR` | Null pointer or unrecoverable error | No sample written; caller must handle |
+
+### 12.3 Ownership and Reentrancy Constraints
+
+- **Single Owner:** The driver is single-owner and non-reentrant. It must not be invoked concurrently or from an interrupt context that preempts another driver invocation.
+- **No Stale Data:** The driver never returns stale HOLD data as a new sample. An ineligible CAPTURE (when `LIVE_VALID = 0`) acts as a hardware no-op and returns `GSENSOR_NO_NEW`.
+- **Caller Contention Guard:** Callers may implement software concurrency protection; unexpected contention returns `GSENSOR_BUSY`.
+- **Bus Faults:** An APB/AHB error from malformed addresses or access sizes raises a CPU exception under the system trap policy, not a recoverable `GSENSOR_ERROR`.
+
+### 12.4 Reset Semantics
+
+- System reset asynchronously clears both LIVE and HOLD banks, SEQ, and VALID bits.
+- Any transfer interrupted by reset has no guaranteed return value.
+- Following reset release, `VALID` remains 0 until the 12-write initialization completes and the first full digital burst finishes.
 
 ## 13. ADC / Joystick Rules
 
@@ -820,7 +871,7 @@ Until cleanup is implemented and verified:
 3. APB peripheral MMIO is word-oriented,
 4. legacy GPIO still owns SW input and LEDR[8:0] output roles,
 5. no active CPU/PLIC interrupt service exists,
-6. G-sensor and ADC have the coherency/CDC limitations documented in their current specs,
+6. G-sensor uses the coherent LIVE/HOLD sample ABI; ADC retains its documented CDC/coherency limitations pending cleanup,
 7. AES-GCM callers must enforce valid length, sequencing, and authentication checks,
 8. current blocking waits may be unbounded,
 9. only canonical addresses are supported.
@@ -851,6 +902,8 @@ firmware/include/soc_mmio.h
 firmware/drivers/uart.c
 firmware/drivers/timer.c
 firmware/drivers/gpio.c
+firmware/drivers/gsensor.c
+firmware/include/gsensor.h
 firmware/drivers/vram.c
 firmware/drivers/aes_gcm.c
 firmware/drivers/joystick.c
@@ -916,16 +969,10 @@ Rejected VGA stores are terminal faults: firmware shall not retry, skip,
 increment `mepc`, blindly `mret`, or present the fault as a recoverable driver
 result.
 
-## P09B G-sensor firmware contract — paired publication update
+## 39. Phase 4A-P09B G-Sensor Firmware Integration Note
 
-> **Current Public integration:** This API is current with the paired P09B source/documentation commits. It does not grant a tracker closure or physical acceptance claim.
+The coherent G-sensor firmware API `gsensor_read_sample()` is fully integrated into the public firmware tree. Directed host mock-MMIO tests and RV32I application builds verify the polling lifecycle, ordered register reads, CAPTURE/RELEASE sequencing, and error result branches. `FW-008` remains `IN_PROGRESS` for residual exhaustive reset-negative coverage and multi-context caller misuse cases.
 
-> **Publication synchronization:** This API becomes current Public documentation only with its matching P09B source commit. It does not create a final commit SHA, tracker closure, or physical acceptance claim.
+### Historical Pre-P09 Firmware Contract
 
-This section describes the isolated P09B candidate driver/RTL contract, not a claim about current Public `main`. The public API is exactly `gsensor_status_t gsensor_read_sample(gsensor_sample_t *out)`. `gsensor_sample_t` has `int16_t x, y, z` and `uint32_t seq` fields; `gsensor_status_t` has exactly `GSENSOR_OK`, `GSENSOR_NO_NEW`, `GSENSOR_BUSY`, and `GSENSOR_ERROR` results. Numeric enum values and padding are not part of the MMIO ABI. A null output pointer returns `GSENSOR_ERROR` without MMIO. The API has one owner and is non-reentrant; it must not release a HOLD owned by another context. No PLIC or sensor interrupt firmware service is introduced here.
-
-The polling transaction uses ordered volatile 32-bit MMIO: read STATUS once; if `HOLD_VALID=1`, return `BUSY` without CAPTURE or RELEASE; otherwise if `LIVE_VALID=0`, return `NO_NEW`; write `SNAP_CTRL=1` to CAPTURE; read STATUS and require `HOLD_VALID=1`; read HOLD_SEQ, HOLD_XY_DATA, HOLD_Z_DATA in that order; write `SNAP_CTRL=2` to RELEASE; then return `OK` with the assembled sample. Thus BUSY takes precedence over NO_NEW when both conditions hold. A legal CAPTURE that loses eligibility because no new LIVE data is available is an APB OKAY no-op; the post-CAPTURE HOLD_VALID check detects failure and returns `NO_NEW` without RELEASE. The driver shall never return stale HOLD as a new sample. Unexpected protocol state or a known local driver fault is `ERROR`. An AHB ERROR from malformed/unmapped MMIO is a CPU fault under the trap policy, not an ordinary recoverable `GSENSOR_ERROR` return. A caller-side contention guard may also report `BUSY` before MMIO. All exits release only a HOLD successfully acquired by this invocation. Sequence is returned for generation identification and diagnostics, not used as mandatory last-seq filtering. A same-edge STATUS read and sample completion returns the pre-edge STATUS value; a later read sees the new LIVE generation.
-
-See [G-sensor ABI](12_gsensor.md) for register widths, simultaneous-event priority, reset behavior, and invalid-access fault rules. The Stage 1 `NOT_RUN` label is historical; isolated-candidate host and RV32I tests exist, without promoting external or reset-negative scope.
-
-The shared P09B reset is asynchronous on assertion even though release is clock-qualified. Firmware must not interpret an MMIO read interrupted before completion as `OK`, `NO_NEW` or a valid historical sample, nor assume it returns at all; the CPU may reset with the transfer. An already completed read remains a prior completion. On reset during HOLD ownership, hardware clears HOLD/LIVE and reinitializes the sensor; after reboot no stale sample or former ownership may be used, and the driver must never issue an unowned RELEASE. The controller starts its 12-write initialization on common `PRESETn` release, without the historical extra local delay; APB may be accessible before the first complete sample, but VALID stays zero. These are isolated-candidate behaviors, not current Public `main` behavior or a software recovery guarantee across a CPU reset.
+Prior to P09B, the firmware had no coherent driver or snapshot mechanism. Software read raw telemetry directly from two APB registers (`GSENSOR_XY_DATA` and `GSENSOR_Z_DATA`), which lacked `VALID` or `SEQ` indicators and risked torn reads across separate bus transactions. This raw interface is retained only as historical background and is superseded by the active driver contract in §12.

@@ -1,5 +1,7 @@
 # SoC Firmware Contract — 한국어 Companion
 
+> **P09 종결 주석(2026-09-17):** §12가 현행 코히어런트 G-sensor 펌웨어 계약(`gsensor_read_sample()`)을 정의하며 과거 원시 텔레메트리 설명을 대체한다. RV32I 빌드와 호스트 mock-MMIO 테스트가 통과했다; `FW-008`은 잔여 negative/경합 커버리지를 위해 `IN_PROGRESS`를 유지한다.
+
 > **P07 종결 주석(2026-09-16):** §38이 현행 UART/LoRa firmware 계약이며
 > §§7–8의 과거 UART 관련 설명을 대체한다. User/Chat은 P07B를 Open
 > Verification으로 승인했다. UART/LoRa sub-scope는 global `FW-002` 근거에
@@ -144,6 +146,7 @@ MMIO는 volatile semantics를 유지해야 한다. Application은 project MMIO h
 UART0/UART1   -> uart
 GPIO          -> gpio
 Timer         -> timer
+G-Sensor      -> gsensor
 VGA/VRAM      -> vram/display
 AES-GCM       -> aes_gcm
 ADC Joystick  -> joystick
@@ -260,21 +263,71 @@ LEDR[9]       -> reset indicator
 
 GPIO register readback은 physical LED 동작을 증명하지 않는다.
 
-## 12. G-sensor / Private SPI
+## 12. G-Sensor Firmware Contract
 
-현재 G-sensor는 hardware가 ADXL345 configuration과 private SPI acquisition을 수행한다. Firmware가 SPI transaction을 직접 시작하지 않는다.
+G-sensor 서브시스템은 LIVE 및 HOLD bank를 사용한 코히어런트 소프트웨어 가시 샘플 발행 ABI를 제공한다. 펌웨어는 프로덕션 드라이버 API를 통해 가속도계 데이터에 접근한다:
 
-Firmware는 canonical sensor data register를 aligned 32-bit로 읽는다.
+```c
+gsensor_status_t gsensor_read_sample(gsensor_sample_t *out);
+```
 
-현재 limitation:
+샘플 구조체는 코히어런트 부호 있는 16-bit 3축 값과 시퀀스 번호를 반환한다:
 
-- first-sample VALID 없음
-- reset 직후 sample validity 보장 없음
-- SPI→PCLK multi-bit CDC가 target coherent snapshot 구조가 아님
-- X/Y와 Z가 별도 APB read
-- sensor ODR보다 polling이 빠르면 repeated sample 가능
+```c
+typedef struct {
+    int16_t x;
+    int16_t y;
+    int16_t z;
+    uint32_t seq;
+} gsensor_sample_t;
+```
 
-따라서 current firmware는 G-sensor 값을 best-effort telemetry로 다루며 atomic XYZ, sequence, timestamp를 주장하면 안 된다.
+### 12.1 드라이버 라이프사이클 및 폴링 프로토콜
+
+드라이버는 엄격한 단일 소유자, 비재진입 라이프사이클을 적용한다:
+
+```text
+STATUS 읽기
+    |
+    +--> HOLD_VALID == 1인 경우 -> GSENSOR_BUSY 반환
+    +--> LIVE_VALID == 0인 경우 -> GSENSOR_NO_NEW 반환
+    |
+SNAP_CTRL = 1 쓰기 (CAPTURE)
+    |
+STATUS 읽기
+    |
+    +--> HOLD_VALID != 1인 경우 -> GSENSOR_NO_NEW 반환 (캡처 실패 / 신규 데이터 없음)
+    |
+HOLD_SEQ 읽기
+HOLD_XY_DATA 읽기
+HOLD_Z_DATA 읽기
+    |
+SNAP_CTRL = 2 쓰기 (RELEASE)
+    |
+GSENSOR_OK 반환 (*out에 샘플 수합 완료)
+```
+
+### 12.2 결과 시맨틱
+
+| 상태 | 의미 | 드라이버 동작 |
+|---|---|---|
+| `GSENSOR_OK` | 유효한 코히어런트 샘플 획득 완료 | `*out`에 데이터 복사, HOLD 해제 |
+| `GSENSOR_NO_NEW` | 신규 완전 샘플 부재 | CAPTURE 미수행 또는 실패; HOLD 유지/해제 |
+| `GSENSOR_BUSY` | HOLD bank 점유 중 또는 호출자 경합 | MMIO 변경 없음; 호출자가 나중에 재시도 |
+| `GSENSOR_ERROR` | null 포인터 또는 복구 불가능 오류 | 샘플 미작성; 호출자가 처리 |
+
+### 12.3 소유권 및 재진입 제약
+
+- **단일 소유자:** 드라이버는 단일 소유자 전용이며 재진입할 수 없다. 다른 드라이버 호출을 선점하는 인터럽트 문맥이나 동시 문맥에서 호출되어서는 안 된다.
+- **오래된 데이터 반환 금지:** 드라이버는 과거 HOLD 데이터를 새 샘플로 반환하지 않는다. 자격 없는 CAPTURE(`LIVE_VALID = 0`)는 하드웨어 no-op으로 동작하며 `GSENSOR_NO_NEW`를 반환한다.
+- **호출자 경합 보호:** 호출자는 소프트웨어 동시성 보호를 구현할 수 있으며 예상치 못한 경합 시 `GSENSOR_BUSY`를 반환한다.
+- **버스 결함:** 잘못된 주소 또는 접근 크기로 인한 APB/AHB 오류는 시스템 트랩 정책에 따라 CPU 예외를 발생시키며 복구 가능한 `GSENSOR_ERROR`가 아니다.
+
+### 12.4 리셋 시맨틱
+
+- 시스템 리셋은 LIVE 및 HOLD bank, SEQ, VALID 비트를 비동기적으로 클리어한다.
+- 리셋으로 중단된 전송은 반환 값을 보장하지 않는다.
+- 리셋 해제 후 12-write 초기화가 완료되고 첫 완전 디지털 버스트가 끝날 때까지 `VALID`는 0을 유지한다.
 
 ## 13. ADC / Joystick
 
@@ -702,7 +755,7 @@ Central cleanup tracker에서 ID는 재정규화할 수 있다.
 3. APB MMIO는 word-oriented
 4. legacy GPIO가 현재 SW/LED 역할을 가짐
 5. CPU/PLIC interrupt service 없음
-6. G-sensor/ADC current coherency limitation 존재
+6. G-sensor는 코히어런트 LIVE/HOLD 샘플 ABI를 사용; ADC는 클린업 대기 중인 문서화된 CDC/코히어런시 한계 유지
 7. AES caller가 length/sequencing/auth check 책임
 8. current blocking wait는 unbounded일 수 있음
 9. canonical address만 지원
@@ -729,6 +782,8 @@ firmware/include/soc_mmio.h
 firmware/drivers/uart.c
 firmware/drivers/timer.c
 firmware/drivers/gpio.c
+firmware/drivers/gsensor.c
+firmware/include/gsensor.h
 firmware/drivers/vram.c
 firmware/drivers/aes_gcm.c
 firmware/drivers/joystick.c
@@ -789,16 +844,10 @@ firmware fail-stop handling에 의존한다. 모든 rebuild는 startup opcode
 risk이다. Rejected VGA store를 retry/skip/`mepc` 증가/blind `mret` 또는
 recoverable driver 결과로 처리하지 않는다.
 
-## P09B G-sensor firmware 계약 — source/documentation 동시 게시 갱신
+## 39. Phase 4A-P09B G-Sensor Firmware 통합 노트
 
-> **현행 Public 통합:** 이 API는 P09B source/documentation 동시 commit과 함께 현행 상태가 된다. tracker 종료나 물리 acceptance를 주장하지 않는다.
+코히어런트 G-sensor 펌웨어 API `gsensor_read_sample()`은 공개 펌웨어 트리에 완전히 통합되었다. 디렉티드 호스트 mock-MMIO 테스트와 RV32I 애플리케이션 빌드를 통해 폴링 라이프사이클, 순차 레지스터 읽기, CAPTURE/RELEASE 시퀀싱 및 오류 결과 분기를 검증했다. `FW-008`은 잔여 완전 리셋-negative 커버리지 및 다중 문맥 호출자 오용 케이스 검증을 위해 `IN_PROGRESS`를 유지한다.
 
-> **게시 정합성:** 이 API는 대응 P09B source commit과 함께 게시될 때만 현행 Public 문서가 된다. 최종 commit SHA, tracker 종료 또는 물리 acceptance를 주장하지 않는다.
+### 역사적 Pre-P09 펌웨어 계약
 
-이 절은 현재 Public `main` 구현 주장이 아닌 격리 P09B 후보 driver/RTL 계약이다. 공개 API는 정확히 `gsensor_status_t gsensor_read_sample(gsensor_sample_t *out)`이다. `gsensor_sample_t`는 `int16_t x, y, z` 및 `uint32_t seq` field를 갖고, `gsensor_status_t`의 결과는 정확히 `GSENSOR_OK`, `GSENSOR_NO_NEW`, `GSENSOR_BUSY`, `GSENSOR_ERROR` 네 가지다. Enum 숫자값과 padding은 MMIO ABI가 아니다. null `out`은 MMIO 없이 `GSENSOR_ERROR`를 반환한다. API는 단일 소유자·비재진입이며 다른 문맥의 HOLD를 RELEASE하지 않는다. 여기서 PLIC/센서 interrupt firmware 처리는 도입하지 않는다.
-
-Polling은 순서가 보장된 volatile 32-bit MMIO를 사용한다: STATUS 1회 read → `HOLD_VALID=1`이면 CAPTURE/RELEASE 없이 `BUSY` → 아니면 `LIVE_VALID=0`이면 `NO_NEW` → `SNAP_CTRL=1` CAPTURE write → STATUS read로 `HOLD_VALID=1` 확인 → HOLD_SEQ → HOLD_XY_DATA → HOLD_Z_DATA → `SNAP_CTRL=2` RELEASE write → sample과 `OK` 반환이다. 두 조건이 모두 참이면 BUSY가 NO_NEW보다 우선한다. 새 LIVE가 없어 자격을 잃은 정상 CAPTURE는 APB OKAY no-op이며 CAPTURE 후 HOLD_VALID=0이면 RELEASE 없이 `NO_NEW`로 처리한다. 이전 HOLD를 새 sample로 반환하지 않는다. 예상 밖 protocol state나 알려진 로컬 driver 오류는 `ERROR`다. 잘못된/unmapped MMIO에서 발생하는 AHB ERROR는 trap policy상 CPU fault이지 통상적인 복구 가능 `GSENSOR_ERROR` 반환이 아니다. 호출자 측 경쟁 guard도 MMIO 전에 `BUSY`를 반환할 수 있다. 해당 호출이 성공적으로 획득한 HOLD만 해제한다. SEQ는 세대 식별·진단용으로 반환하고 last-seq 필터를 필수로 쓰지 않는다. STATUS read와 sample completion이 같은 edge면 pre-edge STATUS를 반환하고 다음 read에서 새 LIVE 세대가 보인다.
-
-레지스터 폭, 동시 이벤트 우선순위, reset, 잘못된 접근 fault는 [G-sensor ABI](../12_gsensor.md)를 따른다. Stage 1 `NOT_RUN` 표시는 역사 기록이며, 격리 후보 host/RV32I test는 존재하지만 외부·reset-negative 범위를 승격하지 않는다.
-
-P09B 공통 reset은 release가 clock-qualified여도 assertion은 비동기다. Firmware는 완료 전에 reset으로 중단된 MMIO read를 `OK`, `NO_NEW` 또는 유효한 과거 sample로 취급하거나 반드시 반환된다고 가정하지 않는다. CPU 자체가 그 transfer 중 reset될 수 있다. 이미 완료된 read는 이전 완료로 남는다. HOLD 소유 중 reset이면 HW가 HOLD/LIVE를 clear하고 sensor를 재초기화한다. 재부팅 뒤 stale sample/이전 소유권을 사용하거나 무소유 RELEASE를 실행하지 않는다. Controller는 historical 추가 local delay 없이 공통 `PRESETn` release에 12-write 초기화를 시작한다. APB는 첫 완료 sample 이전에도 접근할 수 있으나 VALID=0이다. 이는 격리 후보 동작이며 현행 Public `main` 동작이나 CPU reset을 건너는 software recovery 보장이 아니다.
+P09B 이전 펌웨어에는 코히어런트 드라이버나 스냅샷 메커니즘이 없었다. 소프트웨어는 2개의 APB 레지스터(`GSENSOR_XY_DATA` 및 `GSENSOR_Z_DATA`)에서 직접 원시 텔레메트리를 읽었으며, 이 레지스터들에는 `VALID` 또는 `SEQ` 표시가 없어 분리된 버스 트랜잭션 간 torn read 위험이 있었다. 이 원시 인터페이스는 역사적 배경으로만 유지되며 §12의 활성 드라이버 계약으로 완전히 대체되었다.

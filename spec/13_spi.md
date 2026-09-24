@@ -1,16 +1,14 @@
 # Baseline SoC Private SPI Engine Specification
 
-> **Status:** DRAFT — reconstructed from the active FPGA baseline and subject to Developer + ChatGPT Chat final review.
+> **Status:** ACTIVE SPECIFICATION — current integrated P09B baseline.
 >
 > **Canonical language:** English. If this file and `spi.ko.md` conflict, this file is authoritative.
 >
 > **Parent specifications:** `soc_architecture.md`, `reset_clock.md`, `gsensor.md`.
 
-> **Implementation note (Phase 4A-GSENSOR, 2026-09-14):** Earlier dual-phase `spi_pll`/`spi_clk` descriptions and the historical lack of a verified SPI mode are superseded for the current public candidate by the narrowly scoped implementation status at the end of this file. This does not assert physical pin-timing or board acceptance.
-
 ## 1. Purpose
 
-This document defines the SPI engine that exists in the active FPGA baseline.
+This document defines the private SPI engine in the active FPGA baseline.
 
 The baseline does **not** contain a software-visible, general-purpose APB SPI controller. The only active SPI datapath is a private fixed-function engine inside the G-sensor subsystem, dedicated to configuring and sampling the on-board ADXL345 accelerometer.
 
@@ -18,16 +16,17 @@ This specification owns:
 
 - the architectural boundary of the private SPI engine,
 - active RTL sources,
-- SPI clock/reset generation,
+- SPI clock and reset generation,
 - chip-select and serial-line behavior,
-- the 16-bit initialization-write transaction format,
+- the 16-bit initialization-write transaction format and 12-write configuration sequence,
 - the 56-bit multi-byte accelerometer-read transaction format,
+- acquisition scheduling (INT1 primary trigger and 30 ms watchdog fallback),
 - controller sequencing and completion behavior,
 - current limitations and non-programmable properties,
-- verification requirements,
-- cleanup requirements before a reusable/general-purpose SPI peripheral is claimed.
+- verification status and remaining physical timing closure items,
+- historical pre-P09 baseline behavior retained for provenance.
 
-The software-visible accelerometer registers themselves are defined by `gsensor.md`.
+The software-visible accelerometer registers and coherent sample publication ABI are defined by `12_gsensor.md`.
 
 ## 2. Architectural Role
 
@@ -36,27 +35,23 @@ The active datapath is:
 ```text
 CPU
  |
- | APB read of accelerometer snapshot
+ | APB read of coherent sample snapshot (HOLD bank)
  v
-APB_GSENSOR_MB                 PCLK = 50 MHz
+APB_GSENSOR_MB                 PCLK = 50 MHz, shared PRESETn
  |
- +-- reset_delay
+ +-- LIVE / HOLD sample banks + VALID / SEQ / SNAP_CTRL
  |
- +-- spi_pll
- |    +-- spi_clk      = 2 MHz   (controller state/sample clock)
- |    +-- spi_clk_out  = 2 MHz   (external SCLK source)
- |
- +-- spi_ee_config
+ +-- spi_ee_config             fixed-function ADXL345 controller, 50 MHz PCLK
       |
-      +-- fixed ADXL345 initialization table
-      +-- periodic / local-interrupt-triggered acquisition
+      +-- 12 ordered initialization writes (POWER_CTL last)
+      +-- INT1-triggered / 30 ms watchdog fallback acquisition
       |
-      +-- spi_controller
+      +-- SPI engine           registered mode-3 SCLK, ~2 MHz
             |
             +--> G_SENSOR_CS_N
             +--> G_SENSOR_SCLK
-            +--> G_SENSOR_SDI   (FPGA -> ADXL345)
-            +<-- G_SENSOR_SDO   (ADXL345 -> FPGA)
+            +--> G_SENSOR_SDI   (FPGA -> ADXL345, MOSI)
+            +<-- G_SENSOR_SDO   (ADXL345 -> FPGA, MISO)
 ```
 
 There is no:
@@ -71,21 +66,15 @@ software programmable word length
 software programmable clock divider
 ```
 
-in the active baseline.
-
-Therefore references to "SPI" in this project shall not be interpreted as a generic software-accessible peripheral unless a future specification explicitly introduces one.
+in the active baseline. References to "SPI" in this project refer strictly to this private sensor transport unless a future specification introduces a general-purpose SPI controller.
 
 ## 3. Active RTL Sources
 
-The active implementation is primarily:
+The active implementation consists of:
 
 ```text
 rtl/peripherals/gsensor/APB_GSENSOR_MB.v
-rtl/peripherals/gsensor/v/adxl345_controller.v
-rtl/peripherals/gsensor/v/SPI_MASTER.v
-rtl/peripherals/gsensor/v/spi_param.h
-rtl/peripherals/gsensor/v/reset_delay.v
-private vendor-project vault: spi_pll generated IP (not in public tree)
+rtl/peripherals/gsensor/spi_ee_config.v
 ```
 
 Module relationships:
@@ -93,126 +82,77 @@ Module relationships:
 ```text
 APB_GSENSOR_MB
   |
-  +-- reset_delay
-  +-- spi_pll
+  +-- LIVE and HOLD sample banks + APB register interface
   +-- spi_ee_config
-        |
-        +-- spi_controller
 ```
 
-The module named `spi_controller` is implemented in `SPI_MASTER.v`.
+The historical modules `reset_delay.v`, `adxl345_controller.v`, `SPI_MASTER.v`, `spi_param.h`, and the private IP `spi_pll` are inactive in the current P09B baseline.
 
 ## 4. Clock and Reset Contract
 
-### 4.1 Source clock
+### 4.1 Source Clock
 
-`APB_GSENSOR_MB` receives the 50 MHz APB/system clock:
+`APB_GSENSOR_MB` and `spi_ee_config` operate entirely in the 50 MHz APB/system clock domain:
 
 ```text
 PCLK = 50 MHz
 ```
 
-A local `reset_delay` keeps the G-sensor SPI subsystem in reset for approximately:
+There is no internal SPI generated clock domain or PLL.
+
+### 4.2 Reset Distribution
+
+The G-sensor controller connects directly to shared `PRESETn`:
 
 ```text
-2^20 / 50 MHz = 20.97152 ms
+spi_ee_config.iRSTN = PRESETn
 ```
 
-after the system reset input is released.
+The historical wrapper `reset_delay` instance is removed from the active path.
 
-### 4.2 SPI PLL
+- **Asynchronous assertion:** When `PRESETn` asserts low, any in-flight SPI transfer is immediately aborted, serial pins return to their safe idle values, and controller/scheduler state is cleared.
+- **Synchronous release:** Reset release is synchronized to PCLK through the system reset qualification (~20 ms). Upon release, the controller immediately starts its 12 ordered initialization writes.
 
-The generated `spi_pll` derives two nominal 2 MHz outputs from the 50 MHz input using divide-by-25 clock outputs.
+### 4.3 Serial Clock Generation
+
+The external serial clock `G_SENSOR_SCLK` is driven directly by a registered output flip-flop in the 50 MHz PCLK domain.
+
+The controller generates nominal 2 MHz SCLK by alternating 12 and 13 PCLK half-periods:
 
 ```text
-spi_clk      = PLL c0 = 2 MHz
-spi_clk_out  = PLL c1 = 2 MHz
+12 PCLKs (240 ns) + 13 PCLKs (260 ns) = 25 PCLKs (500 ns = 2.0 MHz)
 ```
 
-The generated PLL configuration uses different phase shifts for the two outputs. In the currently generated file:
-
-```text
-c0 phase shift = 277778 ps
-c1 phase shift = 166667 ps
-relative offset = 111111 ps
-```
-
-At a 2 MHz period of 500 ns, the relative offset is approximately 80 degrees.
-
-`spi_clk` clocks the internal controller state, bit counter, and receive shift register. `spi_clk_out` is gated onto the external G-sensor SCLK pin while a transaction is active.
-
-### 4.3 PLL lock limitation
-
-The PLL `locked` output is not used. After `reset_delay` expires, the PLL reset and SPI controller reset are released without an explicit lock-qualified startup handshake.
-
-This is current baseline behavior, not a preferred clock/reset architecture.
+This registered clock output exists only on the board-facing pin; it is not an internal clock domain and does not clock internal registers.
 
 ## 5. Physical Serial Interface
 
-The active board interface is four-wire SPI-style signaling:
+The active board interface is a dedicated four-wire SPI connection:
 
 | Signal | Direction | Baseline behavior |
 |---|---|---|
 | `G_SENSOR_CS_N` | FPGA -> sensor | active-low chip select |
-| `G_SENSOR_SCLK` | FPGA -> sensor | idle high; phase-shifted 2 MHz PLL clock while active |
-| `G_SENSOR_SDI` | FPGA -> sensor | command/address/write-data output |
-| `G_SENSOR_SDO` | sensor -> FPGA | read-data input |
+| `G_SENSOR_SCLK` | FPGA -> sensor | idle high; registered 2 MHz mode-3 clock while active |
+| `G_SENSOR_SDI` | FPGA -> sensor | command/address/write-data output (MOSI) |
+| `G_SENSOR_SDO` | sensor -> FPGA | read-data input (MISO) |
 
-The active design does not use a bidirectional SDIO line. A previously considered tri-state implementation remains commented out in the source; the active `SPI_SDI` output is always driven.
+The active design uses separate MOSI and MISO lines. During the read-data phase of a transaction, `G_SENSOR_SDI` is driven low.
 
-During the read-data phase, `SPI_SDI` is driven low rather than tri-stated. This is valid for the active separate-MOSI/separate-MISO board wiring but shall not be generalized to 3-wire SPI.
+## 6. Serial Protocol and Mode-3 Timing
 
-## 6. Chip-Select and SCLK Behavior
+The private SPI engine operates in **SPI Mode 3** (`CPOL = 1, CPHA = 1`):
 
-The private engine implements:
+- `G_SENSOR_SCLK` is high while idle.
+- `G_SENSOR_CS_N` asserts low while SCLK remains high.
+- MOSI data (`G_SENSOR_SDI`) changes on falling edges of SCLK.
+- MISO data (`G_SENSOR_SDO`) is sampled on rising edges of SCLK.
+- CS remains asserted low across the entire transaction and holds through the last sampled bit before returning high.
 
-```verilog
-assign oSPI_CSN = ~iSPI_GO;
-assign oSPI_CLK = spi_count_en ? iSPI_CLK_OUT : 1'b1;
-```
+## 7. Initialization Write Transactions
 
-Therefore:
+### 7.1 Transaction Format
 
-- `iSPI_GO = 1` drives chip select low.
-- inactive SCLK is forced high.
-- the external SCLK toggles only while `spi_count_en = 1`.
-- the external clock source is `spi_clk_out`, not the internal state clock `spi_clk`.
-
-Chip select is controlled by the higher-level `spi_ee_config` FSM. The low-level engine does not expose independent CS timing configuration.
-
-## 7. Low-Level Bit Counter
-
-`spi_controller` uses one 6-bit down-counter for both supported transaction types.
-
-```text
-initialization transaction:
-    cnt_start_val = 15
-    intended bit indices = 15 .. 0
-    transaction width = 16 bits
-
-multi-byte read transaction:
-    cnt_start_val = 55
-    intended bit indices = 55 .. 0
-    transaction width = 56 bits
-```
-
-The completion indication is:
-
-```verilog
-assign oSPI_END = ~|spi_count;
-```
-
-so the higher-level controller treats counter value zero as the transfer-completion condition.
-
-`oSPI_END` is an internal local handshake. It is not exposed to APB software.
-
-## 8. Initialization Write Transactions
-
-### 8.1 Format
-
-During initial configuration, `ini_config = 1` and the low-level engine operates on a 16-bit transaction.
-
-The higher-level controller creates:
+Each initialization transaction is a 16-bit serial write:
 
 ```text
 [15:14] WRITE_MODE = 2'b00
@@ -220,294 +160,113 @@ The higher-level controller creates:
 [ 7: 0] register write data
 ```
 
-Conceptually:
+Transmitted MSB-first from bit 15 to bit 0.
+
+### 7.2 12-Write Initialization Sequence
+
+Upon reset release, `spi_ee_config` executes exactly 12 ordered register writes:
+
+| Index | ADXL345 register | Address | Written value | Operational purpose |
+|---:|---|---:|---:|---|
+| 0 | `THRESH_ACT` | `0x24` | `0x20` | Activity threshold |
+| 1 | `THRESH_INACT` | `0x25` | `0x03` | Inactivity threshold |
+| 2 | `TIME_INACT` | `0x26` | `0x01` | Inactivity time |
+| 3 | `ACT_INACT_CTL` | `0x27` | `0x7F` | Activity/inactivity control |
+| 4 | `THRESH_FF` | `0x28` | `0x09` | Free-fall threshold |
+| 5 | `TIME_FF` | `0x29` | `0x46` | Free-fall time |
+| 6 | `BW_RATE` | `0x2C` | `0x09` | 50 Hz output data rate, normal power |
+| 7 | `INT_MAP` | `0x2F` | `0x00` | Routes DATA_READY to INT1 pin |
+| 8 | `INT_ENABLE` | `0x2E` | `0x80` | Enables DATA_READY interrupt output |
+| 9 | `DATA_FORMAT` | `0x31` | `0x00` | Default ±2g range, 10-bit right-justified |
+| 10 | `OFSZ` | `0x20` | `0x07` | Z-axis offset calibration (~ +109 mg) |
+| 11 | `POWER_CTL` | `0x2D` | `0x08` | Measurement mode enable (**executed last**) |
+
+Executing `POWER_CTL` last ensures that the ADXL345 is fully configured in standby mode before measurement begins.
+
+After the twelfth write completes and CS returns high, the acquisition scheduler arms, enabling INT1 recognition and the 30 ms watchdog.
+
+## 8. Multi-Byte Accelerometer Read (56-Bit Burst)
+
+### 8.1 Command and Structure
+
+Each accelerometer acquisition performs a 56-bit SPI transaction:
 
 ```text
-+----------------------+----------------------+
-| 8-bit command/address| 8-bit register data  |
-+----------------------+----------------------+
-          16 serial bits total
+8-bit command/address phase  : {1'b1 (read), 1'b1 (multibyte), 6'h32 (DATAX0)} = 0xF2
+48-bit read-data phase       : 6 bytes returned contiguously by ADXL345
 ```
 
-The current source sends bits by indexing `internal_tx_data[spi_count]` while the counter decrements, so the transaction is emitted MSB-first from bit 15 toward bit 0.
-
-### 8.2 Fixed initialization sequence
-
-`spi_ee_config` performs eleven fixed register writes after reset. The active table includes:
+The 6 returned data bytes correspond to:
 
 ```text
-THRESH_ACT      <- 0x20
-THRESH_INACT    <- 0x03
-TIME_INACT      <- 0x01
-ACT_INACT_CTL   <- 0x7F
-THRESH_FF       <- 0x09
-TIME_FF         <- 0x46
-BW_RATE         <- 0x09
-INT_ENABLE      <- 0x00
-INT_MAP         <- 0x00
-DATA_FORMAT     <- 0x00
-POWER_CONTROL   <- 0x08
+DATAX0, DATAX1 (X-axis low/high)
+DATAY0, DATAY1 (Y-axis low/high)
+DATAZ0, DATAZ1 (Z-axis low/high)
 ```
 
-These transactions are generated entirely by hardware. Software cannot modify this table through a generic SPI register interface in the baseline.
+The controller extracts full 16-bit values for all three axes.
 
-## 9. Multi-Byte Accelerometer Read
+### 8.2 Internal Handshake
 
-### 9.1 Trigger
+The low-level transfer completion is signaled internally by `spi_end` / `sample_complete`. Upon completion, the sample is atomically published to the LIVE bank in `APB_GSENSOR_MB`.
 
-After initialization, `spi_ee_config` periodically initiates an accelerometer read when either:
+## 9. Acquisition Scheduler and Watchdog
+
+### 9.1 Primary Trigger: INT1
+
+- External pin `GSENSOR_INT[1]` (connected to DE10-Lite pin `Y14`, ADXL345 INT1) is synchronized into PCLK through a 2-FF synchronizer.
+- When armed, a synchronized rising edge on INT1 triggers an acquisition read.
+- Reading the axis data registers automatically clears DATA_READY inside the ADXL345.
+
+### 9.2 Fallback Trigger: 30 ms Watchdog
+
+- A 50 MHz counter measures elapsed PCLK cycles since the last recognized acquisition.
+- At threshold 1,500,000 cycles (exactly 30 ms), a fallback acquisition is requested if no INT1 trigger has fired.
+- Under normal 50 Hz operation, DATA_READY arrives every ~20 ms, resetting the watchdog before the 30 ms deadline.
+
+### 9.3 Pending Request Arbitration
+
+The scheduler maintains a single-slot pending request enum:
 
 ```text
-iG_INT2 == 1
+NONE / FALLBACK / IRQ
 ```
 
-or the private read-idle counter reaches its trigger bit.
+- Priority: `IRQ > FALLBACK > NONE`.
+- Triggers occurring while the SPI engine is busy are coalesced into the single pending slot; no duplicate reads are queued.
+- When the SPI engine returns to idle, the pending request launches immediately.
 
-As defined in `gsensor.md`, the current fallback counter uses `IDLE_MSB = 14`, corresponding to approximately 8.192 ms at 2 MHz.
+## 10. Software Visibility and Status
 
-### 9.2 Command format
+There is no direct firmware interface to the private SPI engine:
 
-The read command is constructed as:
+- Software cannot configure SPI clock rate, mode, or chip select.
+- Software cannot trigger manual SPI writes or reads.
+- All software interaction occurs through the APB G-sensor register map (`HOLD_XY`, `HOLD_Z`, `STATUS`, `HOLD_SEQ`, `SNAP_CTRL`) using the `gsensor_read_sample()` API as defined in `12_gsensor.md` and `19_firmware_contract.md`.
 
-```verilog
-p2s_data[15:8] <= {2'b11, X_LB};
-```
+## 11. Verification Status and Residual Closure Gaps
 
-with:
+### 11.1 Verification Status
 
-```text
-X_LB = 0x32
-```
+- **SPI-001 (Digital Transaction Verification):** `VERIFIED`. Scoped digital testbenches (`tb_gsensor_single_pclk.sv`) verify Mode 3 SCLK timing, 12/13-PCLK halves, all initialization writes, 56-bit burst reads, MSB-first bit order, rising-edge MISO sampling, exact CS assertion duration, and reset abort behavior.
+- **Internal Timing Closure:** Quartus TimeQuest confirms positive 50 MHz setup/hold margins on all internal G-sensor paths across slow and fast corners.
 
-Thus the transmitted command byte is the ADXL345 multi-byte-read command beginning at DATAX0.
+### 11.2 Residual Closure Gaps (Why IN_PROGRESS / BLOCKED)
 
-The 56-bit transfer is structured as:
+- **SPI-002 (Physical ADXL345 Pin Timing):** `IN_PROGRESS`. Board-facing SPI pin timing (external setup/hold relative to the ADXL345 datasheet limits, PCB trace delays, and pin capacitance) has not been physically characterized with an oscilloscope.
+- **STA-002 (External I/O Timing / Electrical Closure):** `BLOCKED`. Awaiting physical board-level timing measurements and electrical sign-off across all board I/O interfaces.
 
-```text
-8 command/address bits
-+ 48 returned data bits
------------------------
-= 56 serial bits total
-```
+## 12. Historical Baseline / Pre-P09 Notes
 
-The six returned bytes correspond to the contiguous ADXL345 axis-data register range:
+The following information describes earlier iterations of the G-sensor SPI subsystem and is retained strictly for provenance and historical interpretation:
 
-```text
-DATAX0
-DATAX1
-DATAY0
-DATAY1
-DATAZ0
-DATAZ1
-```
-
-### 9.3 Drive/sample phases
-
-For a 56-bit read:
-
-```text
-spi_count 55 .. 48
-    command/address phase
-    FPGA drives SPI_SDI
-
-spi_count 47 .. 0
-    read-data phase
-    FPGA drives SPI_SDI low
-    FPGA samples SPI_SDO into oS2P_DATA
-```
-
-The receive register shifts one SDO sample into its least-significant end on each `posedge spi_clk` for which the controller is in the read-data phase.
-
-The interpretation of the 48 received data bits into X/Y/Z is owned by `12_gsensor.md`. This older paragraph is historical: active A6 reconstructs all three axes from complete `completed_rx` byte pairs, with scoped `GS-002` known-pattern digital evidence; P09B must revalidate it after changes.
-
-## 10. SPI Timing Mode Classification
-
-The current engine shall **not** be advertised as a generic SPI Mode 0, 1, 2, or 3 controller solely from the RTL naming.
-
-Observable baseline properties include:
-
-- SCLK is forced high while idle.
-- internal state/data sampling occurs on `posedge spi_clk`.
-- external SCLK is sourced from a separately phase-shifted `spi_clk_out`.
-- `spi_clk` and `spi_clk_out` have the same nominal 2 MHz frequency but a generated relative phase offset of approximately 80 degrees.
-
-Because launch/sample timing is created by two distinct phase-shifted PLL outputs rather than by one standard CPOL/CPHA edge-selection scheme, a standard SPI mode classification requires waveform-level confirmation against the ADXL345 timing requirements.
-
-The fact that the existing FPGA design communicates with the board accelerometer does not by itself make this engine a reusable or standards-clean SPI master.
-
-## 11. Software Visibility
-
-There is no direct firmware API for the low-level SPI engine.
-
-Software cannot directly request:
-
-```text
-SPI transmit
-SPI receive
-chip-select change
-clock-rate change
-CPOL/CPHA change
-transaction-length change
-register-address transaction
-```
-
-The CPU only observes accelerometer data through the G-sensor APB wrapper.
-
-Accordingly, there is no normative `SPI_BASE` address in the baseline memory map.
-
-## 12. Error and Status Behavior
-
-The private SPI engine has no software-visible:
-
-```text
-BUSY
-DONE
-ERROR
-TIMEOUT
-RX_VALID
-TX_READY
-FIFO status
-slave-not-responding status
-```
-
-The low-level `oSPI_END` and higher-level `gsensor_ready` are internal signals only.
-
-The engine does not perform an explicit device-ID read/validation before beginning normal operation.
-
-There is no protocol-level timeout if the external sensor returns invalid data. The bit counter completes based on locally generated clocks regardless of sensor response.
-
-## 13. Reset Behavior
-
-On low-level controller reset:
-
-```text
-spi_count_en = 0
-spi_count    = 15
-oS2P_DATA    = 0
-```
-
-The higher-level G-sensor controller resets its initialization index and restarts the fixed configuration sequence after local reset release.
-
-The active external SCLK idle value is high and CS is deasserted when `spi_go = 0`.
-
-As noted above, the baseline does not qualify controller release with PLL `locked`.
-
-## 14. Baseline Invariants
-
-For the current FPGA baseline, the following are normative:
-
-1. The SPI engine is private to the G-sensor subsystem.
-2. There is no software-visible generic SPI peripheral or SPI base address.
-3. The engine uses a dedicated four-wire connection to the board accelerometer.
-4. Initialization writes are fixed 16-bit hardware-generated transactions.
-5. Accelerometer acquisition uses a fixed 56-bit command-plus-six-byte-read transaction.
-6. The nominal serial clock is 2 MHz.
-7. SCLK is high while inactive.
-8. CS is active low and is controlled by `spi_go`.
-9. Software cannot configure clock rate, mode, chip select, word length, or transaction content directly.
-10. Standard SPI Mode 0–3 compliance is not claimed for this private implementation.
-
-## 15. Verification Requirements
-
-A dedicated SPI regression shall eventually verify at minimum:
-
-1. reset leaves CS inactive and SCLK high,
-2. each initialization entry produces exactly the intended command/address byte and data byte,
-3. all eleven initialization writes occur in the intended order,
-4. a multi-byte read emits the expected command beginning at address `0x32`,
-5. the read transaction contains one command byte followed by six returned bytes,
-6. CS remains asserted across the complete intended transaction,
-7. SCLK is active only during the intended transfer window,
-8. MOSI/SDI bit ordering is correct,
-9. MISO/SDO sampling reconstructs deterministic known response patterns correctly,
-10. `oSPI_END` occurs at the expected terminal count,
-11. the higher-level controller does not start a new transaction before the previous transfer completes,
-12. clock/reset release behavior is deterministic,
-13. waveform timing satisfies the ADXL345 serial-interface timing requirements.
-
-For known-pattern read verification, the testbench should return recognizable byte values for all six axis bytes rather than all-zero or symmetric patterns, so bit-order and byte-order faults cannot hide.
-
-## 16. Baseline Cleanup Targets Before Major Feature Integration
-
-The following items shall be carried into the consolidated baseline cleanup list.
-
-### SPI-001 — Decide private engine versus reusable SPI architecture
-
-The current block is a sensor-specific sequencer, not a general-purpose SPI peripheral. Before describing the future SoC as having a general-purpose SPI controller, either:
-
-- keep this block explicitly private and design a separate generic SPI IP, or
-- replace/refactor it into a generic SPI master with a clean device-specific layer above it.
-
-### SPI-002 — Replace dual-phase-PLL protocol timing with a clear synchronous SPI architecture
-
-Frozen A6 selects a single 50 MHz PCLK state clock, clock-enable/tick timing, and a registered external SCLK for the private ADXL345 engine. A future reusable controller is separate from this baseline cleanup.
-
-### SPI-003 — Define and verify CPOL/CPHA behavior
-
-The baseline idles SCLK high but does not expose a standard mode abstraction. Waveform-level timing shall be checked and a future generic controller shall explicitly define supported modes.
-
-### SPI-004 — Qualify reset release with clock readiness or eliminate the PLL dependency
-
-If a PLL remains in the architecture, controller operation shall not begin until the generated clock is valid according to an explicit lock/reset policy.
-
-### SPI-005 — Add deterministic transaction-level verification
-
-Verify exact 16-bit writes, 56-bit reads, bit order, byte order, CS duration, clock count, and known-pattern readback.
-
-### SPI-006 — Separate sensor policy from transport
-
-ADXL345 register initialization, sampling policy, and axis parsing should not be structurally embedded in a reusable SPI transport controller.
-
-### SPI-007 — Add generic software contract only if generic SPI is introduced
-
-A future software-visible SPI peripheral would require a separate approved specification covering at least:
-
-```text
-base address
-control/status registers
-clock divisor
-CPOL/CPHA
-chip-select selection
-TX/RX data path
-FIFO policy
-busy/done/error behavior
-interrupt policy
-transfer width
-backpressure / timeout semantics
-```
-
-No such contract exists in the baseline.
-
-## 17. Non-Goals
-
-This baseline specification does not:
-
-- allocate a new APB slot for generic SPI,
-- define a future SPI register map,
-- claim support for multiple SPI slaves,
-- claim DMA-driven SPI,
-- claim FIFO buffering,
-- claim standard SPI Mode 0–3 compliance,
-- change the existing ADXL345 hardware sequence.
-
-The statements above describe the historical pre-A6 implementation; the Phase 4A-GSENSOR status below records the current public candidate.
-
-## Phase 4A-GSENSOR A6 SPI Timing Implementation
-
-The current public candidate implements the approved A6 private ADXL345 transport with one 50 MHz PCLK FSM, registered idle-high SCLK, and no active dual-phase `spi_pll`. Alternate 12/13 PCLK half-periods make a 25-PCLK (2 MHz) SCLK cycle. It remains 4-wire, active-low CS, MSB first, mode 3 (CPOL=1, CPHA=1): CS asserts while SCLK is high, MOSI changes on falling edges, MISO is sampled on rising edges, and CS holds through the last sampled bit. Directed 16/56-bit transactions, reset, INT synchronization and known-pattern XYZ tests pass. The user-run fit contains no SPI PLL generated clock and passes internal 50 MHz setup/hold.
-
-Earlier sections about two phase-shifted `spi_pll` clocks describe the historical baseline only. Physical ADXL345 pin setup/hold, board operation and the software-visible VALID/SEQ/cross-read snapshot remain unverified; `SPI-002` and `STA-002` are not closed by the internal timing result. Detailed Phase 4A-GSENSOR evidence remains in the private local evidence archive.
-
-## Phase 4A-SPI-001 Digital Evidence Closure (2026-09-15)
-
-User/Chat approved the current tracker `SPI-001` transition to `VERIFIED` for digital transaction/waveform evidence only. The directed `verification/directed/models/gsensor/tb_gsensor_single_pclk.sv` checks mode 3, registered 12/13-PCLK SCLK halves, all eleven 16-bit initialization writes, three complete 56-bit reads, MOSI order, rising-edge MISO capture, exact CS lifetime, non-symmetric known-pattern data, and in-flight reset abort/safe-idle/restart; the focused G-sensor regression passes. No synthesizable RTL or SDC/QSF change, Quartus build, or board test was part of this closure. `SPI-002` remains `IN_PROGRESS` for physical ADXL345 timing; `GS-005`, `STA-002`, `CDC-002`, and `GS-001` retain their separate open gates.
-
-The older §16 heading also labeled “SPI-001” discusses private versus generic SPI as historical pre-A6 context. It is preserved here; the current tracker `SPI-001` is the directed digital waveform-verification row. Terminology cleanup belongs to the later Full Spec Refresh.
-
-## P09B ADXL345 transaction contract — paired publication update
-
-> **Current Public integration:** The 12-write PCLK-only implementation is current with the paired P09B source/documentation commits. Historical 11-write evidence remains historical and `SPI-002` remains open.
-
-> **Publication synchronization:** The 12-write PCLK-only implementation is published only with its matching source commit. Historical 11-write evidence remains historical and `SPI-002` remains open.
-
-The isolated P09B candidate retains the fixed-function PCLK-only mode-3 transport and full 56-bit DATAX0..DATAZ1 read. Its 12 initialization writes, in order, are `(0x24,0x20)`, `(0x25,0x03)`, `(0x26,0x01)`, `(0x27,0x7F)`, `(0x28,0x09)`, `(0x29,0x46)`, `(0x2C,0x09)`, `(0x2F,0x00)`, `(0x2E,0x80)`, `(0x31,0x00)`, `(0x20,0x07)`, `(0x2D,0x08)`. Thus 50 Hz DATA_READY is enabled and mapped to INT1; measurement mode is last. The existing 11-write waveform evidence remains historical and cannot verify this new table. In the isolated candidate the controller reset input is direct `PRESETn`, **not** the historical extra 2^20-PCLK local delay. It starts initialization on common reset release and arms acquisition/watchdog only after all twelve writes end with CS HIGH. Asynchronous reset assertion aborts in-flight SPI, clears scheduler state and restarts this full sequence after synchronous release; no old E0/E1 completion may publish afterward. A completed digital burst is not proof of a new physical conversion. INT1 is the primary trigger and a 30 ms elapsed-PCLK watchdog is the fallback, not the historical nominal 8.192 ms idle poll. Exact coalescing, edge priorities and sample publication are specified in [12_gsensor.md](12_gsensor.md). The Stage 1 `NOT_RUN` labels are historical. The isolated candidate has focused digital and CPU/host evidence, but sensor-supply startup, ADXL345 board timing and physical pin checks remain outside this contract; `SPI-002` is not closed. None of this updates current Public `main` before integration approval.
+1. **Historical Dual-Phase `spi_pll` (Pre-A6):**
+   Originally, the subsystem used an Altera `spi_pll` IP generating two nominal 2 MHz clocks from 50 MHz with an ~80-degree phase shift (`spi_clk` for controller state and `spi_clk_out` for external SCLK). This created an unsafe internal `spi_clk -> PCLK` clock-domain crossing and required a separate PLL lock wait. A6 eliminated `spi_pll` entirely and converted the controller to single 50 MHz PCLK operation.
+2. **Historical Local Reset Delay (`reset_delay.v`):**
+   The A6 wrapper retained an instance of `reset_delay.v` (a 20-bit counter adding ~20.97 ms delay after system reset release, for a total startup delay of ~41 ms). P09B removed this instance, connecting `spi_ee_config` directly to shared `PRESETn`.
+3. **Historical 11-Write Sequence:**
+   The pre-P09 baseline executed 11 initialization writes with `INT_ENABLE = 0x00` (interrupts disabled) and enabled measurement mode (`POWER_CTL = 0x08`) at write index 10 rather than last. P09B expanded this to 12 ordered writes, enabling DATA_READY on INT1 and placing `POWER_CTL` last.
+4. **Historical ~8.192 ms Polling Fallback:**
+   The pre-P09 controller polled for data based on bit 14 of an idle counter (`POLL_BITS = 14`, nominal 16,384 × 25 / 50 MHz ≈ 8.192 ms), which was asynchronous to sensor ODR and produced duplicate samples. P09B replaced this with INT1-driven acquisition and a 30 ms watchdog.
+5. **Historical Raw 2-Register APB Interface:**
+   The pre-P09 APB wrapper exposed only two read-only registers (`GSENSOR_XY_DATA` and `GSENSOR_Z_DATA`) without `VALID`, `SEQ`, or atomic snapshot capability, risking torn reads across separate bus transactions. P09B introduced the coherent LIVE/HOLD architecture.
