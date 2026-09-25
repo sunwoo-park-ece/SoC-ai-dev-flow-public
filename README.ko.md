@@ -2,7 +2,17 @@
 
 이 저장소는 개인 FPGA SoC 프로젝트의 **공개 가능한 소스 기준 저장소**다. 확정된 사양, 직접 작성한 RTL/FW, 고지와 함께 재배포 가능한 오픈소스 RTL, 공개 검증 소스, 정제된 보고서를 보관한다.
 
-표준 엔지니어링 환경은 WSL Ubuntu + Codex다. RTL/FW 구현, Verilator 검사, 벤더 CLI 실행, ModelSim/XSim 시뮬레이션, 결과 분석과 엔지니어링 보고서 작성은 이 환경에서 수행한다. Antigravity는 확정 사양을 기준으로 독립 DV를 작성한다. Windows Work는 검토가 끝난 근거를 받아 포트폴리오, PDF/PPT, 면접 자료를 다듬고 필요한 경우 GUI 전용 벤더 작업을 보조하지만, 표준 빌드나 엔지니어링 보고서의 소유자는 아니다.
+![Development Workflow](docs/assets/images/development_workflow.png)
+
+이 프로젝트는 WSL 중심의 엔지니어링 워크플로우를 사용합니다.
+
+- **WSL Local**은 구현 및 검증 에이전트가 사용하는 표준(canonical) 엔지니어링 작업 공간입니다.
+- **GitHub**은 이슈, 소스 이력 및 협업을 위한 버전 관리 공통 Source of Truth입니다.
+- **G-drive / WSL Mirror Drive**는 Chat 기반 검토를 위해 무결성(parity)이 검증된 스냅샷 미러를 저장합니다.
+- **G-drive / Chat Workspace Drive**는 소유자/Chat 간 쓰기 가능한 문서 및 인수인계 산출물 작성에 사용됩니다.
+- `sync.sh`는 전체 staging 스냅샷을 생성하고 무결성이 검증된 미러를 배포합니다.
+- 실선 화살표: 코드/데이터 동기화 또는 직접적인 저장소 상호작용
+- 점선 화살표: 태스크 / 이슈 / 문서 / 인수인계 흐름
 
 ## Hardware Overview
 

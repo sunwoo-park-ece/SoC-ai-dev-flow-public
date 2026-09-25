@@ -2,7 +2,17 @@
 
 This repository is the publishable source of truth for a personal FPGA SoC project. It contains specifications, project-authored RTL and firmware, redistributable third-party RTL with notices, portable verification sources, and reviewed reports.
 
-The canonical engineering environment is WSL Ubuntu with Codex. RTL/firmware development, Verilator checks, vendor CLI invocation, ModelSim/XSim simulation, result analysis, and engineering-report generation originate there. Antigravity independently develops DV from the approved specifications. Windows Work consumes reviewed evidence for portfolio documents, PDF/PPT material, and interview preparation; it may assist with GUI-only vendor operations, but it is not the canonical build or engineering-report owner.
+![Development Workflow](docs/assets/images/development_workflow.png)
+
+The project uses a WSL-centered engineering workflow.
+
+- **WSL Local** is the canonical engineering workspace used by implementation and verification agents.
+- **GitHub** is the versioned shared source of truth for issues, source history, and collaboration.
+- **G-drive / WSL Mirror Drive** stores a parity-verified snapshot mirror for Chat-assisted review.
+- **G-drive / Chat Workspace Drive** is used for owner/chat writable documentation and handoff artifacts.
+- `sync.sh` creates a full staging snapshot and deploys a parity-verified mirror.
+- Solid arrows: code/data synchronization or direct repository interaction
+- Dashed arrows: task / issue / documentation / handoff flow
 
 ## Hardware Overview
 
