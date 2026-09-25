@@ -95,7 +95,8 @@ endfunction
                                             off == 16'h0010 ||
                                             (off >= 16'h0020 && off <= 16'h008c && off[1:0] == 2'b00));
                     4'h5:
-                        canonical_offset = (off <= 16'h0038 && off[1:0] == 2'b00);
+                        canonical_offset = ((off <= 16'h004c && off[1:0] == 2'b00) ||
+                                            off == 16'h0060 || off == 16'h0064);
                     default: canonical_offset = 1'b0;
                 endcase
             end

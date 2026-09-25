@@ -139,7 +139,7 @@ wire BRAM_HAZARD; // cpu에서 출력하는 DMEM에 읽기와 쓰기가 동시�
 
 
 // APB 개별 슬레이브 응답 신호
-wire [31:0] PRDATA_UART0, PRDATA_UART1, PRDATA_GPIO, PRDATA_TIMER, PRDATA_GSENSOR, PRDATA_AES, PRDATA_JOYSTICK, PRDATA_HEX, PRDATA_SW, PRDATA_LED;
+wire [31:0] PRDATA_UART0, PRDATA_UART1, PRDATA_GPIO, PRDATA_TIMER, PRDATA_GSENSOR, PRDATA_AES, PRDATA_ADC, PRDATA_HEX, PRDATA_SW, PRDATA_LED;
 
 
 // DE10-lite 보드의 BRAM 크기는 204KB 
@@ -234,7 +234,7 @@ assign PRDATA = (PSEL[0]) ? PRDATA_UART0 :      // UART0/LoRa: 0x4000_0000
                 (PSEL[2]) ? PRDATA_TIMER :      // TIMER:      0x4002_0000
                 (PSEL[3]) ? PRDATA_GSENSOR:     // GSENSOR:    0x4003_0000
                 (PSEL[4]) ? PRDATA_AES:         // AES-GCM:    0x4004_0000
-                (PSEL[5]) ? PRDATA_JOYSTICK:    // JOYSTICK:   0x4005_0000
+                (PSEL[5]) ? PRDATA_ADC:         // ADC v2:     0x4005_0000
                 (PSEL[6]) ? PRDATA_UART1:       // UART1/PC:   0x4006_0000
                 (PSEL[7]) ? PRDATA_HEX:         // HEX:        0x4007_0000
                 (PSEL[8]) ? PRDATA_SW:          // SW:         0x4008_0000
@@ -251,7 +251,8 @@ wire GSENSOR_READY;
 wire GSENSOR_SLVERR;
 wire VGA_READY;
 wire AES_READY;
-wire JOYSTICK_READY;
+wire ADC_READY;
+wire ADC_SLVERR;
 wire HEX_READY;
 wire SW_READY, LED_READY;
 wire gpio_irq, sw_irq; // Local PLIC-ready sources; no CPU routing in P04.
@@ -262,7 +263,7 @@ assign APB_SLAVE_PREADY = (PSEL[0]) ? UART0_READY :
                           (PSEL[2]) ? TIMER_READY :
                           (PSEL[3]) ? GSENSOR_READY :
                           (PSEL[4]) ? AES_READY :
-                          (PSEL[5]) ? JOYSTICK_READY :
+                          (PSEL[5]) ? ADC_READY :
                           (PSEL[6]) ? UART1_READY :
                           (PSEL[7]) ? HEX_READY :
                           (PSEL[8]) ? SW_READY :
@@ -412,7 +413,7 @@ AHB_APB_bridge u_bridge (
 .PWDATA     (PWDATA),
 .PRDATA     (PRDATA),
 .PREADY      (APB_SLAVE_PREADY),
-.PSLVERR     (PSEL[3] && GSENSOR_SLVERR)
+.PSLVERR     ((PSEL[3] && GSENSOR_SLVERR) || (PSEL[5] && ADC_SLVERR))
 );
 
 
@@ -565,9 +566,7 @@ wire [5:0]  adc_valid_mask_pclk;
 wire [71:0] adc_samples_flat_pclk;
 wire        adc_mailbox_busy;
 
-wire [4:0]  joystick_adc_command_channel_unused;
-wire        joystick_adc_command_sop_unused;
-wire        joystick_adc_command_eop_unused;
+wire [3:0]  adc_error_pulse_pclk;
 
 reset_release_sync u_adc_project_reset_sync (
     .clk           (adc_sys_clk),
@@ -638,26 +637,38 @@ adc_qsys u_adc_qsys (
     .modular_adc_0_response_endofpacket   (adc_response_endofpacket)
 );
 
-APB_ADC_Joystick_Controller u_adc_joystick (
-    .PCLK                         (PCLK),
-    .PRESETn                      (PRESETn),
-    .PADDR                        (PADDR),
-    .PWRITE                       (PWRITE),
-    .PSEL                         (PSEL[5]),
-    .PENABLE                      (PENABLE),
-    .PWDATA                       (PWDATA),
-    .PRDATA                       (PRDATA_JOYSTICK),
-    .PREADY                       (JOYSTICK_READY),
-    .adc_command_valid            (adc_enable_req),
-    .adc_command_channel          (joystick_adc_command_channel_unused),
-    .adc_command_startofpacket    (joystick_adc_command_sop_unused),
-    .adc_command_endofpacket      (joystick_adc_command_eop_unused),
-    .adc_command_ready            (1'b0),
-    .adc_response_valid           (1'b0),
-    .adc_response_channel         (5'd0),
-    .adc_response_data            (12'd0),
-    .adc_response_startofpacket   (1'b0),
-    .adc_response_endofpacket     (1'b0)
+adc_error_event_cdc u_adc_error_event_cdc (
+    .adc_sys_clk      (adc_sys_clk),
+    .adc_reset_n      (adc_project_reset_n),
+    .error_event      (adc_error_event),
+    .pclk             (PCLK),
+    .pclk_reset_n     (PRESETn),
+    .error_pulse_pclk (adc_error_pulse_pclk)
+);
+
+APB_ADC_Controller u_adc_controller (
+    .PCLK                (PCLK),
+    .PRESETn             (PRESETn),
+    .PADDR               (PADDR),
+    .PWRITE              (PWRITE),
+    .PSEL                (PSEL[5]),
+    .PENABLE             (PENABLE),
+    .PWDATA              (PWDATA),
+    .PRDATA              (PRDATA_ADC),
+    .PREADY              (ADC_READY),
+    .PSLVERR             (ADC_SLVERR),
+    .adc_enable_req      (adc_enable_req),
+    .engine_enabled_pclk (adc_engine_enabled_pclk),
+    .frame_pulse_pclk    (adc_frame_pulse_pclk),
+    .frame_seq_pclk      (adc_frame_seq_pclk),
+    .valid_mask_pclk     (adc_valid_mask_pclk),
+    .samples_flat_pclk   (adc_samples_flat_pclk),
+    .mailbox_busy        (adc_mailbox_busy),
+    .error_pulse_pclk    (adc_error_pulse_pclk),
+    .joy_status_i        (6'b000000), // C3 functional policy boundary; tied to 0 in C2
+    .joy_center_x_o      (),
+    .joy_center_y_o      (),
+    .joy_deadzone_o      ()
 );
 
 	APB_HEX_display u_hex_display (

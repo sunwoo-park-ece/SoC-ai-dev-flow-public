@@ -27,6 +27,7 @@ rtl/core/v/pipeline_regs/ID_EX_Register.v
 rtl/core/v/pipeline_regs/IF_ID_Register.v
 rtl/core/v/top/RV32I46F_5SP_MMIO.v
 rtl/core/v/wb_stage/MEM_WB_Register.v
+rtl/peripherals/APB_ADC_Controller.v
 rtl/peripherals/APB_ADC_Joystick_Controller.v
 rtl/peripherals/APB_GPIO.v
 rtl/peripherals/APB_HEX_display.v
@@ -42,6 +43,7 @@ rtl/peripherals/gsensor/spi_ee_config.v
 rtl/soc/AMBA_SoC_TOP.v
 rtl/soc/adc_acquisition_engine.v
 rtl/soc/adc_command_sequencer.v
+rtl/soc/adc_error_event_cdc.v
 rtl/soc/adc_frame_mailbox_cdc.v
 rtl/soc/reset_release_sync.v
 rtl/soc/system_reset_controller.v
