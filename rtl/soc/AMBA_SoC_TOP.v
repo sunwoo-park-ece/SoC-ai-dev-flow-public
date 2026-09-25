@@ -545,7 +545,26 @@ wire        adc_response_startofpacket;
 wire        adc_response_endofpacket;
 wire        adc_sys_clk;
 wire        adc_project_reset_n;
-wire        joystick_adc_command_valid_unused;
+
+// P11B acquisition engine / CDC internal interconnect
+wire        adc_engine_enable;
+wire        adc_engine_enabled;
+wire        adc_engine_frame_valid;
+wire        adc_mailbox_frame_ready;
+wire [31:0] adc_engine_frame_seq;
+wire [5:0]  adc_engine_valid_mask;
+wire [71:0] adc_engine_samples_flat;
+wire [3:0]  adc_error_event;
+
+// Clean PCLK publication / control boundary
+wire        adc_enable_req;
+wire        adc_engine_enabled_pclk;
+wire        adc_frame_pulse_pclk;
+wire [31:0] adc_frame_seq_pclk;
+wire [5:0]  adc_valid_mask_pclk;
+wire [71:0] adc_samples_flat_pclk;
+wire        adc_mailbox_busy;
+
 wire [4:0]  joystick_adc_command_channel_unused;
 wire        joystick_adc_command_sop_unused;
 wire        joystick_adc_command_eop_unused;
@@ -556,14 +575,50 @@ reset_release_sync u_adc_project_reset_sync (
     .reset_n       (adc_project_reset_n)
 );
 
-adc_command_sequencer u_adc_command_sequencer (
-    .clk                   (adc_sys_clk),
-    .reset_n               (adc_project_reset_n),
-    .command_ready          (adc_command_ready),
-    .command_valid          (adc_command_valid),
-    .command_channel        (adc_command_channel),
-    .command_startofpacket  (adc_command_startofpacket),
-    .command_endofpacket    (adc_command_endofpacket)
+// P11B Acquisition Engine: sole project-local Qsys command owner
+adc_acquisition_engine u_adc_acquisition_engine (
+    .adc_sys_clk           (adc_sys_clk),
+    .adc_reset_n           (adc_project_reset_n),
+    .enable                (adc_engine_enable),
+    .engine_enabled        (adc_engine_enabled),
+    .command_valid         (adc_command_valid),
+    .command_channel       (adc_command_channel),
+    .command_startofpacket (adc_command_startofpacket),
+    .command_endofpacket   (adc_command_endofpacket),
+    .command_ready         (adc_command_ready),
+    .response_valid        (adc_response_valid),
+    .response_channel      (adc_response_channel),
+    .response_data         (adc_response_data),
+    .response_startofpacket(adc_response_startofpacket),
+    .response_endofpacket  (adc_response_endofpacket),
+    .frame_valid           (adc_engine_frame_valid),
+    .frame_ready           (adc_mailbox_frame_ready),
+    .frame_seq             (adc_engine_frame_seq),
+    .valid_mask            (adc_engine_valid_mask),
+    .samples_flat          (adc_engine_samples_flat),
+    .error_event           (adc_error_event)
+);
+
+// P11B Frame Mailbox CDC: transfers complete frames to PCLK domain
+adc_frame_mailbox_cdc u_adc_frame_mailbox_cdc (
+    .pclk                  (PCLK),
+    .pclk_reset_n          (PRESETn),
+    .enable_req            (adc_enable_req),
+    .engine_enabled_pclk   (adc_engine_enabled_pclk),
+    .frame_pulse_pclk      (adc_frame_pulse_pclk),
+    .frame_seq_pclk        (adc_frame_seq_pclk),
+    .valid_mask_pclk       (adc_valid_mask_pclk),
+    .samples_flat_pclk     (adc_samples_flat_pclk),
+    .adc_sys_clk           (adc_sys_clk),
+    .adc_reset_n           (adc_project_reset_n),
+    .engine_enable         (adc_engine_enable),
+    .engine_enabled        (adc_engine_enabled),
+    .frame_valid           (adc_engine_frame_valid),
+    .frame_ready           (adc_mailbox_frame_ready),
+    .frame_seq             (adc_engine_frame_seq),
+    .valid_mask            (adc_engine_valid_mask),
+    .samples_flat          (adc_engine_samples_flat),
+    .mailbox_busy          (adc_mailbox_busy)
 );
 
 // APB ADC Joystick 슬레이브 (0x4005_0000)
@@ -593,17 +648,17 @@ APB_ADC_Joystick_Controller u_adc_joystick (
     .PWDATA                       (PWDATA),
     .PRDATA                       (PRDATA_JOYSTICK),
     .PREADY                       (JOYSTICK_READY),
-    .adc_command_valid            (joystick_adc_command_valid_unused),
+    .adc_command_valid            (adc_enable_req),
     .adc_command_channel          (joystick_adc_command_channel_unused),
     .adc_command_startofpacket    (joystick_adc_command_sop_unused),
     .adc_command_endofpacket      (joystick_adc_command_eop_unused),
-    .adc_command_ready            (adc_command_ready),
-    .adc_response_valid           (adc_response_valid),
-    .adc_response_channel         (adc_response_channel),
-    .adc_response_data            (adc_response_data),
-    .adc_response_startofpacket   (adc_response_startofpacket),
-	    .adc_response_endofpacket     (adc_response_endofpacket)
-	);
+    .adc_command_ready            (1'b0),
+    .adc_response_valid           (1'b0),
+    .adc_response_channel         (5'd0),
+    .adc_response_data            (12'd0),
+    .adc_response_startofpacket   (1'b0),
+    .adc_response_endofpacket     (1'b0)
+);
 
 	APB_HEX_display u_hex_display (
 	    .PCLK    (PCLK),
