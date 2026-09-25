@@ -49,6 +49,17 @@ grep -q '^SUMMARY: PASS tb_adc_error_event_cdc$' "$out/run_error_cdc.log"
 cat "$out/run_error_cdc.log"
 echo "PASS tb_adc_error_event_cdc"
 
+# 3B. Test 2B: tb_adc_engine_cdc_integration
+echo "--- Test: tb_adc_engine_cdc_integration ---"
+iverilog -g2012 -s tb_adc_engine_cdc_integration -o "$out/tb_adc_engine_cdc_integration.vvp" \
+    "$root/rtl/soc/adc_acquisition_engine.v" \
+    "$root/rtl/soc/adc_error_event_cdc.v" \
+    "$root/verification/directed/adc/tb_adc_engine_cdc_integration.sv" > "$out/compile_engine_cdc.log" 2>&1
+vvp "$out/tb_adc_engine_cdc_integration.vvp" > "$out/run_engine_cdc.log" 2>&1
+grep -q '^SUMMARY: PASS tb_adc_engine_cdc_integration$' "$out/run_engine_cdc.log"
+cat "$out/run_engine_cdc.log"
+echo "PASS tb_adc_engine_cdc_integration"
+
 # 4. Test 3: tb_soc_bus_fault_adc
 echo "--- Test: tb_soc_bus_fault_adc ---"
 iverilog -g2012 -s tb_soc_bus_fault_adc -o "$out/tb_soc_bus_fault_adc.vvp" \

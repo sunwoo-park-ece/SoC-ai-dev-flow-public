@@ -118,6 +118,7 @@ module APB_ADC_Controller (
     reg [11:0] live_ch1, live_ch2, live_ch3, live_ch4, live_ch5, live_ch6;
 
     wire disabled_ack = (!enable_reg) && (!engine_enabled_pclk);
+    wire live_accept  = frame_pulse_pclk && !disabled_ack;
 
     always @(posedge PCLK or negedge PRESETn) begin
         if (!PRESETn) begin
@@ -134,7 +135,7 @@ module APB_ADC_Controller (
             // Disabled acknowledgement invalidates LIVE eligibility
             if (disabled_ack) begin
                 live_valid <= 1'b0;
-            end else if (frame_pulse_pclk) begin
+            end else if (live_accept) begin
                 live_valid <= 1'b1;
                 live_seq   <= frame_seq_pclk;
                 live_mask  <= valid_mask_pclk;
@@ -194,7 +195,7 @@ module APB_ADC_Controller (
     always @(posedge PCLK or negedge PRESETn) begin
         if (!PRESETn) begin
             frame_count_reg <= 32'd0;
-        end else if (frame_pulse_pclk) begin
+        end else if (live_accept) begin
             frame_count_reg <= frame_count_reg + 32'd1;
         end
     end

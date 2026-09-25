@@ -46,7 +46,12 @@ module tb_adc_error_event_cdc;
     // Event counters
     integer src_count [0:3];
     integer dst_count [0:3];
+    integer src_cycles = 0;
     integer i;
+
+    always @(posedge adc_sys_clk) begin
+        if (adc_reset_n) src_cycles <= src_cycles + 1;
+    end
 
     // Destination domain monitor
     always @(posedge pclk) begin
@@ -138,21 +143,68 @@ module tb_adc_error_event_cdc;
         end
 
         // ---------------------------------------------------------------------
-        // 4. Minimum Spacing Proof: Supported Acquisition Engine Behavior
+        // 4. Minimum Spacing Proof: Exact Cycle-Level Forced & Measured (10MHz -> 50MHz)
         // ---------------------------------------------------------------------
-        $display("Testing supported minimum same-bit spacing...");
-        // In adc_acquisition_engine.v:
-        // reject_response transitions to ST_ISSUE_CH1 (wait command_ready),
-        // then ST_WAIT_CH1 (wait response_valid).
-        // Minimum separation between two error events is >= 2 adc_sys_clk cycles.
+        $display("Testing exact minimum same-bit spacing (10MHz -> 50MHz, cycle-level forced & measured)...");
+        // We force exactly two same-bit error events on bit 0 separated by exactly 2 adc_sys_clk cycles:
+        // Cycle t1: pulse 1 active for 1 cycle
+        // Cycle t1+1: idle (0)
+        // Cycle t1+2: pulse 2 active for 1 cycle
+        // Assertion interval: t2 - t1 = 2 cycles.
+        begin: min_spacing_block
+            integer t1_cycle, t2_cycle;
+            real t1_time, t2_time;
+            integer start_src, start_dst;
+
+            start_src = src_count[0];
+            start_dst = dst_count[0];
+
+            @(posedge adc_sys_clk);
+            error_event[0] <= 1'b1;
+            src_count[0]   <= src_count[0] + 1;
+            t1_cycle       = src_cycles;
+            t1_time        = $realtime;
+
+            @(posedge adc_sys_clk);
+            error_event[0] <= 1'b0;
+
+            @(posedge adc_sys_clk);
+            error_event[0] <= 1'b1;
+            src_count[0]   <= src_count[0] + 1;
+            t2_cycle       = src_cycles;
+            t2_time        = $realtime;
+
+            @(posedge adc_sys_clk);
+            error_event[0] <= 1'b0;
+
+            $display("[MEASURED] Event 1 at cycle=%0d (time=%0.1fns), Event 2 at cycle=%0d (time=%0.1fns)",
+                     t1_cycle, t1_time, t2_cycle, t2_time);
+            $display("[MEASURED] Exact assertion-to-assertion delta = %0d adc_sys_clk cycles (%0.1fns)",
+                     (t2_cycle - t1_cycle), (t2_time - t1_time));
+            check((t2_cycle - t1_cycle) == 2, "assertion-to-assertion spacing is exactly 2 adc_sys_clk cycles");
+
+            wait_destination_settle(15);
+
+            check((src_count[0] - start_src) == 2, "exactly 2 source events sent at minimum spacing");
+            check((dst_count[0] - start_dst) == 2, "exactly 2 destination pulses received (0 lost, 0 duplicates)");
+            $display("[PASS] Exact minimum spacing (2 cycles) lossless: 2 sent, 2 received, 0 lost, 0 duplicates");
+        end
+
+        // Repetitive stress: 5 pairs of back-to-back 2-cycle spaced events
         for (i = 0; i < 5; i = i + 1) begin
-            send_source_error(4'b0001); // Event 1
-            // 2 cycles spacing (supported minimum)
-            repeat (2) @(posedge adc_sys_clk);
-            send_source_error(4'b0001); // Event 2
+            @(posedge adc_sys_clk);
+            error_event[0] <= 1'b1;
+            src_count[0]   <= src_count[0] + 1;
+            @(posedge adc_sys_clk);
+            error_event[0] <= 1'b0;
+            @(posedge adc_sys_clk);
+            error_event[0] <= 1'b1;
+            src_count[0]   <= src_count[0] + 1;
+            @(posedge adc_sys_clk);
+            error_event[0] <= 1'b0;
             wait_destination_settle(15);
         end
-        check(dst_count[0] == src_count[0], "supported minimum spacing (2 cycles) is 100% lossless");
+        check(dst_count[0] == src_count[0], "repeated minimum spacing (2 cycles) is 100% lossless");
 
         // ---------------------------------------------------------------------
         // 5. Clock Frequency and Phase Variations
@@ -168,14 +220,22 @@ module tb_adc_error_event_cdc;
             check(dst_count[i] == src_count[i], "equal frequency transfer accurate");
         end
 
-        // Equal frequency back-to-back at minimum separation (3 cycles of 20ns = 60ns)
+        // Equal frequency back-to-back at minimum separation (2 cycles of 20ns = 40ns)
+        $display("Testing 50MHz -> 50MHz minimum same-bit spacing (2 cycles = 40ns)...");
         for (i = 0; i < 5; i = i + 1) begin
-            send_source_error(4'b0010);
-            repeat (3) @(posedge adc_sys_clk);
-            send_source_error(4'b0010);
+            @(posedge adc_sys_clk);
+            error_event[1] <= 1'b1;
+            src_count[1]   <= src_count[1] + 1;
+            @(posedge adc_sys_clk);
+            error_event[1] <= 1'b0;
+            @(posedge adc_sys_clk);
+            error_event[1] <= 1'b1;
+            src_count[1]   <= src_count[1] + 1;
+            @(posedge adc_sys_clk);
+            error_event[1] <= 1'b0;
             wait_destination_settle(10);
         end
-        check(dst_count[1] == src_count[1], "equal frequency 3-cycle spacing lossless");
+        check(dst_count[1] == src_count[1], "equal frequency 2-cycle spacing lossless");
 
         // Asymmetric / Incommensurate clock periods (17ns ADC -> 23ns PCLK)
         $display("Testing incommensurate clock periods (17ns ADC -> 23ns PCLK)...");

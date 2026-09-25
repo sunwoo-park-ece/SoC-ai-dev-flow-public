@@ -400,14 +400,96 @@ module tb_apb_adc_v2;
         $display("[PASS] Disable invalidation and HOLD survival across disable/re-enable verified");
 
         // ---------------------------------------------------------------------
+        // 4B. Mandatory Directed Coincidence Test: disabled_ack && frame_pulse_pclk
+        // ---------------------------------------------------------------------
+        $display("Testing coincidence: disabled_ack=1 and frame_pulse_pclk=1 on same edge...");
+        // First capture publication 3 into HOLD
+        apb_write(32'h4005_000C, 32'h3, rerr); // ENABLE=1 | CAPTURE=1
+        check(!rerr, "CAPTURE frame 3 into HOLD OKAY");
+        apb_read(32'h4005_0014, rdata, rerr);
+        check(rdata == 32'd3, "HOLD seq is 3 before coincidence test");
+        apb_read(32'h4005_001C, rdata, rerr);
+        check(rdata == 32'h555, "HOLD CH1 is 0x555 before coincidence test");
+
+        // Disable ADC via APB: ENABLE = 0
+        apb_write(32'h4005_000C, 32'h0, rerr);
+        check(!rerr, "clear ENABLE write OKAY");
+        check(adc_enable_req == 1'b0, "adc_enable_req deasserted");
+
+        // Check FRAME_COUNT before coincidence event: exactly 3
+        apb_read(32'h4005_0060, rdata, rerr);
+        check(rdata == 32'd3, "FRAME_COUNT == 3 prior to coincidence test");
+
+        // Force on exact same PCLK edge:
+        // engine_enabled_pclk <= 0 (so disabled_ack = 1)
+        // frame_pulse_pclk <= 1 with rejected publication payload (seq=99, CH1=0x999, CH2=0x888)
+        @(posedge pclk);
+        engine_enabled_pclk <= 1'b0;
+        frame_pulse_pclk    <= 1'b1;
+        frame_seq_pclk      <= 32'd99;
+        valid_mask_pclk     <= 6'b000011;
+        samples_flat_pclk   <= {48'd0, 12'h888, 12'h999};
+        @(posedge pclk);
+        frame_pulse_pclk    <= 1'b0;
+        @(posedge pclk);
+
+        // Verify coincidence result:
+        // 1. LIVE_VALID == 0
+        apb_read(32'h4005_0010, rdata, rerr);
+        check(rdata[2] == 1'b0, "coincidence: LIVE_VALID is 0");
+        // 2. NEW_FRAME == 0
+        check(rdata[4] == 1'b0, "coincidence: NEW_FRAME is 0");
+        // 3. HOLD_VALID survives unchanged
+        check(rdata[3] == 1'b1, "coincidence: HOLD_VALID survives");
+        // 4. LIVE payload not replaced by rejected publication (seq!=99, CH1!=0x999)
+        apb_read(32'h4005_0034, rdata, rerr);
+        check(rdata != 32'd99, "coincidence: LIVE seq not replaced by rejected publication");
+        // 5. FRAME_COUNT remains unchanged (3)
+        apb_read(32'h4005_0060, rdata, rerr);
+        check(rdata == 32'd3, "coincidence: FRAME_COUNT unchanged (did not increment)");
+        // 6. HOLD remains unchanged (seq=3, CH1=0x555)
+        apb_read(32'h4005_0014, rdata, rerr);
+        check(rdata == 32'd3, "coincidence: HOLD seq unchanged");
+        apb_read(32'h4005_001C, rdata, rerr);
+        check(rdata == 32'h555, "coincidence: HOLD CH1 unchanged");
+
+        // Re-enable ADC: ENABLE = 1, engine_enabled_pclk = 1
+        apb_write(32'h4005_000C, 32'h1, rerr);
+        check(!rerr, "re-enable ADC OKAY");
+        @(posedge pclk);
+        engine_enabled_pclk <= 1'b1;
+        @(posedge pclk);
+
+        // Deliver normal accepted Publication 4: seq=4, CH1=0x777, CH2=0x666
+        @(posedge pclk);
+        frame_pulse_pclk  <= 1'b1;
+        frame_seq_pclk    <= 32'd4;
+        valid_mask_pclk   <= 6'b000011;
+        samples_flat_pclk <= {48'd0, 12'h666, 12'h777};
+        @(posedge pclk);
+        frame_pulse_pclk  <= 1'b0;
+        @(posedge pclk);
+
+        // Verify normal later accepted publication increments FRAME_COUNT exactly once (to 4)
+        apb_read(32'h4005_0060, rdata, rerr);
+        check(rdata == 32'd4, "normal publication increments FRAME_COUNT exactly once to 4");
+        apb_read(32'h4005_0010, rdata, rerr);
+        check(rdata[2] == 1'b1, "LIVE_VALID asserted for normal publication 4");
+        check(rdata[4] == 1'b1, "NEW_FRAME asserted for normal publication 4");
+        apb_read(32'h4005_0034, rdata, rerr);
+        check(rdata == 32'd4, "LIVE seq updated to 4");
+
+        $display("[PASS] Coincidence (disabled_ack && frame_pulse_pclk) and publication recovery verified");
+
+        // ---------------------------------------------------------------------
         // 5. FRAME_COUNT Exact Increment
         // ---------------------------------------------------------------------
-        // Exactly 3 publications have been delivered so far (frames 1, 2, 3)
+        // Exactly 4 publications have been delivered so far (frames 1, 2, 3, 4)
         apb_read(32'h4005_0060, rdata, rerr);
-        check(!rerr && rdata == 32'd3, "FRAME_COUNT == 3 after 3 publications");
+        check(!rerr && rdata == 32'd4, "FRAME_COUNT == 4 after 4 publications");
 
-        // Deliver 2 more publications
-        for (c = 4; c <= 5; c = c + 1) begin
+        // Deliver 1 more publication (frame 5)
+        for (c = 5; c <= 5; c = c + 1) begin
             @(posedge pclk);
             frame_pulse_pclk  <= 1'b1;
             frame_seq_pclk    <= c;
