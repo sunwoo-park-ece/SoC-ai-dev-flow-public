@@ -55,7 +55,7 @@ The baseline contains:
 - Polling timer.
 - ADXL345 accelerometer subsystem with internal SPI engine.
 - AES-GCM accelerator.
-- MAX 10 ADC joystick controller.
+- Generic MAX 10 ADC acquisition peripheral with optional joystick policy child.
 - Six-digit seven-segment display controller.
 - VGA 640x480 display path with dual VRAM buffers.
 
@@ -259,7 +259,7 @@ The bridge decodes eight canonical 64 KiB APB slots:
 | 2 | `0x4002_0000 - 0x4002_FFFF` | TIMER | Polling timer |
 | 3 | `0x4003_0000 - 0x4003_FFFF` | GSENSOR | ADXL345 accelerometer subsystem |
 | 4 | `0x4004_0000 - 0x4004_FFFF` | AES-GCM | Cryptographic accelerator |
-| 5 | `0x4005_0000 - 0x4005_FFFF` | JOYSTICK | MAX 10 ADC joystick controller |
+| 5 | `0x4005_0000 - 0x4005_FFFF` | ADC | Generic ADC MMIO + optional joystick policy |
 | 6 | `0x4006_0000 - 0x4006_FFFF` | UART1 | PC/debug UART |
 | 7 | `0x4007_0000 - 0x4007_FFFF` | HEX | Six-digit seven-segment display |
 
@@ -372,21 +372,33 @@ The current baseline is designed around a 128-bit payload block transaction inte
 
 Detailed register ordering, IV/AAD construction, start/done behavior, encryption/decryption mode, and tag validation are specified in `aes_gcm.md`.
 
-## 15. ADC Joystick Architecture
+## 15. ADC / Joystick Architecture — P11 Target (In-progress)
 
-The joystick block connects the APB subsystem to the MAX 10 ADC/Qsys interface.
+P11 changes slot 5 from a joystick-owned ADC wrapper into a **generic ADC MMIO peripheral with an optional joystick-policy child**.
 
-It provides:
+```text
+MAX 10 ADC / adc_qsys
+        |
+        v
+ADC Acquisition Engine (adc_sys_clk, sole command owner)
+        |
+        | stable scan-frame req/ack CDC
+        v
+APB_ADC_Controller (PCLK)
+        |
+        +-- LIVE bank -> CAPTURE-only HOLD bank
+        +-- CH1..CH6 raw MMIO (CH3..CH6 reserved in Clean Baseline)
+        +-- sequence / valid-mask / frame-count / error status
+        +-- Joystick_Policy combinational child over HOLD
+```
 
-- Alternating X/Y ADC channel commands.
-- Captured 12-bit raw samples.
-- Configurable channel numbers.
-- Configurable center values.
-- Configurable deadzone.
-- Derived forward/backward/left/right status.
-- Sample/response diagnostic information.
+Structural channel capacity is six. The Clean Baseline scans command CH1/CH2 only; on the referenced DE10-Lite schematic these correspond to board `ADC_IN0/ADC_IN1` (JP8 A0/A1). Default joystick policy treats CH1 as logical X and CH2 as logical Y, while physical cable orientation/polarity remains board acceptance **(In-progress)**.
 
-Detailed behavior is specified in `adc_joystick.md`.
+A scan frame is a coherent digital publication unit, not simultaneous analog sampling. The generated Modular ADC is configured for 1 MSPS total rate with a 10 MHz hard-IP input clock and 25 MHz `adc_sys_clk`; at ideal continuous scheduling adjacent samples are 1 us apart. Actual project frame cadence remains an implementation/evidence item because command/response latency and mailbox backpressure can lengthen the interval.
+
+PCLK software uses a LIVE bank plus CAPTURE-only HOLD snapshot. There is no ADC RELEASE command; this intentionally differs from the P09 G-sensor CAPTURE/RELEASE ownership lifecycle. `Joystick_Policy` is a simple stateless child and firmware independently recomputes the same policy as a golden/reference model.
+
+Detailed register, CDC, reset, timing, and verification contracts are authoritative in `15_adc_joystick.md` and `06_reset_clock.md`. Nothing in this architecture section promotes P11 implementation to Verified.
 
 ## 16. Seven-Segment Display Architecture
 

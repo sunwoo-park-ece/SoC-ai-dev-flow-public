@@ -492,3 +492,22 @@ P05C fitted evidence는 system reset controller, VGA/ADC local reset synchronize
 통합된 P09B 구현은 registered mode-3 외부 SCLK와 함께 단일 50 MHz PCLK 도메인에서 완전히 동작한다. `spi_ee_config.iRSTN`을 `PRESETn`에 직접 연결하여 활성 로컬 `reset_delay` 인스턴스 없이 시스템 리셋 검증을 공유한다. LIVE/HOLD bank, IRQ 동기화/이력, pending scheduler 상태 및 30 ms watchdog도 모두 동일한 `PRESETn`을 공유한다.
 
 Reset assertion은 비동기적이며 진행 중인 SPI 트랜잭션이나 APB 전송을 중단한다. Reset release는 시스템 리셋 검증(~20 ms)을 통해 PCLK에 동기화된다. Reset은 LIVE 및 HOLD bank, SEQ, VALID 및 pending scheduler 상태를 모두 클리어한다. 외부 ADXL345 보드 타이밍 및 전기적 특성 분석은 `STA-002` / `SPI-002`에서 계속 추적된다.
+
+## P11 ADC Reset / CDC Freeze Note
+
+현재 확인된 ADC clock은 `adc_sys_clk=25 MHz`, ADC hard-IP input `10 MHz`, configured total sample rate `1 MSPS`이다.
+
+Reset ownership은 중앙 policy와 destination-domain release를 분리한다.
+
+```text
+KEY[0] -> system_reset_controller -> HRESETn
+  +-> HCLK/PCLK: 이미 HCLK 기준 release, 추가 sync 불필요
+  +-> reset_release_sync(adc_sys_clk) -> adc_reset_n
+  +-> adc_qsys reset port -> vendor-managed reset/PLL-lock logic
+```
+
+Project-local ADC engine은 `adc_reset_n`을 사용한다. Qsys PLL `locked`는 현재 project top으로 export되지 않으며 generated HDL을 hand edit하지 않는다.
+
+ADC frame은 historical direct response crossing 대신 stable bundled-data req/ack mailbox로 `adc_sys_clk -> PCLK` 이동한다. Source는 ACK까지 payload를 고정하고 mailbox busy 동안 다음 frame publication을 진행하지 않는다. Async FIFO는 future streaming/DMA, producer non-stall, multi-frame buffering 요구가 생길 때만 필요하다.
+
+P11 frame CDC와 vendor lock-loss/protocol 검증은 **(In-progress)**다.

@@ -118,7 +118,8 @@ GPIO_BASE        = 0x4001_0000
 TIMER_BASE       = 0x4002_0000
 GSENSOR_BASE     = 0x4003_0000
 AES_GCM_BASE     = 0x4004_0000
-JOYSTICK_BASE    = 0x4005_0000
+ADC_BASE         = 0x4005_0000
+JOYSTICK_BASE    = ADC_BASE   /* transitional P11 migration alias only */
 UART1_BASE       = 0x4006_0000
 HEX_DISPLAY_BASE = 0x4007_0000
 ```
@@ -160,7 +161,7 @@ Timer         -> timer driver
 G-Sensor      -> gsensor driver
 VGA/VRAM      -> vram/display support
 AES-GCM       -> aes_gcm driver
-ADC Joystick  -> joystick driver
+ADC / Joystick -> generic ADC driver + joystick policy layer
 HEX Display   -> hex_display driver
 ```
 
@@ -361,24 +362,67 @@ return GSENSOR_OK (sample populated in *out)
 - Any transfer interrupted by reset has no guaranteed return value.
 - Following reset release, `VALID` remains 0 until the 12-write initialization completes and the first full digital burst finishes.
 
-## 13. ADC / Joystick Rules
+## 13. ADC / Joystick Firmware Rules — P11 Target (In-progress)
 
-In the active design the Qsys ADC command stream is owned by a top-level scanner that continuously alternates physical ADC channels 1 and 2. The APB joystick controller's command outputs are not the active ADC command source.
+P11 introduces a generic ADC driver contract at `ADC_BASE = 0x4005_0000`. A temporary `JOYSTICK_BASE` alias may exist only as migration compatibility; new code shall use the generic ADC naming.
 
-Therefore current firmware shall use the board integration as fixed:
+Firmware shall not program runtime channel selection in P11. The Clean Baseline hardware scan is fixed/read-only:
 
 ```text
-X channel = 1
-Y channel = 2
+ACTIVE_MASK = 0x03
+command CH1 -> raw slot CH1
+command CH2 -> raw slot CH2
 ```
 
-Programming different `JOY_X_CHANNEL` / `JOY_Y_CHANNEL` values changes classification in the APB controller but does not reprogram the top-level ADC scan sequence.
+CH3..CH6 addresses are reserved canonical RO raw-data locations and return zero/invalid in this baseline.
 
-Likewise, clearing `JOY_CTRL.ENABLE` does not stop the underlying top-level ADC scanner.
+### 13.1 Acquisition enable
 
-`joystick_read()` performs separate reads of direction status, X, and Y. Current firmware shall not claim that the three values are one atomic acquisition snapshot.
+`ADC_CTRL.ENABLE` is a real persistent acquisition request. Software distinguishes request from hardware acknowledgement:
 
-The existing LEFT/RIGHT-to-ASCII mapping shall be treated as a board/application convention pending physical polarity confirmation.
+```text
+ADC_STATUS.ENABLE_REQ
+ADC_STATUS.ENGINE_ENABLED
+```
+
+Code that requires the engine to be quiescent shall wait for the acknowledged state with a bounded poll budget. Disable preserves the previous HOLD snapshot but prevents publication of a partial post-disable frame.
+
+### 13.2 CAPTURE-only snapshot
+
+Firmware reads coherent ADC data only from HOLD registers.
+
+Recommended sequence:
+
+```text
+1. inspect LIVE_VALID / NEW_FRAME as needed
+2. write CAPTURE
+3. read HOLD FRAME_SEQ / VALID_MASK / CHx_RAW
+4. no RELEASE step
+```
+
+If no newer LIVE frame exists, CAPTURE returns normal bus success and is a no-op. Existing HOLD remains readable. This differs intentionally from the P09 G-sensor `CAPTURE -> HOLD ownership -> RELEASE` lifecycle.
+
+### 13.3 Generic ADC versus joystick policy
+
+The ADC driver returns raw coherent frame data. Joystick interpretation is a separate policy layer.
+
+Firmware shall implement an independent `joystick_policy_eval()`-class function from raw HOLD CH1/CH2, HOLD valid mask, and the current center/deadzone parameters. It may also read hardware `JOY_STATUS` and compare the two results during verification, but the software result shall not be derived from the hardware result.
+
+Calibration semantics are live-policy semantics:
+
+```text
+JOY_STATUS = current center/deadzone applied to current HOLD sample
+```
+
+Thus changing calibration may change direction without a new CAPTURE.
+
+Physical X/Y polarity and application/ASCII mapping remain **(In-progress)** board acceptance. Firmware shall not preserve the historical LEFT->`d`, RIGHT->`a` quirk as an architectural requirement.
+
+### 13.4 Error and count use
+
+`ERROR_STATUS` contains sticky acquisition/protocol errors and is cleared only by the defined W1P clear command. `FRAME_COUNT` counts completed frames published into PCLK LIVE, not individual ADC responses or CAPTURE calls.
+
+Normal firmware shall use exact 32-bit aligned v2 offsets and shall not rely on historical local mirrors or removed live response-debug fields.
 
 ## 14. HEX Display Rules
 
@@ -512,7 +556,7 @@ After the approved board-I/O migration is implemented, firmware shall use:
 0x4002_0000 Timer
 0x4003_0000 G-sensor
 0x4004_0000 AES-GCM
-0x4005_0000 ADC Joystick
+0x4005_0000 ADC / Joystick Policy
 0x4006_0000 UART1 / PC
 0x4007_0000 HEX Display
 0x4008_0000 SW
@@ -700,15 +744,38 @@ Firmware shall reject/use-no-sample semantics before first valid acquisition and
 
 The private ADXL345 SPI transport remains hardware-owned unless a separate generic SPI peripheral is later approved.
 
-## 27. Target ADC / Joystick Contract
+## 27. Target ADC / Joystick Contract — P11 Frozen (In-progress)
 
-After ADC cleanup, software-visible channel configuration and ENABLE semantics shall correspond to the actual ADC command owner.
+The P11 firmware target is frozen as follows:
 
-Firmware shall no longer rely on a disconnect between APB configuration and a fixed top-level scanner.
+- generic ADC MMIO at slot 5 owns coherent raw-frame access;
+- real ENABLE request/ack semantics replace the historical disconnected enable bit;
+- runtime X/Y channel programming is removed from the baseline ABI; active channels are fixed/read-only;
+- CAPTURE atomically replaces HOLD only when a newer LIVE frame exists;
+- no ADC RELEASE command exists;
+- firmware reads `FRAME_SEQ`, `VALID_MASK`, and CH raw registers from HOLD;
+- `ADC_STATUS.NEW_FRAME` provides freshness under the frozen sequence comparison rule;
+- CH3..CH6 raw addresses are reserved now for future six-channel activation;
+- joystick hardware policy is optional convenience/acceleration logic, not the owner of ADC acquisition;
+- firmware independently recomputes joystick policy and serves as a golden/reference implementation;
+- board-specific cable polarity and ASCII/control mapping remain outside generic ADC semantics.
 
-The target driver shall consume a coherent X/Y publication with validity/sequence information or another explicitly approved atomic sample contract.
+Suggested driver layering:
 
-Board-specific axis polarity and ASCII/control mapping shall be separated from the generic ADC acquisition layer where practical.
+```text
+adc.c / adc.h
+  -> enable/disable + bounded acknowledgement
+  -> capture latest coherent frame
+  -> raw frame/status/error access
+
+joystick_policy.c / joystick_policy.h
+  -> pure C policy evaluator over raw frame + calibration
+
+joystick.c / joystick.h
+  -> optional application convenience wrapper
+```
+
+The P11 implementation may choose exact C type/function names during the implementation task, but it shall preserve these ownership boundaries and observable MMIO semantics.
 
 ## 28. Verified HEX Contract (Active Baseline)
 

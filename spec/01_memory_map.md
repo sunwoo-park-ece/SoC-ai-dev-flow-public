@@ -95,7 +95,7 @@ The currently implemented AHB-to-APB bridge exposes `PSEL[7:0]`. Each canonical 
 | 2 | `PSEL[2]` | `0x4002_0000` – `0x4002_FFFF` | `0x4002_0000` | Timer |
 | 3 | `PSEL[3]` | `0x4003_0000` – `0x4003_FFFF` | `0x4003_0000` | G-sensor |
 | 4 | `PSEL[4]` | `0x4004_0000` – `0x4004_FFFF` | `0x4004_0000` | AES-GCM |
-| 5 | `PSEL[5]` | `0x4005_0000` – `0x4005_FFFF` | `0x4005_0000` | ADC Joystick |
+| 5 | `PSEL[5]` | `0x4005_0000` – `0x4005_FFFF` | `0x4005_0000` | ADC / Joystick Policy |
 | 6 | `PSEL[6]` | `0x4006_0000` – `0x4006_FFFF` | `0x4006_0000` | UART1 / PC |
 | 7 | `PSEL[7]` | `0x4007_0000` – `0x4007_FFFF` | `0x4007_0000` | HEX Display |
 
@@ -162,27 +162,44 @@ Important registers include:
 +0x80..0x8C HDR_DEBUG0..3
 ```
 
-### 6.6 ADC Joystick
+### 6.6 ADC / Joystick Policy — P11 v2 Target (In-progress)
 
-Canonical base: `0x4005_0000`.
+Canonical base: `0x4005_0000` (`ADC_BASE`). A temporary firmware `JOYSTICK_BASE` alias may remain only during migration.
+
+All accesses are naturally aligned 32-bit words. Exact local-offset decode is required; low-bit mirrors are non-architectural and shall return the system error response.
 
 ```text
-+0x00 NAME0
-+0x04 NAME1
-+0x08 VERSION
-+0x0C JOY_CTRL
-+0x10 JOY_STATUS
-+0x14 JOY_X_CHANNEL
-+0x18 JOY_Y_CHANNEL
-+0x1C JOY_X_RAW
-+0x20 JOY_Y_RAW
-+0x24 JOY_CENTER_X
-+0x28 JOY_CENTER_Y
-+0x2C JOY_DEADZONE
-+0x30 JOY_DIR_STATUS
-+0x34 JOY_SAMPLE_COUNT
-+0x38 JOY_RESP_INFO
++0x00 NAME0             RO  "apb-"
++0x04 NAME1             RO  "adc "
++0x08 VERSION           RO  0x0002_0000
++0x0C ADC_CTRL          RW/W1P: ENABLE[0], CAPTURE[1], CLEAR_ERROR[2]
++0x10 ADC_STATUS        RO
++0x14 FRAME_SEQ         RO  HOLD sequence
++0x18 VALID_MASK        RO  HOLD valid mask
++0x1C CH1_RAW           RO  HOLD[CH1][11:0]
++0x20 CH2_RAW           RO  HOLD[CH2][11:0]
++0x24 CH3_RAW           RO  reserved canonical channel address, baseline 0
++0x28 CH4_RAW           RO  reserved canonical channel address, baseline 0
++0x2C CH5_RAW           RO  reserved canonical channel address, baseline 0
++0x30 CH6_RAW           RO  reserved canonical channel address, baseline 0
++0x34 LIVE_SEQ          RO
++0x38 LIVE_VALID_MASK   RO
++0x3C ACTIVE_MASK       RO  baseline 0x03
++0x40 JOY_CENTER_X      RW  reset 2048
++0x44 JOY_CENTER_Y      RW  reset 2048
++0x48 JOY_DEADZONE      RW  reset 300
++0x4C JOY_STATUS        RO
++0x50..0x5C             reserved / ERROR
++0x60 FRAME_COUNT       RO
++0x64 ERROR_STATUS      RO sticky
++0x68..0xFC             reserved / ERROR
 ```
+
+CH3..CH6 offsets are reserved now to permit future six-channel activation without relocating the raw-data ABI. They are valid read-only addresses but return zero in the P11 Clean Baseline and their valid-mask bits remain clear.
+
+`ADC_CTRL.CAPTURE` with no newer LIVE frame is an accepted OKAY no-op and preserves HOLD. Writes to RO registers, reserved offsets, malformed control values, unsupported sizes, and noncanonical offsets are errors with no peripheral side effect.
+
+The target register map is frozen for P11 specification purposes but remains **(In-progress)** implementation until P11 verification evidence exists. See `15_adc_joystick.md`.
 
 ### 6.7 HEX Display
 
@@ -238,7 +255,7 @@ Target allocation:
 | 2 | `0x4002_0000` | Timer | unchanged |
 | 3 | `0x4003_0000` | G-sensor | unchanged |
 | 4 | `0x4004_0000` | AES-GCM | unchanged |
-| 5 | `0x4005_0000` | ADC Joystick | unchanged |
+| 5 | `0x4005_0000` | ADC / Joystick Policy | unchanged base; P11 ABI v2 |
 | 6 | `0x4006_0000` | UART1 / PC | unchanged |
 | 7 | `0x4007_0000` | HEX Display | unchanged |
 | 8 | `0x4008_0000` | SW | new target peripheral |
@@ -278,7 +295,8 @@ GPIO_BASE        = 0x4001_0000
 TIMER_BASE       = 0x4002_0000
 GSENSOR_BASE     = 0x4003_0000
 AES_GCM_BASE     = 0x4004_0000
-JOYSTICK_BASE    = 0x4005_0000
+ADC_BASE         = 0x4005_0000
+JOYSTICK_BASE    = ADC_BASE   // transitional P11 migration alias only
 UART1_BASE       = 0x4006_0000
 HEX_DISPLAY_BASE = 0x4007_0000
 ```

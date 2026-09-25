@@ -49,7 +49,7 @@ AHB_APB_bridge
 | PSEL[2] Timer                            |
 | PSEL[3] G-sensor                         |
 | PSEL[4] AES-GCM                          |
-| PSEL[5] ADC Joystick                     |
+| PSEL[5] ADC / Joystick Policy            |
 | PSEL[6] UART1 / PC                       |
 | PSEL[7] HEX Display                      |
 |                                          |
@@ -182,7 +182,7 @@ Active canonical slots:
 | 2 | `0x4002_0000` | Timer |
 | 3 | `0x4003_0000` | G-sensor |
 | 4 | `0x4004_0000` | AES-GCM |
-| 5 | `0x4005_0000` | ADC Joystick |
+| 5 | `0x4005_0000` | ADC / Joystick Policy |
 | 6 | `0x4006_0000` | UART1 / PC |
 | 7 | `0x4007_0000` | HEX Display |
 
@@ -302,7 +302,7 @@ Approved target allocation:
 | 2 | `0x4002_0000` | Timer |
 | 3 | `0x4003_0000` | G-sensor |
 | 4 | `0x4004_0000` | AES-GCM |
-| 5 | `0x4005_0000` | ADC Joystick |
+| 5 | `0x4005_0000` | ADC / Joystick Policy |
 | 6 | `0x4006_0000` | UART1 / PC |
 | 7 | `0x4007_0000` | HEX Display |
 | 8 | `0x4008_0000` | SW |
@@ -385,6 +385,25 @@ Detailed board-I/O sequencing is owned by `board_io_architecture.md`.
 - Slots 10–15 reserved.
 
 The target section is a migration contract until the corresponding RTL and verification are complete.
+
+## P11 ADC Slot-5 Contract — Specification Freeze (In-progress)
+
+P11 retains slot 5 at `0x4005_0000` but changes its architectural identity from the historical joystick-owned wrapper to `APB_ADC_Controller`, a generic ADC MMIO slave with an optional `Joystick_Policy` child.
+
+The slot-5 bridge/peripheral contract is:
+
+- naturally aligned 32-bit APB accesses only;
+- `PREADY=1` for valid accesses;
+- exact full local-offset validation, not `PADDR[7:2]` mirroring;
+- bridge allowlist updated through the highest implemented v2 register `+0x64`, admitting only the exact offsets listed in `01_memory_map.md` / `15_adc_joystick.md`;
+- CH3..CH6 raw offsets are valid RO reserved-channel addresses and return zero in the baseline;
+- `+0x50..+0x5C`, `+0x68..+0xFC`, wrong-direction accesses, malformed control writes, misalignment, and unsupported sizes return `PSLVERR`, propagated as the existing two-cycle AHB ERROR;
+- rejected accesses create no command, capture, calibration, counter, or error-clear side effect;
+- `CAPTURE` with no new frame is a valid command with OKAY/no-op semantics, not `PSLVERR`.
+
+The P11 implementation must add the ADC slave `PSLVERR` path into the existing bridge error mux. The former `PRDATA_JOYSTICK` / `JOYSTICK_READY` signal names may be renamed to ADC-oriented names during implementation; the architectural slot number does not change.
+
+This section freezes the target protocol. It does not claim the P11 RTL has been implemented or verified.
 
 ## Phase 4A-2 Approved APB Error and UART Target (APB fault portion active Phase 4A-3A)
 

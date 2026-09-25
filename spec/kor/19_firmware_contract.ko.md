@@ -107,7 +107,8 @@ GPIO_BASE        = 0x4001_0000
 TIMER_BASE       = 0x4002_0000
 GSENSOR_BASE     = 0x4003_0000
 AES_GCM_BASE     = 0x4004_0000
-JOYSTICK_BASE    = 0x4005_0000
+ADC_BASE         = 0x4005_0000
+JOYSTICK_BASE    = ADC_BASE   /* P11 migration 중 임시 alias */
 UART1_BASE       = 0x4006_0000
 HEX_DISPLAY_BASE = 0x4007_0000
 ```
@@ -149,7 +150,7 @@ Timer         -> timer
 G-Sensor      -> gsensor
 VGA/VRAM      -> vram/display
 AES-GCM       -> aes_gcm
-ADC Joystick  -> joystick
+ADC / Joystick -> generic ADC driver + joystick policy
 HEX Display   -> hex_display
 ```
 
@@ -329,24 +330,20 @@ GSENSOR_OK 반환 (*out에 샘플 수합 완료)
 - 리셋으로 중단된 전송은 반환 값을 보장하지 않는다.
 - 리셋 해제 후 12-write 초기화가 완료되고 첫 완전 디지털 버스트가 끝날 때까지 `VALID`는 0을 유지한다.
 
-## 13. ADC / Joystick
+## 13. ADC / Joystick — P11 Target (In-progress)
 
-현재 실제 ADC command owner는 top-level scanner이며 channel 1과 2를 반복 스캔한다.
+P11 firmware는 generic ADC frame을 사용한다. `ADC_CTRL.ENABLE`은 실제 acquisition request이고 `ADC_STATUS.ENGINE_ENABLED`가 실제 engine state를 알려준다.
 
-따라서 current firmware는 board integration을:
+Software는 CH1/CH2 raw를 별도 live register로 읽지 않고 CAPTURE된 HOLD의 `FRAME_SEQ`, `VALID_MASK`, `CHx_RAW`를 읽는다. 새 LIVE가 없을 때 CAPTURE는 OKAY/no-op이며 HOLD를 유지한다. ADC에는 RELEASE가 없다.
+
+Joystick direction은 두 경로로 계산한다.
 
 ```text
-X = channel 1
-Y = channel 2
+HW: HOLD -> combinational Joystick_Policy -> JOY_STATUS
+FW: HOLD -> independent joystick_policy_eval() -> golden/reference result
 ```
 
-로 사용한다.
-
-`JOY_X_CHANNEL`/`JOY_Y_CHANNEL`을 다른 값으로 설정해도 실제 Qsys scanner channel이 바뀌는 것은 아니다. `JOY_CTRL.ENABLE=0`도 underlying scanner 자체를 멈추지 않는다.
-
-`joystick_read()`는 direction/X/Y를 별도 APB read로 읽으므로 atomic sample이라고 주장하면 안 된다.
-
-LEFT/RIGHT ASCII mapping은 physical polarity 확인 전까지 board/application convention으로 본다.
+두 경로는 동일한 current center/deadzone register 값을 사용하되 독립 구현이어야 한다. Physical polarity 및 application mapping은 board acceptance 전까지 **(In-progress)**다.
 
 ## 14. HEX Display
 
@@ -452,7 +449,7 @@ Board-I/O migration 이후:
 0x4002_0000 Timer
 0x4003_0000 G-sensor
 0x4004_0000 AES-GCM
-0x4005_0000 ADC Joystick
+0x4005_0000 ADC / Joystick Policy
 0x4006_0000 UART1 / PC
 0x4007_0000 HEX Display
 0x4008_0000 SW
@@ -605,13 +602,11 @@ RTL reconstruction bug가 발견되면 software 보정이 아니라 RTL+spec을 
 
 Private ADXL345 SPI는 별도 generic SPI가 승인되기 전까지 hardware-owned다.
 
-## 27. Target ADC / Joystick
+## 27. Target ADC / Joystick — P11 Frozen (In-progress)
 
-Cleanup 후 software-visible channel/ENABLE semantics와 실제 ADC command owner가 일치해야 한다.
+P11 target은 generic ADC MMIO, real ENABLE request/ack, fixed/read-only baseline channel set, CAPTURE-only HOLD, reserved CH3..CH6 raw ABI, no live async debug, optional HW joystick child, independent FW golden policy로 동결됐다.
 
-Target driver는 coherent X/Y + valid/sequence contract를 사용한다.
-
-Board axis polarity/WASD mapping은 generic ADC acquisition과 가능하면 분리한다.
+세부 register 및 error semantics는 `15_adc_joystick.md`가 정본이다.
 
 ## 28. Verified HEX Contract (Active Baseline)
 
@@ -851,3 +846,13 @@ recoverable driver 결과로 처리하지 않는다.
 ### 역사적 Pre-P09 펌웨어 계약
 
 P09B 이전 펌웨어에는 코히어런트 드라이버나 스냅샷 메커니즘이 없었다. 소프트웨어는 2개의 APB 레지스터(`GSENSOR_XY_DATA` 및 `GSENSOR_Z_DATA`)에서 직접 원시 텔레메트리를 읽었으며, 이 레지스터들에는 `VALID` 또는 `SEQ` 표시가 없어 분리된 버스 트랜잭션 간 torn read 위험이 있었다. 이 원시 인터페이스는 역사적 배경으로만 유지되며 §12의 활성 드라이버 계약으로 완전히 대체되었다.
+
+## P11 ADC Firmware Freeze Note
+
+P11 firmware는 generic `ADC_BASE=0x4005_0000`을 사용한다. `ENABLE`은 실제 persistent request이며 `ENGINE_ENABLED` acknowledgement와 구분한다. Baseline active channels는 fixed/read-only CH1/CH2이고 CH3..CH6 raw offsets는 reserve한다.
+
+ADC snapshot lifecycle은 CAPTURE-only다. 새 LIVE가 있으면 atomic HOLD 교체, 새 frame이 없으면 OKAY/no-op으로 기존 HOLD를 보존한다. G-sensor와 달리 RELEASE가 없다.
+
+FW는 raw HOLD + current center/deadzone으로 독립 `joystick_policy_eval()` 계열 함수를 구현하여 HW `JOY_STATUS`의 golden/reference oracle로 사용한다. Calibration write는 HOLD raw가 그대로여도 HW/FW direction 결과를 즉시 바꿀 수 있다.
+
+Physical axis polarity와 ASCII mapping은 board acceptance **(In-progress)**다.

@@ -32,7 +32,7 @@ PSEL[1] legacy GPIO
 PSEL[2] Timer
 PSEL[3] G-sensor
 PSEL[4] AES-GCM
-PSEL[5] ADC Joystick
+PSEL[5] ADC / Joystick Policy
 PSEL[6] UART1 / PC
 PSEL[7] HEX
 ```
@@ -104,7 +104,7 @@ SETUP에서는 `HREADY=0`, ACCESS에서는 `HREADY=PREADY`이다. 따라서 alwa
 | 2 | `0x4002_0000` | Timer |
 | 3 | `0x4003_0000` | G-sensor |
 | 4 | `0x4004_0000` | AES-GCM |
-| 5 | `0x4005_0000` | ADC Joystick |
+| 5 | `0x4005_0000` | ADC / Joystick Policy |
 | 6 | `0x4006_0000` | UART1 / PC |
 | 7 | `0x4007_0000` | HEX |
 
@@ -182,7 +182,7 @@ PSEL[15:0]
 | 2 | `0x4002_0000` | Timer |
 | 3 | `0x4003_0000` | G-sensor |
 | 4 | `0x4004_0000` | AES-GCM |
-| 5 | `0x4005_0000` | ADC Joystick |
+| 5 | `0x4005_0000` | ADC / Joystick Policy |
 | 6 | `0x4006_0000` | UART1 / PC |
 | 7 | `0x4007_0000` | HEX |
 | 8 | `0x4008_0000` | SW |
@@ -285,3 +285,9 @@ P10-HEX 구현은 canonical slot 7 (`0x4007_0000..0x4007_000C`)의 동작을 확
 - Slot 7로 향하는 비정규 CPU 요청은 `PSEL[7]` 인가 없이 bridge에서 차단되며 2-cycle AHB ERROR(`HRESP=01`)로 종료된다.
 - 주변장치 슬레이브 자체(`APB_HEX_display.v`)는 `PADDR[15:0]` 완전 일치 디코드를 구현한다. 미매핑 또는 비정규 로컬 오프셋은 읽기 시 0을 반환하고 쓰기 시 side effect 없이 무시된다 (`PREADY=1`, `PSLVERR` 없음).
 - 드라이버 및 검증 세부사항은 [16_hex_display.ko.md](16_hex_display.ko.md) 및 [19_firmware_contract.ko.md](19_firmware_contract.ko.md)를 따른다.
+
+## P11 ADC Slot-5 Contract — Spec Freeze (In-progress)
+
+Slot 5 (`0x4005_0000`)는 P11에서 `APB_ADC_Controller` generic ADC slave가 된다. Valid access는 32-bit aligned, `PREADY=1`, exact full local-offset decode를 사용한다. CH3..CH6 raw offset은 valid RO reserve이며 baseline에서는 0을 반환한다. Reserved/unmapped/wrong-direction/malformed CTRL은 `PSLVERR` 및 existing bridge AHB ERROR로 전파되며 side effect가 없어야 한다. No-new CAPTURE는 invalid access가 아니므로 OKAY/no-op이다.
+
+Bridge allowlist는 `15_adc_joystick.md`의 v2 exact offset만 허용하도록 P11에서 갱신하며 implementation/evidence는 **(In-progress)**다.

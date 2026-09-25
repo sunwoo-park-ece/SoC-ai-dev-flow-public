@@ -1,331 +1,741 @@
-# Baseline SoC ADC Joystick Subsystem Specification
+# P11 ADC / Joystick Subsystem Specification
 
-> **Status:** DRAFT — reconstructed from the active FPGA baseline and subject to Developer + ChatGPT Chat final review.
+> **Status:** P11 TARGET SPECIFICATION — architecture/specification frozen; RTL/FW/DV implementation and evidence are **(In-progress)**.
 >
-> **Canonical language:** English. If this file and `adc_joystick.ko.md` conflict, this file is authoritative.
+> **Canonical language:** English. If this file and `kor/15_adc_joystick.ko.md` conflict, this file is authoritative.
 >
-> **Parent specifications:** `soc_architecture.md`, `memory_map.md`, `apb_subsystem.md`, `reset_clock.md`, `interrupt_architecture.md`.
+> **Source anchor:** P11 public worktree `P11-ADC-Cleanup`, HEAD `3be24514d87ed5d6e40361323e6ea8465a4645e6` at P11A preflight review.
+>
+> **Preflight authority:** Private Issue #4 `[P11A] ADC Cleanup Preflight`, report comment `issuecomment-5830820717`.
+>
+> **Parent specifications:** `00_soc_architecture.md`, `01_memory_map.md`, `05_apb_subsystem.md`, `06_reset_clock.md`, `19_firmware_contract.md`, `baseline_cleanup.md`.
 
-## 1. Purpose
+## 1. Purpose and Scope
 
-This document defines the active MAX10 ADC / joystick subsystem in the FPGA baseline.
+This document defines the post-P11 software-visible and project-local architecture for the MAX 10 ADC subsystem and its optional joystick policy consumer.
 
-It specifies:
-
-- the boundary between Intel/Qsys ADC IP and project-local joystick logic,
-- the actual top-level ADC command path,
-- the APB-visible register contract,
-- ADC channel and 12-bit sample semantics,
-- joystick center/dead-zone/direction processing,
-- reset, clock, and clock-domain-crossing behavior,
-- firmware usage constraints,
-- verification requirements,
-- baseline cleanup items required before major feature integration.
-
-The baseline implementation contains an important architectural split: the ADC command generator inside `APB_ADC_Joystick_Controller` is **not connected to the active ADC command interface**. The real ADC command stream is generated independently at SoC top level. This distinction is part of the current-behavior contract and shall not be hidden by the software-facing register names.
-
-## 2. Active Architecture
-
-Canonical base address:
+P11 separates reusable ADC acquisition from board/application interpretation. The architectural boundary is:
 
 ```text
-JOYSTICK_BASE = 0x4005_0000
-APB slot      = PSEL[5]
+MAX 10 ADC / adc_qsys
+        |
+        v
+ADC Acquisition Engine       reusable acquisition / scan-frame owner
+        |
+        | coherent frame CDC
+        v
+APB_ADC_Controller           generic software-visible ADC peripheral
+        |
+        +--> raw ADC MMIO
+        |
+        +--> Joystick_Policy simple optional hardware child
+                  |
+                  +--> firmware has an independent policy implementation
 ```
 
-Active project-local RTL:
+The P11 baseline remains polling based. No ADC interrupt or PLIC source is introduced by this specification.
+
+The following P11 features are frozen but remain **(In-progress)** until implementation and verification evidence exist:
+
+- sole-owner ADC command engine,
+- six-channel-capable internal frame representation,
+- CH1/CH2 Clean Baseline scan,
+- stable bundled-data req/ack CDC mailbox,
+- PCLK LIVE/HOLD snapshot banks,
+- CAPTURE-only software lifecycle,
+- exact slot-5 MMIO decode and APB error behavior,
+- combinational `Joystick_Policy` child,
+- independent firmware joystick policy / golden model,
+- board polarity and physical joystick acceptance.
+
+## 2. P11 Target Architecture
+
+### 2.1 Complete architecture
 
 ```text
-rtl/peripherals/APB_ADC_Joystick_Controller.v
-rtl/soc/AMBA_SoC_TOP.v
+                          KEY[0]
+                             |
+                             v
+                system_reset_controller
+                             |
+                         HRESETn
+                             |
+          +------------------+----------------------+
+          |                  |                      |
+          v                  v                      v
+      HCLK/PCLK          adc_qsys             reset_release_sync
+       domain            vendor IP              adc_sys_clk
+          |                  |                      |
+          |          command / response             v
+          |                  |                 adc_reset_n
+          |                  |                      |
+          |                  v                      v
+          |        +-------------------------------------+
+          |        | ADC Acquisition Engine              |
+          |        |                                     |
+          |        | sole command owner                  |
+          |        | MAX_CHANNELS = 6                    |
+          |        | baseline active = CH1 / CH2         |
+          |        | sample[0..5]                        |
+          |        | valid_mask[5:0]                     |
+          |        | frame_seq[31:0]                     |
+          |        | complete scan-frame assembly        |
+          |        +------------------+------------------+
+          |                           |
+          |                   stable frame payload
+          |                           |
+          |                    req/ack mailbox
+          |                           |
+          |===========================|================ CDC
+          |                           |
+          |                          PCLK
+          |                           |
+          |                           v
+          |                +--------------------+
+          |                | ADC LIVE BANK      |
+          |                | samples/mask/seq   |
+          |                +---------+----------+
+          |                          | CAPTURE
+          |                          v
+          |                +--------------------+
+          |                | ADC HOLD BANK      |
+          |                | coherent SW view   |
+          |                +---------+----------+
+          |                          |
+          |              +-----------+--------------+
+          |              |                          |
+          |              v                          v
+          |     Generic ADC MMIO             Joystick_Policy
+          |                                  combinational
+          |                                       |
+          +---------------------------------------+
 ```
 
-Vendor/Qsys implementation:
+### 2.2 Responsibility boundaries
+
+`ADC Acquisition Engine` owns:
+
+- the only project-local Qsys command source,
+- active-channel scan order,
+- response validation,
+- partial-frame state,
+- complete-frame publication,
+- source-domain frame sequence generation,
+- PCLK->ADC ENABLE level synchronization endpoint,
+- ADC->PCLK mailbox source endpoint.
+
+`APB_ADC_Controller` owns:
+
+- slot-5 exact MMIO decode,
+- ENABLE request register,
+- PCLK-visible engine acknowledgement/status,
+- LIVE bank,
+- CAPTURE-only HOLD bank,
+- generic raw-channel registers,
+- joystick calibration registers,
+- sticky ADC error status,
+- frame publication count,
+- APB `PREADY` / `PSLVERR` behavior.
+
+`Joystick_Policy` owns only the pure conversion:
 
 ```text
-private vendor-project vault: adc_qsys generated IP (not in public tree)
+HOLD raw CH1/CH2 + current center/deadzone -> F/B/L/R status
 ```
 
-The active datapath is:
+It shall not contain Qsys, APB, CDC, reset sequencing, MAX 10 IP, or command-scheduler knowledge.
+
+## 3. Vendor Configuration and Physical Mapping
+
+### 3.1 Established generated configuration
+
+P11A established the following generated instance facts from the restricted Quartus/Qsys source and installed Quartus 19.1 Modular ADC metadata:
 
 ```text
-                            board clk = 50 MHz
-                                  |
-                                  v
-                             adc_qsys PLL
-                            /            \
-                           /              \
-                adc_sys_clk = 25 MHz     ADC PLL clock = 10 MHz
-                       |                         |
-                       |                         v
-                       |                    MAX10 ADC hard IP
-                       |
-      top-level fixed channel sequencer
-      channel 1 <-> channel 2
-                       |
-                       v
-                 Qsys command stream
-                       |
-                       v
-                    adc_qsys
-                       |
-                Qsys response stream
-                       |
-                       |  no explicit project-RTL CDC
-                       v
-PCLK = 50 MHz --> APB_ADC_Joystick_Controller --> CPU/APB
-                       |
-                       +-- X/Y raw registers
-                       +-- center/dead-zone compare
-                       +-- direction status
+FPGA device                         = MAX 10 10M50DAF484C7G
+Modular ADC mode                    = ADC control core only / external command-response use
+board reference clock               = 50 MHz
+adc_sys_clk                         = 25 MHz
+ADC hard-IP input clock             = 10 MHz
+response data width                 = 12 bits
+command/response channel width      = 5 bits
+analog input mask                   = 63 -> CH1..CH6 enabled in hard-IP config
+selected total ADC sampling rate    = 1 MSPS
+external reference configuration    = 2.5 V
+TSD                                 = disabled
 ```
 
-The APB controller also contains command-generation outputs, but the top level connects them only to `*_unused` wires. They do not drive `adc_qsys`.
+The 1 MSPS value is the configured ADC sampling-rate selection. It is **not** inferred from the 10 MHz clock alone and is not, by itself, proof of the project-level scan-frame cadence.
 
-## 3. Clock and Reset Domains
+### 3.2 Intel sampling-rate reference
 
-### 3.1 PCLK domain
-
-`APB_ADC_Joystick_Controller` runs on:
+The Intel MAX 10 Analog to Digital Converter User Guide lists Modular ADC sample-rate settings including:
 
 ```text
-PCLK = 50 MHz
+25 kSPS
+50 kSPS
+100 kSPS
+125 kSPS
+200 kSPS
+250 kSPS
+500 kSPS
+1 MSPS
 ```
 
-with active-low `PRESETn`.
+Not every sampling-rate setting is valid with every ADC input-clock frequency. For the documented combinations relevant here:
 
-It owns the software-visible registers, X/Y sample storage, validity flags, direction combinational logic, and sample counter.
+| Total ADC rate | Valid ADC input clock(s) used for this reference |
+|---:|---|
+| 1 MSPS | 2 / 10 / 20 / 40 / 80 MHz |
+| 500 kSPS | 10 / 20 / 40 MHz |
+| 250 kSPS | 10 / 20 MHz |
+| 200 kSPS | 2 MHz |
+| 125 kSPS | 10 MHz |
+| 100 kSPS | 2 MHz |
+| 50 kSPS | 2 MHz |
+| 25 kSPS | 2 MHz |
 
-### 3.2 Qsys ADC domain
+The current generated project uses **1 MSPS / 10 MHz**. At the current 10 MHz ADC input, the guide also permits 500 kSPS, 250 kSPS, and 125 kSPS, but P11 does not change the generated rate setting.
 
-The generated Qsys PLL is configured from the 50 MHz board clock with:
+Normative public reference:
+
+- Intel MAX 10 Analog to Digital Converter User Guide, Modular ADC parameter settings and valid sample-rate/input-clock combination.
+- https://www.intel.com/programmable/technical-pdfs/683596.pdf
+
+### 3.3 DE10-Lite channel mapping
+
+P11A established the board-level mapping for the referenced DE10-Lite schematic:
 
 ```text
-c0 = 50 MHz / 2 = 25 MHz
-c1 = 50 MHz / 5 = 10 MHz
+Qsys command CH1 -> ADC1IN1 -> board ADC_IN0 -> JP8 pin 1 / Arduino A0
+Qsys command CH2 -> ADC1IN2 -> board ADC_IN1 -> JP8 pin 2 / Arduino A1
+Qsys command CH3 -> ADC1IN3 -> board ADC_IN2 -> JP8 pin 3 / Arduino A2
+Qsys command CH4 -> ADC1IN4 -> board ADC_IN3 -> JP8 pin 4 / Arduino A3
+Qsys command CH5 -> ADC1IN5 -> board ADC_IN4 -> JP8 pin 5 / Arduino A4
+Qsys command CH6 -> ADC1IN6 -> board ADC_IN5 -> JP8 pin 6 / Arduino A5
 ```
 
-The active top names `c0`:
+The command-channel number is therefore one greater than the board `ADC_INx` label for these six user analog inputs.
+
+The Clean Baseline active scan is fixed to command channels CH1 and CH2. The default joystick policy interprets CH1 as logical X and CH2 as logical Y, but actual cable wiring, physical polarity, board revision, and final X/Y direction are **(In-progress)** board-acceptance facts and shall not be claimed from the command numbering alone.
+
+## 4. ADC Scan-Frame Semantics
+
+### 4.1 Frame, not simultaneous sampling
+
+An ADC scan frame is a **coherent publication unit**, not a simultaneous analog sample.
+
+For active channels scanned sequentially:
 
 ```text
-adc_sys_clk
+sample CH1 at t0
+sample CH2 at t0 + Ts
+...
+sample CHN at t0 + (N-1)*Ts
 ```
 
-The top-level channel sequencer runs on `adc_sys_clk`.
+The completed values are grouped under one frame identity only after the active scan is complete.
 
-The modular ADC command/response interface is associated with this Qsys clock domain. The generated Qsys design internally provides the PLL `locked` indication to the MAX10 modular ADC control block and includes generated reset controllers with synchronized deassertion.
+P11 atomicity means:
 
-Software shall not infer a stable sample rate solely from these clock values. ADC conversion latency and command-ready behavior remain properties of the vendor ADC subsystem.
+- all samples in one software-visible HOLD snapshot belong to one completed scan frame,
+- one frame cannot contain CH1 from one scan and CH2 from another,
+- CDC publication transfers the completed frame as one stable record,
+- CAPTURE copies one complete LIVE frame to HOLD on one PCLK edge.
 
-## 4. Actual ADC Command Path
+P11 atomicity does **not** mean that all analog channels were sampled at the same physical instant.
 
-The real active top-level command generation is:
+### 4.2 Ideal timing equations
 
-```verilog
-assign adc_command_valid = HRESETn;
-assign adc_command_startofpacket = 1'b1;
-assign adc_command_endofpacket = 1'b1;
-
-always @(posedge adc_sys_clk or negedge HRESETn) begin
-    if (!HRESETn)
-        adc_command_channel <= 5'd1;
-    else if (adc_command_ready)
-        adc_command_channel <=
-            (adc_command_channel == 5'd1) ? 5'd2 : 5'd1;
-end
-```
-
-Therefore, after reset release:
+For total ADC sample rate `Fs`:
 
 ```text
-command_valid = 1 continuously
-command SOP   = 1
-command EOP   = 1
-channel       = 1,2,1,2,... as command_ready accepts requests
+Ts = 1 / Fs
+first-to-last skew = (N - 1) * Ts
+ideal N-channel frame sampling interval = N * Ts
 ```
 
-The baseline ADC scan set is physically fixed by this top-level RTL to channels 1 and 2.
+The equations describe ideal continuous conversion scheduling. Project command/response handshaking, mailbox backpressure, and acquisition-engine policy may increase the actual frame interval.
 
-### 4.1 Consequence for software-visible channel registers
+### 4.3 Representative frame-skew table
 
-`APB_ADC_Joystick_Controller` has its own:
+| Intel sample-rate setting | Adjacent `Ts` | 2-channel first-to-last skew | 2-channel ideal sample interval | 6-channel first-to-last skew | 6-channel ideal sample interval |
+|---:|---:|---:|---:|---:|---:|
+| 1 MSPS | 1 us | 1 us | 2 us | 5 us | 6 us |
+| 500 kSPS | 2 us | 2 us | 4 us | 10 us | 12 us |
+| 250 kSPS | 4 us | 4 us | 8 us | 20 us | 24 us |
+| 200 kSPS | 5 us | 5 us | 10 us | 25 us | 30 us |
+| 125 kSPS | 8 us | 8 us | 16 us | 40 us | 48 us |
+| 100 kSPS | 10 us | 10 us | 20 us | 50 us | 60 us |
+| 50 kSPS | 20 us | 20 us | 40 us | 100 us | 120 us |
+| 25 kSPS | 40 us | 40 us | 80 us | 200 us | 240 us |
+
+This table is a timing illustration across Intel-supported sampling-rate settings. It does not state that all rows are valid with the current 10 MHz ADC input clock. The current generated setting is specifically **1 MSPS with 10 MHz input**.
+
+### 4.4 Current configured timing
+
+For the current generated 1 MSPS setting:
 
 ```text
-X_CHANNEL
-Y_CHANNEL
-CTRL.ENABLE
-scan_axis
-adc_command_valid/channel outputs
+Ts                               = 1 us
+baseline CH1 -> CH2 ideal skew   = 1 us
+baseline 2-channel ideal interval= 2 us
+future 6-channel first-last skew = 5 us
+future 6-channel ideal interval  = 6 us
 ```
 
-but those command outputs are not connected to Qsys.
+The effective P11 scan-frame cadence is **(In-progress)** and shall be measured from accepted command / response timestamps after the acquisition engine is implemented. The specification shall not equate the 2 us ideal two-channel interval with a measured end-to-end frame period until that evidence exists.
 
-Thus, in the active FPGA baseline:
+## 5. Acquisition Engine Contract
 
-- `CTRL.ENABLE` does **not** start or stop the real ADC conversion stream.
-- writing `X_CHANNEL` or `Y_CHANNEL` does **not** change which analog channels Qsys scans.
-- `X_CHANNEL` and `Y_CHANNEL` only control how returned response channel numbers are classified into the APB controller's X and Y sample registers.
-- changing them away from the top-level fixed channels 1 and 2 can cause real channel-1/2 responses to be reported as unexpected instead of changing the ADC source.
+### 5.1 Structural scalability
 
-The current firmware uses X=1 and Y=2, which matches the hard-wired top-level command sequencer.
-
-## 5. Vendor ADC Configuration
-
-The generated MAX10 modular ADC block exposes:
+The engine shall be structurally capable of representing six user ADC slots:
 
 ```text
-command channel width  = 5 bits
-response channel width = 5 bits
-response data width    = 12 bits
+sample[0] <-> command CH1
+sample[1] <-> command CH2
+sample[2] <-> command CH3
+sample[3] <-> command CH4
+sample[4] <-> command CH5
+sample[5] <-> command CH6
 ```
 
-The generated modular ADC configuration includes an analog-input mask of `63`, while the active SoC command sequencer uses only channels 1 and 2.
+Baseline configuration:
 
-The current subsystem does not expose general ADC channel selection, acquisition timing, reference selection, or conversion-control registers through the SoC APB interface.
+```text
+MAX_CHANNELS = 6
+ACTIVE_MASK  = 6'b000011
+scan order   = CH1, CH2
+```
 
-## 6. APB Interface
+Runtime-programmable scan masks/channel lists are not part of P11.
 
-The joystick peripheral permanently asserts:
+### 5.2 Sole command ownership
+
+Only the ADC acquisition engine may drive the project-local Qsys command interface.
+
+The historical top-level scanner and the historical APB-local disconnected command generator shall not coexist as command owners after P11.
+
+### 5.3 Response acceptance
+
+The generated response interface has no project-visible response-ready/backpressure input. The engine shall therefore be capable of accepting/validating a response whenever the vendor interface asserts response-valid.
+
+The engine shall validate at minimum:
+
+- expected channel identity,
+- no duplicate active channel in one frame,
+- expected baseline scan order,
+- SOP/EOP shape required by the single-command packet contract.
+
+On a malformed response:
+
+```text
+partial frame -> discard
+no frame_seq increment
+no mailbox publication
+sticky ERROR_STATUS bit -> set
+assembly -> restart from CH1 when enabled
+```
+
+### 5.4 Complete frame
+
+Baseline complete frame condition:
+
+```text
+CH1 accepted and stored
+CH2 accepted and stored
+valid_mask == 6'b000011
+no frame error
+```
+
+Only a complete frame may increment source `frame_seq` and be offered to the CDC mailbox.
+
+### 5.5 Frame sequence
+
+`frame_seq` is a 32-bit modulo counter.
+
+```text
+reset                         -> 0
+first complete frame          -> 1
+each later complete frame     -> previous + 1 modulo 2^32
+partial/error frame           -> no increment
+```
+
+Sequence identity is a digital publication identifier, not an analog timestamp.
+
+## 6. ENABLE Control and PCLK -> ADC CDC
+
+### 6.1 Software-visible request
+
+`ADC_CTRL.ENABLE` is a persistent PCLK-domain level named `ENABLE_REQ` in the architectural model.
+
+Unlike frame transfer, ENABLE does not require a bundled-data mailbox because it is a stable one-bit level rather than a pulse or multi-bit payload.
+
+The approved mechanism is:
+
+```text
+PCLK ENABLE_REQ
+      |
+      v
+2+ FF level synchronizer in adc_sys_clk
+      |
+      v
+engine enable state
+      |
+      v
+ENGINE_ENABLED level synchronized back to PCLK
+```
+
+`ADC_STATUS.ENABLE_REQ` reports the requested state. `ADC_STATUS.ENGINE_ENABLED` reports the acknowledged engine state.
+
+### 6.2 Enable transition
+
+On synchronized `0 -> 1`:
+
+- clear any stale partial assembly,
+- begin a new scan at CH1,
+- permit command issue,
+- assert engine-enabled acknowledgement only when the engine has entered the enabled scan state.
+
+### 6.3 Disable transition
+
+On synchronized `1 -> 0`:
+
+- issue no new commands after the disable request is recognized,
+- consume any unavoidable already-accepted response only to safely quiesce the vendor interface,
+- do not use such trailing traffic to publish a new frame after disable recognition,
+- discard the current partial frame,
+- invalidate LIVE eligibility after the disabled state is acknowledged,
+- preserve the last HOLD snapshot for software readback,
+- deassert `ENGINE_ENABLED` after the engine is quiescent.
+
+A disable transition shall never publish a partial frame.
+
+## 7. ADC -> PCLK CDC Mailbox
+
+### 7.1 Baseline mechanism
+
+Completed frames cross from 25 MHz `adc_sys_clk` to 50 MHz PCLK through a stable bundled-data request/acknowledge toggle mailbox.
+
+Source sequence:
+
+```text
+1. assemble complete frame
+2. write stable payload register
+3. toggle REQ
+4. hold payload unchanged while mailbox busy
+5. wait until synchronized ACK matches REQ
+6. only then permit next frame publication
+```
+
+Destination sequence:
+
+```text
+1. synchronize REQ into PCLK
+2. detect REQ change
+3. capture entire stable payload into LIVE on one PCLK edge
+4. increment PCLK FRAME_COUNT
+5. toggle/return ACK
+```
+
+The mailbox payload contains at least:
+
+```text
+frame_seq[31:0]
+valid_mask[5:0]
+sample CH1..CH6 representation
+```
+
+Baseline CH3..CH6 values are architecturally zero/invalid.
+
+### 7.2 Backpressure policy
+
+P11 chooses a lossless-at-publication mailbox policy: the acquisition engine shall not overwrite the mailbox payload or publish a second completed frame while the previous frame is awaiting acknowledgement.
+
+The engine may pause at the frame boundary while mailbox busy. P11 therefore prioritizes coherent/lossless frame publication over maximum raw ADC throughput.
+
+### 7.3 When an asynchronous FIFO becomes necessary
+
+The mailbox is no longer sufficient when any of the following becomes an architectural requirement:
+
+- the producer must continue creating complete frames while the destination has not acknowledged the previous frame,
+- more than one completed frame may accumulate per CDC round trip,
+- every high-rate frame must be retained without pausing the ADC scheduler,
+- destination stalls may be long or unbounded while acquisition must continue,
+- burst acquisition is required,
+- ADC samples become a continuous data stream for DMA/external SDRAM,
+- queue occupancy/depth/overflow becomes software-visible state.
+
+Typical future example:
+
+```text
+1 MSPS ADC streaming
+    -> async FIFO
+    -> AXI/DMA
+    -> external SDRAM
+```
+
+Such a streaming architecture is outside P11 and shall not be inferred from this latest-state MMIO peripheral.
+
+## 8. PCLK LIVE / HOLD Snapshot Contract
+
+### 8.1 LIVE bank
+
+LIVE is updated only by a successfully received mailbox publication.
+
+LIVE contains:
+
+```text
+LIVE_SEQ
+LIVE_VALID_MASK
+LIVE_CH1..CH6
+LIVE_VALID
+```
+
+`LIVE_VALID` is cleared by reset and by acknowledged acquisition disable. It becomes one after the first valid post-enable frame reaches PCLK.
+
+### 8.2 HOLD bank
+
+HOLD is the coherent software snapshot:
+
+```text
+HOLD_SEQ
+HOLD_VALID_MASK
+HOLD_CH1..CH6
+HOLD_VALID
+```
+
+Only CAPTURE or reset may modify HOLD.
+
+### 8.3 NEW_FRAME
+
+The approved P11 software-visible predicate is:
+
+```text
+NEW_FRAME = LIVE_VALID && (!HOLD_VALID || LIVE_SEQ != HOLD_SEQ)
+```
+
+Because `SEQ` is finite, equality after an exact 2^32-frame lapse is theoretically indistinguishable from no change. Firmware shall not leave one HOLD snapshot unrefreshed across 2^32 published frames if it relies on `NEW_FRAME` as the only freshness predicate.
+
+### 8.4 CAPTURE-only lifecycle
+
+`ADC_CTRL.CAPTURE` is a write-one pulse command.
+
+If `NEW_FRAME=1` when the command is accepted:
+
+```text
+HOLD samples     <- LIVE samples
+HOLD_VALID_MASK  <- LIVE_VALID_MASK
+HOLD_SEQ         <- LIVE_SEQ
+HOLD_VALID       <- 1
+```
+
+The copy is atomic in PCLK.
+
+If `NEW_FRAME=0`:
+
+- the APB transaction returns normal OKAY,
+- CAPTURE is a no-op,
+- HOLD remains unchanged,
+- no error bit is set.
+
+“No new frame” is runtime state, not malformed MMIO. It shall not set `ERROR_STATUS`, consume or invalidate the current HOLD snapshot, modify `HOLD_SEQ`, or create a synthetic sequence/count event. This keeps polling simple: software may attempt CAPTURE opportunistically without turning normal producer/consumer timing into a bus fault.
+
+The observable cases are therefore:
+
+| Pre-command state | CAPTURE result | HOLD after completion | Bus/error result |
+|---|---|---|---|
+| LIVE invalid, HOLD invalid | no-op | invalid/unchanged | OKAY, no error |
+| LIVE invalid, HOLD valid | no-op | previous HOLD retained | OKAY, no error |
+| LIVE valid and HOLD invalid | copy LIVE | new valid HOLD | OKAY |
+| LIVE valid and `LIVE_SEQ != HOLD_SEQ` | replace HOLD with LIVE | newer HOLD | OKAY |
+| LIVE valid and `LIVE_SEQ == HOLD_SEQ` | no-op | previous HOLD retained | OKAY, no error |
+
+A later successful CAPTURE replaces the previous HOLD snapshot. There is no RELEASE command. This contract deliberately makes CAPTURE idempotent with respect to a non-new LIVE generation and lets firmware use either `NEW_FRAME` pre-checking or unconditional CAPTURE attempts without divergent error handling.
+
+### 8.5 Difference from P09 G-sensor
+
+P09 G-sensor intentionally uses an ownership lifecycle:
+
+```text
+CAPTURE -> CPU-owned HOLD -> RELEASE
+```
+
+ADC P11 instead models the latest coherent analog state:
+
+```text
+CAPTURE -> HOLD
+next CAPTURE -> replace HOLD
+```
+
+ADC HOLD does not block acquisition and is not a queue entry requiring explicit ownership release. Adding RELEASE would increase API state without providing useful ownership semantics for this latest-state ADC contract.
+
+## 9. APB / MMIO Contract
+
+### 9.1 Base and access width
+
+```text
+ADC_BASE = 0x4005_0000
+APB slot = PSEL[5]
+access   = naturally aligned 32-bit words only
+```
+
+P11 replaces the architectural name “ADC Joystick peripheral” with **generic ADC peripheral with optional joystick policy**. A transitional `JOYSTICK_BASE` firmware alias may temporarily point to the same address during migration, but new code shall use `ADC_BASE`.
+
+The APB slave remains zero-wait for valid accesses:
 
 ```text
 PREADY = 1
 ```
 
-and has no interrupt output.
+It shall expose `PSLVERR` for invalid direction/reserved/unmapped/unsupported accesses and route the error through the existing bridge AHB error path.
 
-APB accesses are accepted on the standard active access phase:
+### 9.2 Exact v2 register map
 
-```text
-PSEL && PENABLE && PWRITE
-PSEL && PENABLE && !PWRITE
-```
+| Offset | Register | Access | Reset / baseline | Description |
+|---:|---|---|---|---|
+| `0x00` | `NAME0` | RO | `"apb-"` | identification |
+| `0x04` | `NAME1` | RO | `"adc "` | generic ADC identification |
+| `0x08` | `VERSION` | RO | `0x0002_0000` | ABI major 2, minor 0 |
+| `0x0C` | `ADC_CTRL` | RW/W1P | `0` | ENABLE + commands |
+| `0x10` | `ADC_STATUS` | RO | dynamic | request/engine/bank/mailbox/error state |
+| `0x14` | `FRAME_SEQ` | RO | `0` | HOLD sequence |
+| `0x18` | `VALID_MASK` | RO | `0` | HOLD valid mask |
+| `0x1C` | `CH1_RAW` | RO | `0` | HOLD CH1 [11:0] |
+| `0x20` | `CH2_RAW` | RO | `0` | HOLD CH2 [11:0] |
+| `0x24` | `CH3_RAW` | RO reserved channel | `0` | reserved canonical address |
+| `0x28` | `CH4_RAW` | RO reserved channel | `0` | reserved canonical address |
+| `0x2C` | `CH5_RAW` | RO reserved channel | `0` | reserved canonical address |
+| `0x30` | `CH6_RAW` | RO reserved channel | `0` | reserved canonical address |
+| `0x34` | `LIVE_SEQ` | RO | `0` | latest PCLK LIVE sequence |
+| `0x38` | `LIVE_VALID_MASK` | RO | `0` | latest PCLK LIVE mask |
+| `0x3C` | `ACTIVE_MASK` | RO | `0x03` | fixed Clean Baseline active channels |
+| `0x40` | `JOY_CENTER_X` | RW | `2048` | current HW/FW policy parameter |
+| `0x44` | `JOY_CENTER_Y` | RW | `2048` | current HW/FW policy parameter |
+| `0x48` | `JOY_DEADZONE` | RW | `300` | current HW/FW policy parameter |
+| `0x4C` | `JOY_STATUS` | RO | dynamic | combinational policy over HOLD |
+| `0x50..0x5C` | reserved | none | n/a | ERROR on access |
+| `0x60` | `FRAME_COUNT` | RO | `0` | successful PCLK LIVE publications |
+| `0x64` | `ERROR_STATUS` | RO | `0` | sticky acquisition error bits |
+| `0x68..0xFC` | reserved | none | n/a | ERROR on access |
 
-Register decoding uses:
+CH3..CH6 addresses are intentionally reserved now so future six-channel activation does not require a raw-data ABI relocation. In the Clean Baseline they return zero and their HOLD/LIVE valid-mask bits remain clear.
 
-```text
-PADDR[7:2]
-```
+### 9.3 `ADC_CTRL`
 
-so the implemented register set occupies the first 256 bytes of the selected APB slot. The wider APB slot remains aliased by the upstream bridge decode and is not a canonical software contract.
+| Bit | Name | Access | Meaning |
+|---:|---|---|---|
+| 0 | `ENABLE` | RW | persistent acquisition request level |
+| 1 | `CAPTURE` | W1P | attempt LIVE -> HOLD atomic copy |
+| 2 | `CLEAR_ERROR` | W1P | clear sticky `ERROR_STATUS` bits |
+| 31:3 | reserved | none | must write zero; nonzero reserved writes are ERROR |
 
-## 7. Register Map
+Reading `ADC_CTRL` returns only the stored `ENABLE` level; command bits read zero.
 
-| Offset | Register | Access | Reset | Description |
-|---:|---|---|---:|---|
-| `0x00` | `NAME0` | R | `"apb-"` | identification |
-| `0x04` | `NAME1` | R | `"joy "` | identification |
-| `0x08` | `VERSION` | R | `"0.01"` | wrapper version |
-| `0x0C` | `CTRL` | R/W | `0` | local controller enable / clear commands |
-| `0x10` | `STATUS` | R | dynamic | local status plus live ADC handshake fields |
-| `0x14` | `X_CHANNEL` | R/W | `1` | response classification channel for X |
-| `0x18` | `Y_CHANNEL` | R/W | `2` | response classification channel for Y |
-| `0x1C` | `X_RAW` | R | `0` / invalid | X sample and valid flag |
-| `0x20` | `Y_RAW` | R | `0` / invalid | Y sample and valid flag |
-| `0x24` | `CENTER_X` | R/W | `2048` | X center threshold |
-| `0x28` | `CENTER_Y` | R/W | `2048` | Y center threshold |
-| `0x2C` | `DEADZONE` | R/W | `300` | common dead-zone magnitude |
-| `0x30` | `DIR_STATUS` | R | dynamic | decoded direction and X/Y validity |
-| `0x34` | `SAMPLE_COUNT` | R | `0` | count of all observed ADC response-valid events |
-| `0x38` | `RESP_INFO` | R | dynamic | debug/live response information |
+### 9.4 `ADC_STATUS`
 
-Writes to unspecified/read-only offsets have no functional effect and do not generate an APB error.
+| Bit | Name | Meaning |
+|---:|---|---|
+| 0 | `ENABLE_REQ` | PCLK software request level |
+| 1 | `ENGINE_ENABLED` | synchronized engine acknowledgement |
+| 2 | `LIVE_VALID` | at least one eligible current LIVE frame |
+| 3 | `HOLD_VALID` | HOLD contains a captured frame |
+| 4 | `NEW_FRAME` | LIVE is newer than HOLD under Section 8.3 |
+| 5 | `MAILBOX_BUSY` | source frame awaiting acknowledgement |
+| 6 | `ASSEMBLY_ACTIVE` | synchronized/captured indication that a source scan is in progress |
+| 7 | `ERROR_PENDING` | `ERROR_STATUS != 0` |
+| 31:8 | reserved | read zero |
 
-## 8. CTRL Register
+All software-visible status bits shall be PCLK-domain state or safely synchronized/captured state. No live asynchronous Qsys bus field may be exposed directly.
 
-Current defined write bits are:
+### 9.5 `ERROR_STATUS`
 
-```text
-bit 0 ENABLE
-bit 1 CLEAR_FLAGS
-bit 2 CLEAR_COUNT
-```
+Sticky bits:
 
-### 8.1 ENABLE
+| Bit | Name | Meaning |
+|---:|---|---|
+| 0 | `UNEXPECTED_CHANNEL` | response channel not valid for the expected active scan slot |
+| 1 | `DUPLICATE_CHANNEL` | same active channel observed twice within one frame |
+| 2 | `ORDER_ERROR` | baseline CH1 -> CH2 ordering contract violated |
+| 3 | `PACKET_ERROR` | SOP/EOP contract malformed |
+| 31:4 | reserved | read zero |
 
-`ENABLE` is stored in `enable_reg` and controls only the APB controller's **unused local command generator**.
+A source error shall discard the partial frame and set the corresponding sticky PCLK-visible error indication through an implementation-defined safe event/status transfer. `ADC_CTRL.CLEAR_ERROR` clears all sticky error bits; a coincident new hardware error is set-dominant.
 
-It does not gate:
+### 9.6 `FRAME_COUNT`
 
-- the real top-level Qsys command stream,
-- Qsys conversions,
-- response capture into X/Y registers.
+`FRAME_COUNT` increments exactly once when a complete source frame is successfully accepted into the PCLK LIVE bank through the mailbox.
 
-Therefore software shall not treat `CTRL.ENABLE=0` as an ADC power-down or sampling-disable operation in the active baseline.
+It does **not** count:
 
-### 8.2 CLEAR_FLAGS
+- individual ADC responses,
+- commands,
+- CAPTURE operations,
+- discarded partial/error frames.
 
-Writing bit 1 as `1` clears:
+It resets to zero only on system reset in P11 baseline.
 
-```text
-X valid
-Y valid
-unexpected-channel flag
-```
+### 9.7 Invalid access policy
 
-It does not stop incoming responses. A new response may set the flags again immediately afterward.
+The P11 ADC slot shall use exact full local-offset validation.
 
-### 8.3 CLEAR_COUNT
+The bridge allowlist shall admit only architecturally implemented offsets. Low-bit aliases such as `+0x100` mirrors are not permitted.
 
-Writing bit 2 as `1` clears `SAMPLE_COUNT` to zero.
+The following return APB error / propagated AHB error with no side effect:
 
-The firmware helper `joystick_clear_flags()` writes:
+- non-word access,
+- misaligned direct bus access,
+- write to RO register,
+- read/write of unimplemented reserved offsets,
+- malformed `ADC_CTRL` write with reserved bits set,
+- any slot-local offset not listed as architecturally valid.
 
-```text
-ENABLE | CLEAR_FLAGS | CLEAR_COUNT
-```
+An eligible `CAPTURE` that finds no new frame is **not** an error; it is an OKAY no-op.
 
-and therefore also forces the local `ENABLE` storage bit to one.
+## 10. Joystick Hardware Policy
 
-## 9. Response Capture
+### 10.1 Child-module seam
 
-Whenever the APB controller observes `adc_response_valid` high on a PCLK edge, it:
-
-```text
-last_response_channel <- response channel
-sample_sop            <- response SOP
-sample_eop            <- response EOP
-SAMPLE_COUNT           <- SAMPLE_COUNT + 1
-```
-
-and classifies the response:
-
-```text
-if response_channel == X_CHANNEL:
-    X_RAW   <- response_data
-    X_VALID <- 1
-else if response_channel == Y_CHANNEL:
-    Y_RAW   <- response_data
-    Y_VALID <- 1
-else:
-    UNEXPECTED_CHANNEL <- 1
-```
-
-`SAMPLE_COUNT` counts response beats, not completed X/Y pairs. Unexpected-channel responses also increment the count.
-
-There is no sample timestamp or pair sequence number.
-
-## 10. Raw Sample Registers
-
-`X_RAW` and `Y_RAW` contain:
+The target child interface is conceptually:
 
 ```text
-bit 12    VALID
-bits 11:0 12-bit ADC sample
+inputs:
+  hold_ch1[11:0]
+  hold_ch2[11:0]
+  hold_valid_mask[5:0]
+  center_x[11:0]
+  center_y[11:0]
+  deadzone[11:0]
+
+outputs:
+  forward
+  backward
+  left
+  right
+  x_valid
+  y_valid
 ```
 
-The 12-bit data range is:
+The exact RTL port names may differ, but the dependency boundary shall not.
+
+### 10.2 Combinational policy
+
+`Joystick_Policy` is combinational over the current HOLD sample and the **current** calibration registers.
+
+Approved policy:
 
 ```text
-0 .. 4095
+JOY_STATUS = current policy parameters applied to current HOLD sample
 ```
 
-The baseline does not convert the raw values to voltage or a normalized signed joystick coordinate in hardware.
+Therefore, changing center/deadzone may change `JOY_STATUS` immediately without changing `HOLD_SEQ` or raw HOLD data.
 
-X and Y are updated on separate response events. They are not committed as an atomic pair.
+Calibration values are not snapshotted by CAPTURE.
 
-## 11. Joystick Center and Dead-Zone Processing
+### 10.3 Threshold arithmetic
 
-The default calibration is:
+Default values:
 
 ```text
 CENTER_X = 2048
@@ -333,317 +743,272 @@ CENTER_Y = 2048
 DEADZONE = 300
 ```
 
-The active comparisons are equivalent to:
+Use widened arithmetic and saturating conceptual thresholds:
 
 ```text
-RIGHT    = X_VALID && X_RAW > CENTER_X + DEADZONE
-LEFT     = X_VALID && X_RAW < CENTER_X - DEADZONE
-FORWARD  = Y_VALID && Y_RAW > CENTER_Y + DEADZONE
-BACKWARD = Y_VALID && Y_RAW < CENTER_Y - DEADZONE
+high_x = min(4095, center_x + deadzone)
+low_x  = max(0,    center_x - deadzone)
+high_y = min(4095, center_y + deadzone)
+low_y  = max(0,    center_y - deadzone)
+
+RIGHT    = x_valid && x_raw > high_x
+LEFT     = x_valid && x_raw < low_x
+FORWARD  = y_valid && y_raw > high_y
+BACKWARD = y_valid && y_raw < low_y
 ```
 
-The RTL implements the low-side comparison as `raw + deadzone < center` using 13-bit extended arithmetic, avoiding unsigned subtraction underflow.
+The RTL may implement low-side comparison with 13-bit addition/comparison to avoid unsigned underflow, provided it is mathematically equivalent to the clamped policy.
 
-There is no hysteresis, filtering, averaging, calibration procedure, or rate limiting.
+### 10.4 `JOY_STATUS`
 
-If the raw value lies inside the dead zone, neither direction on that axis is asserted.
-
-## 12. DIR_STATUS Register
-
-`DIR_STATUS` fields are:
-
-| Bit | Name | Meaning |
-|---:|---|---|
-| 0 | `FORWARD` | Y above center + deadzone |
-| 1 | `BACKWARD` | Y below center - deadzone |
-| 2 | `LEFT` | X below center - deadzone |
-| 3 | `RIGHT` | X above center + deadzone |
-| 4 | `X_VALID` | at least one matching X response captured since reset/clear |
-| 5 | `Y_VALID` | at least one matching Y response captured since reset/clear |
-| 31:6 | reserved | zero |
-
-The direction outputs are combinational functions of the most recently stored independent X/Y samples.
-
-### 12.1 Firmware direction mapping quirk
-
-The current firmware maps:
-
-```text
-FORWARD  -> 'w'
-BACKWARD -> 's'
-LEFT     -> 'd'
-RIGHT    -> 'a'
-```
-
-Thus the symbolic `LEFT/RIGHT` register names and conventional WASD character meanings are reversed for the X axis. This may reflect physical joystick orientation, but the repository does not establish that intent as an architectural invariant.
-
-Future cleanup shall verify physical axis polarity and then align naming, board orientation, and firmware command semantics.
-
-## 13. STATUS Register
-
-The implemented `STATUS` read contains these useful low-order fields:
-
-| Bits | Field |
+| Bit | Name |
 |---:|---|
-| 0 | local `ENABLE` storage bit |
-| 1 | local `scan_axis` bit |
-| 2 | `X_VALID` |
-| 3 | `Y_VALID` |
-| 4 | unexpected-channel flag |
-| 5 | live `adc_command_ready` |
-| 6 | local `command_fire` |
-| 7 | live `adc_response_valid` |
-| 12:8 | last captured response channel |
-| 17:13 | configured X classification channel |
-| 22:18 | configured Y classification channel |
-| 31:23 | zero/reserved |
+| 0 | `FORWARD` |
+| 1 | `BACKWARD` |
+| 2 | `LEFT` |
+| 3 | `RIGHT` |
+| 4 | `X_VALID` |
+| 5 | `Y_VALID` |
+| 31:6 | zero |
 
-`scan_axis` and `command_fire` describe the APB controller's unused local command generator, not the real top-level Qsys command sequencer. They shall not be used as authoritative indicators of which channel the ADC is actually converting.
+Physical X/Y polarity and final LEFT/RIGHT mapping remain **(In-progress)** board acceptance. The logical bit definitions above shall not be silently reversed to preserve a historical ASCII quirk.
 
-The live `adc_command_ready` and `adc_response_valid` fields are also subject to the CDC limitation described below.
+## 11. Firmware Policy and Golden-Model Contract
 
-## 14. RESP_INFO Register
+Firmware shall implement an independent policy function over the same coherent HOLD raw sample and current calibration values.
 
-`RESP_INFO` combines captured and live Qsys response information:
+Recommended separation:
 
 ```text
-bits 11:0   live adc_response_data
-bits 16:12  live adc_response_channel
-bit  17     live response SOP
-bit  18     live response EOP
-bit  19     last sampled SOP
-bit  20     last sampled EOP
-bits 31:21  zero
+adc driver
+  -> adc_frame_t
+       -> joystick_policy_eval()     independent C reference
+       -> optional read JOY_STATUS   hardware result
 ```
 
-The live fields are meaningful only around a response-valid event and are not a coherent software snapshot.
+The firmware policy shall not derive its expected result by reading `JOY_STATUS`; it must recompute the policy independently.
 
-The baseline firmware does not expose a public helper for this register.
-
-## 15. Clock-Domain Crossing Limitation
-
-The Qsys command/response interface operates in the generated ADC system clock domain, while `APB_ADC_Joystick_Controller` operates in the 50 MHz PCLK domain.
-
-The active top directly connects:
+Verification may therefore compare:
 
 ```text
-adc_command_ready
-adc_response_valid
-adc_response_channel[4:0]
-adc_response_data[11:0]
-adc_response_startofpacket
-adc_response_endofpacket
+HW JOY_STATUS == FW joystick_policy_eval(HOLD, current calibration)
 ```
 
-into the PCLK-domain APB controller without an explicit project-RTL synchronizer, handshake bridge, or asynchronous FIFO.
+for directed and randomized vectors.
 
-Consequences include:
+Board/application mapping of logical direction to ASCII/control commands belongs above this generic policy layer. Conventional WASD mapping should be used only after physical X/Y polarity is confirmed.
 
-- `adc_response_valid` can be missed or sampled unpredictably,
-- the multi-bit response channel/data bus is not guaranteed to be captured atomically in PCLK,
-- `adc_command_ready` is sampled asynchronously by the unused local command logic,
-- `RESP_INFO` exposes live asynchronous signals directly through APB combinational read logic.
+## 12. Reset Architecture
 
-The current baseline shall therefore be treated as having an **unresolved ADC-to-PCLK CDC defect**, consistent with `reset_clock.md`.
+### 12.1 System versus generated-domain reset
 
-A future implementation shall establish a coherent CDC boundary, preferably by capturing completed ADC responses in the ADC domain and transferring a stable response record into PCLK through a handshake/toggle bridge or small asynchronous FIFO.
-
-## 16. Sample Coherency Limitation
-
-Even after CDC is corrected, the current software-visible model stores X and Y independently.
-
-The firmware helper performs separate reads:
+The system reset controller owns external reset conditioning and HCLK-qualified reset release.
 
 ```text
-DIR_STATUS
-X_RAW
-Y_RAW
+                             KEY[0]
+                               |
+                               v
+                    +---------------------+
+                    | System Reset        |
+                    | Controller          |
+                    |                     |
+                    | input conditioning  |
+                    | ~20 ms qualification|
+                    +----------+----------+
+                               |
+                            HRESETn
+                               |
+             +-----------------+------------------+
+             |                                    |
+             v                                    v
+        HCLK / PCLK                        generated domains
+   already HCLK-qualified                 (example: ADC)
+                                                  |
+                                                  v
+                                      reset_release_sync
+                                          adc_sys_clk
+                                                  |
+                                                  v
+                                            adc_reset_n
 ```
 
-while ADC responses may continue updating the registers.
+HCLK/PCLK shall not receive an extra release synchronizer solely for stylistic uniformity because `HRESETn` is already released in the HCLK domain and PCLK equals HCLK.
 
-Therefore one `joystick_read()` call can theoretically observe:
+### 12.2 Project-local ADC reset
 
-```text
-DIR_STATUS based on sample set A
-X_RAW based on later sample B
-Y_RAW based on later sample C
-```
+Project-local ADC acquisition logic shall use asynchronous assertion / `adc_sys_clk`-synchronous deassertion through the reusable `reset_release_sync` primitive.
 
-No atomic X/Y snapshot mechanism exists.
+The P11 architectural name for this project-local reset is `adc_reset_n`.
 
-A future cleanup should provide either:
+### 12.3 Vendor Qsys reset / PLL lock boundary
 
-- an atomic X/Y pair snapshot with sequence number,
-- double-buffered sample publication,
-- or a software-visible capture/commit protocol.
+`adc_qsys` receives qualified `HRESETn` at its vendor reset port. Generated Qsys reset controllers and PLL-lock routing remain a vendor-managed boundary.
 
-## 17. Reset Behavior
+P11A established:
 
-On `PRESETn` assertion, the APB controller resets to:
+- Qsys internally uses PLL lock information,
+- PLL `locked` is not exported to project-local top RTL,
+- project-local ADC reset release is clock-domain synchronized but not directly lock-qualified by an exported signal.
 
-```text
-ENABLE             = 0
-scan_axis          = X
-X_VALID/Y_VALID    = 0
-unexpected_channel = 0
-X_CHANNEL          = 1
-Y_CHANNEL          = 2
-X_RAW/Y_RAW        = 0
-CENTER_X/Y         = 2048
-DEADZONE           = 300
-SAMPLE_COUNT       = 0
-```
+P11 implementation shall not hand-edit generated vendor HDL merely to expose `locked`.
 
-Separately, Qsys receives `HRESETn` and internally controls its generated PLL/reset domains.
+Exact vendor command-ready/lock-loss/recovery behavior remains **(In-progress)** verification. Until proven otherwise, the project acquisition engine shall rely on its local synchronized reset plus the vendor command-ready interface and shall not issue a command before local reset release.
 
-After system reset release the top-level real ADC command stream begins automatically because `adc_command_valid = HRESETn`, regardless of the APB controller's reset `ENABLE=0` state.
+## 13. Interrupt Policy
 
-This means the two halves of the subsystem have different apparent enable semantics immediately after reset.
+P11 remains polling based.
 
-## 18. Interrupt Behavior
+There is no ADC/joystick PLIC source in this specification.
 
-The active ADC joystick block has no interrupt output and no active PLIC connection.
+Any future interrupt architecture shall separately define:
 
-CPU use is polling based.
-
-A future interrupt design shall define before implementation:
-
-- sample-ready event semantics,
-- X/Y pair-ready versus individual ADC-response interrupts,
-- overflow/lost-sample behavior,
-- unexpected-channel/error signaling,
-- interrupt enable/status/clear registers,
+- frame-ready versus threshold/direction events,
+- enable/status/W1C semantics,
+- overflow or coalescing behavior,
 - PLIC source allocation.
 
-## 19. Firmware Contract
+## 14. Verification and Acceptance Requirements
 
-The current firmware initializes the block as:
+All P11 acceptance work is **(In-progress)** until evidence is attached to the P11 implementation/closure flow.
 
-```text
-X channel = 1
-Y channel = 2
-center X  = 2048
-center Y  = 2048
-deadzone  = 300
-```
+### 14.1 Command ownership and ENABLE
 
-This matches the actual top-level fixed Qsys scan channels.
+Verify:
 
-Baseline firmware shall:
+- one project-local command owner only,
+- CH1 -> CH2 scan order,
+- no command before `adc_reset_n` release,
+- stable level ENABLE request synchronization,
+- no new command after synchronized disable recognition,
+- partial frame discarded on disable,
+- re-enable restarts from CH1.
 
-- use 32-bit aligned MMIO accesses,
-- keep X/Y classification channels at 1/2 unless the top-level ADC command path is changed first,
-- require both X_VALID and Y_VALID before converting direction status to a command,
-- not assume `CTRL.ENABLE` stops ADC conversions,
-- not assume one `SAMPLE_COUNT` increment equals one complete joystick sample,
-- not rely on `STATUS.scan_axis`, `command_fire`, or live `RESP_INFO` fields as a trustworthy representation of the active command path.
+### 14.2 Vendor protocol / cadence
 
-## 20. Verification Requirements
+With the real generated interface or an evidence-qualified vendor simulation/trace, measure:
 
-A baseline-directed regression shall verify at minimum:
+- accepted command -> response latency,
+- whether multiple responses may be internally outstanding,
+- response-valid behavior without response-ready,
+- achieved two-channel frame interval,
+- relationship between selected 1 MSPS rate and project-level frame cadence.
 
-1. reset register values,
-2. APB reads/writes for center/deadzone/channel classification fields,
-3. response-channel classification into X/Y/unexpected paths,
-4. X/Y valid flag set/clear behavior,
-5. sample count increment/clear behavior,
-6. exact dead-zone boundary behavior,
-7. DIR_STATUS bit ordering,
-8. top-level channel sequence 1->2->1->2 on accepted commands,
-9. confirmation that APB controller command outputs are not connected to Qsys,
-10. physical joystick axis polarity on board,
-11. CDC-safe behavior after cleanup using assertions or dedicated asynchronous-clock tests,
-12. atomic X/Y publication behavior after coherency cleanup.
+### 14.3 Frame and CDC
 
-Existing successful Quartus compilation or general board demonstration is not sufficient evidence that the current unsynchronized response crossing is CDC-safe.
+Use unrelated/asynchronous clock phases and an independent transaction ledger to prove:
 
-## 21. Baseline Cleanup Targets Before Major Feature Integration
+- no torn frame,
+- no mixed CH1/CH2 generation,
+- source payload stable while mailbox busy,
+- exactly one PCLK LIVE update per acknowledged frame,
+- exact sequence/mask/count behavior,
+- reset/disable cannot publish stale or partial data.
 
-The following items shall be entered into the consolidated baseline cleanup tracker.
+### 14.4 APB / bridge
 
-### High priority
+Verify exact offsets, 32-bit-only policy, RO/reserved errors, no `+0x100` mirror, and end-to-end `PSLVERR -> HRESP` behavior with no invalid side effects.
 
-1. **Unify ADC command ownership.** Remove the duplicate/disconnected command generator architecture. Either the APB controller owns Qsys command generation or a dedicated ADC acquisition engine owns it with an explicit APB status/control interface.
-2. **Fix ADC/Qsys -> PCLK CDC.** Transfer response valid/channel/data/SOP/EOP coherently.
-3. **Fix command-ready CDC** if command generation remains outside the ADC clock domain.
-4. **Provide atomic X/Y sample publication** with validity and sequence information.
-5. **Make ENABLE semantics real and deterministic.** It shall either control acquisition or be removed/renamed.
-6. **Resolve channel-programming semantics.** Software channel registers shall control actual conversion channels or become read-only fixed configuration.
-7. **Verify physical X/Y polarity** and resolve the current LEFT/RIGHT versus `a`/`d` firmware mapping.
+### 14.5 CAPTURE
 
-### Medium priority
+Verify:
 
-8. Separate ADC acquisition from joystick policy so the MAX10 ADC can be reused independently of center/dead-zone/WASD logic.
-9. Add explicit sample-ready/overflow/error status.
-10. Decide whether calibration remains software programmable or gains a defined calibration procedure.
-11. Replace live asynchronous fields in `STATUS`/`RESP_INFO` with captured synchronous debug/status values.
-12. Define interrupt policy before PLIC integration.
-13. Tighten register decode/alias behavior with the APB cleanup policy.
-14. Add generated-clock/CDC timing constraints consistent with `reset_clock.md`.
+- successful atomic replacement,
+- repeated CAPTURE without new frame is OKAY/no-op,
+- HOLD persists across acquisition disable,
+- no RELEASE command exists,
+- rapid LIVE updates do not tear HOLD.
 
-## 22. Recommended Future Architecture
+### 14.6 HW/FW policy equivalence
 
-A cleaner future decomposition is:
+Independent vectors shall include:
 
-```text
-MAX10 ADC / Qsys
-      |
-      v
-ADC acquisition engine (adc_sys_clk)
-      |
-      | coherent CDC record
-      v
-APB ADC peripheral (PCLK)
-      |
-      +-- raw channel samples
-      +-- valid/sequence/error
-      +-- channel configuration
-      |
-      +--> optional joystick policy block / firmware
-```
+- exact center/deadzone boundaries,
+- 0 and 4095 extremes,
+- center < deadzone and center + deadzone > 4095,
+- invalid X/Y valid mask,
+- calibration changes without new CAPTURE,
+- randomized raw/calibration combinations,
+- board polarity test separately from logical policy.
 
-This separates:
+### 14.7 Quartus / TimeQuest / board
 
-```text
-ADC hardware acquisition
-```
+P11 shall collect scoped evidence for:
 
-from:
+- ADC generated clocks,
+- reset recovery/removal,
+- residual ADC/VGA placement warnings,
+- analog JP8 configuration,
+- joystick center and polarity,
+- ADC behavior with relevant VGA activity.
 
-```text
-joystick interpretation policy
-```
+P11 evidence shall not by itself promote global `STA-001` or `STA-002` to closed.
 
-and avoids making a board-specific joystick decoder the architectural owner of the reusable ADC interface.
+## 15. P11 Requirement Mapping
 
-## 23. Baseline Invariants
+| Tracker ID | P11 target | Freeze status |
+|---|---|---|
+| `ADC-001` | sole acquisition-engine command owner | (In-progress) |
+| `ADC-002` | real ENABLE request/ack; fixed RO baseline channel configuration | (In-progress) |
+| `ADC-003` | coherent frame + sequence/mask/error + CAPTURE HOLD | (In-progress) |
+| `ADC-004` | physical X/Y polarity and direction mapping board acceptance | (In-progress) |
+| `ADC-005` | generic ADC / optional joystick seam; no live async debug MMIO | (In-progress) |
+| `ADC-006` | async-clock, MMIO, HW/FW policy, Quartus and board regressions | (In-progress) |
+| `CDC-003` | stable frame req/ack mailbox | (In-progress) |
+| `FW-009` | coherent ADC API + independent FW joystick policy | (In-progress) |
+| `APB-005` ADC sub-scope | exact local offsets, no mirrors | (In-progress) |
 
-Until cleanup changes the specification first, the active baseline shall be understood as:
+## 16. Baseline Invariants After P11 Closure
+
+After implementation and verification, the intended P11 invariants are:
 
 ```text
-APB base                     = 0x4005_0000
-APB slot                     = 5
-ADC response width           = 12 bits
-real Qsys scan channels      = fixed 1 and 2
-real command valid           = continuously high after reset
-APB X/Y channel registers    = response classifiers only
-APB ENABLE                   = does not control real ADC scan
-X/Y sample storage           = independent, non-atomic
-ADC/Qsys -> PCLK CDC         = unresolved / unsynchronized in project RTL
-interrupt output             = none
-software model               = polling
+APB base                         = 0x4005_0000
+architectural peripheral         = generic ADC + optional joystick policy
+project-local command owner      = ADC Acquisition Engine only
+structural channel capacity      = 6
+Clean Baseline active channels   = CH1, CH2
+configured ADC sample rate       = 1 MSPS
+ADC input clock                  = 10 MHz
+adc_sys_clk                      = 25 MHz
+raw sample width                 = 12 bits
+frame atomicity                  = coherent publication, not simultaneous sampling
+ADC->PCLK CDC                    = stable bundled-data req/ack mailbox
+software snapshot                = LIVE + CAPTURE-only HOLD
+RELEASE                          = none
+ENABLE                           = real level request + engine acknowledgement
+CH3..CH6 raw MMIO                = reserved canonical addresses
+joystick HW policy               = stateless combinational child over HOLD
+joystick FW policy               = independent reference/golden function
+interrupt                        = none / polling
 ```
 
-## 24. Related Specifications
+Do not replace `(In-progress)` with `Verified` solely because this specification is frozen.
 
-- `soc_architecture.md`
-- `memory_map.md`
-- `apb_subsystem.md`
-- `reset_clock.md`
-- `interrupt_architecture.md`
-- `firmware_contract.md` (planned)
+## 17. Historical / Pre-P11 Baseline
 
-## Phase 4A-2 Approved External-I/O Closure Target (not active signoff)
+This appendix preserves only the pre-cleanup facts needed to explain P11. It is not the target contract.
 
-STA-002 requires the ADC-facing top ports to be classified by actual analog/digital role. Analog ADC pins do not receive fabricated digital `set_input_delay`; generated ADC clock/reset relationships remain STA-001. Review ADC pin voltage/standard and package placement against the VGA adjacency critical warning, measure/quantify ADC behavior during relevant VGA activity, and explicitly disposition any residual warning risk. Positive internal timing slack is not ADC/board acceptance evidence.
+Before P11:
+
+- a top-level CH1/CH2 scanner drove the real Qsys commands,
+- `APB_ADC_Joystick_Controller` contained a second disconnected command generator,
+- `CTRL.ENABLE` controlled only that dead local generator,
+- writable X/Y channel registers classified responses but did not change actual conversion channels,
+- Qsys response valid/channel/data/SOP/EOP crossed directly from `adc_sys_clk` to PCLK without project RTL CDC,
+- X and Y were updated independently and could represent different generations,
+- live asynchronous command/response debug fields were exposed through `STATUS`/`RESP_INFO`,
+- software read direction/X/Y in separate transactions without an atomic frame identity,
+- no reusable generic ADC MMIO boundary existed,
+- historical firmware mapped LEFT/RIGHT to reversed `d/a` ASCII values pending physical polarity confirmation.
+
+Those behaviors are retained for provenance only and shall not constrain the P11 implementation.
+
+## 18. Related Specifications
+
+- `00_soc_architecture.md`
+- `01_memory_map.md`
+- `05_apb_subsystem.md`
+- `06_reset_clock.md`
+- `19_firmware_contract.md`
+- `baseline_cleanup.md`
+- Intel MAX 10 Analog to Digital Converter User Guide

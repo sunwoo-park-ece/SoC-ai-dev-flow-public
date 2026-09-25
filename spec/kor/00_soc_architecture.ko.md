@@ -55,7 +55,7 @@ Baseline에는 다음이 포함된다.
 - Polling timer.
 - Internal SPI engine을 포함한 ADXL345 accelerometer subsystem.
 - AES-GCM accelerator.
-- MAX 10 ADC joystick controller.
+- generic MAX 10 ADC acquisition peripheral + optional joystick policy child.
 - 6-digit seven-segment display controller.
 - Dual VRAM buffer를 사용하는 VGA 640x480 display path.
 
@@ -259,7 +259,7 @@ Bridge는 8개의 canonical 64 KiB APB slot을 decode한다.
 | 2 | `0x4002_0000 - 0x4002_FFFF` | TIMER | Polling timer |
 | 3 | `0x4003_0000 - 0x4003_FFFF` | GSENSOR | ADXL345 accelerometer subsystem |
 | 4 | `0x4004_0000 - 0x4004_FFFF` | AES-GCM | Cryptographic accelerator |
-| 5 | `0x4005_0000 - 0x4005_FFFF` | JOYSTICK | MAX 10 ADC joystick controller |
+| 5 | `0x4005_0000 - 0x4005_FFFF` | ADC | Generic ADC MMIO + optional joystick policy |
 | 6 | `0x4006_0000 - 0x4006_FFFF` | UART1 | PC/debug UART |
 | 7 | `0x4007_0000 - 0x4007_FFFF` | HEX | Six-digit seven-segment display |
 
@@ -372,21 +372,26 @@ Current baseline은 APB wrapper boundary에서 128-bit payload block transaction
 
 Register ordering, IV/AAD construction, start/done behavior, encrypt/decrypt mode, tag validation은 `aes_gcm.md`에서 정의한다.
 
-## 15. ADC Joystick Architecture
+## 15. ADC / Joystick Architecture — P11 Target (In-progress)
 
-Joystick block은 APB subsystem과 MAX 10 ADC/Qsys interface를 연결한다.
+P11은 slot 5를 joystick-owned ADC wrapper에서 **generic ADC MMIO + optional joystick policy child** 구조로 변경한다.
 
-다음 기능을 제공한다.
+```text
+MAX 10 ADC / adc_qsys
+  -> ADC Acquisition Engine (adc_sys_clk, sole command owner)
+  -> stable scan-frame req/ack CDC
+  -> APB_ADC_Controller (PCLK)
+       -> LIVE / CAPTURE-only HOLD
+       -> CH1..CH6 raw MMIO (CH3..CH6 baseline reserve)
+       -> seq / valid mask / frame count / error
+       -> combinational Joystick_Policy
+```
 
-- Alternating X/Y ADC channel command.
-- Captured 12-bit raw sample.
-- Configurable channel number.
-- Configurable center value.
-- Configurable deadzone.
-- Derived forward/backward/left/right status.
-- Sample/response diagnostic information.
+Internal 구조는 6채널까지 표현하며 Clean Baseline은 CH1/CH2만 scan한다. 현재 generated ADC는 1 MSPS total rate, 10 MHz ADC input, 25 MHz `adc_sys_clk`으로 확인됐다. Scan frame은 동시 analog sample이 아니라 sequential sample을 하나의 coherent publication identity로 묶는 구조다.
 
-세부 동작은 `adc_joystick.md`에서 정의한다.
+Software snapshot은 LIVE + CAPTURE-only HOLD이며 ADC에는 RELEASE가 없다. 이는 P09 G-sensor CAPTURE/RELEASE ownership lifecycle과 의도적으로 다르다. Hardware joystick child와 independent firmware policy를 병행해 HW/FW equivalence 검증에 사용한다.
+
+세부 contract는 `15_adc_joystick.md`, reset/CDC는 `06_reset_clock.md`가 정본이다. 실제 구현/검증은 **(In-progress)**다.
 
 ## 16. Seven-Segment Display Architecture
 

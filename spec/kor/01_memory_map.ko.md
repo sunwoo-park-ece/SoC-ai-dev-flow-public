@@ -45,7 +45,7 @@ DMEM은 top-level이 `0x1000_xxxx` 64 KiB를 선택하지만 실제 BRAM은 32 K
 | 2 | `0x4002_0000` | Timer |
 | 3 | `0x4003_0000` | G-sensor |
 | 4 | `0x4004_0000` | AES-GCM |
-| 5 | `0x4005_0000` | ADC Joystick |
+| 5 | `0x4005_0000` | ADC / Joystick Policy |
 | 6 | `0x4006_0000` | UART1 / PC |
 | 7 | `0x4007_0000` | HEX Display |
 
@@ -89,9 +89,38 @@ DMEM은 top-level이 `0x1000_xxxx` 64 KiB를 선택하지만 실제 BRAM은 32 K
 
 Base `0x4004_0000`. 상세 register는 `aes_gcm.md`가 소유한다.
 
-### ADC Joystick
+### ADC / Joystick Policy — P11 v2 Target (In-progress)
 
-Base `0x4005_0000`. 상세 register는 `adc_joystick.md`가 소유한다.
+Base `0x4005_0000`, canonical name `ADC_BASE`.
+
+```text
++0x00 NAME0
++0x04 NAME1
++0x08 VERSION = 0x0002_0000
++0x0C ADC_CTRL
++0x10 ADC_STATUS
++0x14 FRAME_SEQ
++0x18 VALID_MASK
++0x1C CH1_RAW
++0x20 CH2_RAW
++0x24 CH3_RAW (reserved canonical, baseline 0)
++0x28 CH4_RAW (reserved canonical, baseline 0)
++0x2C CH5_RAW (reserved canonical, baseline 0)
++0x30 CH6_RAW (reserved canonical, baseline 0)
++0x34 LIVE_SEQ
++0x38 LIVE_VALID_MASK
++0x3C ACTIVE_MASK = 0x03
++0x40 JOY_CENTER_X
++0x44 JOY_CENTER_Y
++0x48 JOY_DEADZONE
++0x4C JOY_STATUS
++0x50..0x5C reserved / ERROR
++0x60 FRAME_COUNT
++0x64 ERROR_STATUS
++0x68..0xFC reserved / ERROR
+```
+
+No-new CAPTURE는 OKAY/no-op이며 HOLD를 보존한다. RO write/reserved/misaligned/unsupported access는 ERROR이며 mirror address는 canonical이 아니다.
 
 ### HEX
 
@@ -127,7 +156,7 @@ Target slot allocation:
 | 2 | `0x4002_0000` | Timer | 유지 |
 | 3 | `0x4003_0000` | G-sensor | 유지 |
 | 4 | `0x4004_0000` | AES-GCM | 유지 |
-| 5 | `0x4005_0000` | ADC Joystick | 유지 |
+| 5 | `0x4005_0000` | ADC / Joystick Policy | 유지 |
 | 6 | `0x4006_0000` | UART1 / PC | 유지 |
 | 7 | `0x4007_0000` | HEX | 유지 |
 | 8 | `0x4008_0000` | SW | 신규 target |

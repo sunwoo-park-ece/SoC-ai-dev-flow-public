@@ -273,16 +273,18 @@ UART/LoRa, external-I/O electrical acceptance가 아니다. `UART-005`는 OPEN,
 | `AES-IRQ` | Medium | PLIC | IRQ | DEFERRED |
 | `AES-DMA` | Medium | AXI | streaming/DMA | DEFERRED |
 
-## 16. ADC / Joystick
+## 16. ADC / Joystick — P11 Spec Frozen, Implementation In-progress
 
-| ID | Sev | Gate | 핵심 작업 | Status |
-|---|---|---|---|---|
-| `ADC-001` | Blocker | BC | command owner 단일화 | OPEN |
-| `ADC-002` | High | BC | enable/channel semantics 정상화 | OPEN |
-| `ADC-003` | High | BC | atomic XY/sequence/error | OPEN |
-| `ADC-004` | High | BC | physical polarity + a/d mapping | OPEN |
-| `ADC-005` | Medium | BC | acquisition/joystick 경계 | OPEN |
-| `ADC-006` | High | BC | async regression + board | OPEN |
+| ID | Frozen P11 outcome | Status |
+|---|---|---|
+| `ADC-001` | sole `adc_sys_clk` acquisition-engine command owner | IN_PROGRESS |
+| `ADC-002` | real ENABLE request/ack + fixed/read-only baseline CH1/CH2 | IN_PROGRESS |
+| `ADC-003` | complete frame SEQ/mask + req/ack CDC + CAPTURE-only HOLD | IN_PROGRESS |
+| `ADC-004` | board X/Y wiring/polarity/direction acceptance | IN_PROGRESS |
+| `ADC-005` | generic ADC / optional joystick seam, no live async debug | IN_PROGRESS |
+| `ADC-006` | async-clock/MMIO/HW-FW/Quartus/board regression | IN_PROGRESS |
+
+`CDC-003`, `FW-009`, `APB-005` ADC sub-scope도 P11 closure 전까지 IN_PROGRESS다.
 
 ## 17. HEX
 
@@ -488,3 +490,11 @@ Stage 1 당시 제안된 G-sensor 계약은 생산 RTL·펌웨어·테스트벤�
 4. **빌드 및 물리 수락:** S6 Quartus Prime Lite 19.1 빌드 클린 완료(오류 0, 42개 유효 핀 `HEX0..HEX5[0:6]`, 0개 `HEX[7]`). MAX 10 DE10-Lite 보드에서 `firmware/apps/s6_hex_board_acceptance.c` 실행을 통해 B0(리셋 `000000`), B1(디코더 `123456`), B2(디코더 `ABCDEF`), B3(active-low 단일 세그먼트 RAW), B4(멀티 세그먼트 RAW `543210`), B5(ENABLE=0 시 블랭킹), B6(재활성화 시 B4 패턴 보존 복구), B7/B8(디코더 반복 루프 회귀 확인) 상태를 `reports/evidence/p10-hex-s6/summary.md`(`P10-HEX-S6-EV-01`, `OWNER_CONFIRMED`)로 확인.
 
 이를 통해 `HEX-001`, `HEX-002`, `HEX-003`이 `VERIFIED`로 종결됨. 외부 I/O 타이밍/전기적 서명(`STA-002`) 및 ADC/VGA proximity/CDC 범위는 미종결 상태를 유지함.
+
+## P11 ADC Spec Freeze Integration Note
+
+P11A preflight와 Owner/Chat 승인으로 ADC target spec이 동결됐다. 구현/검증 전이므로 `ADC-001..006`, `CDC-003`, `FW-009`, `APB-005` ADC sub-scope는 모두 **IN_PROGRESS**로 관리한다.
+
+동결된 목표는 sole ADC Acquisition Engine, fixed CH1/CH2 baseline + 6-channel structural capacity, real ENABLE level request/ack, stable req/ack frame mailbox, LIVE + CAPTURE-only HOLD, exact v2 MMIO/CH3..CH6 reserved address, combinational HW `Joystick_Policy`, independent FW golden policy이다.
+
+P11 spec freeze는 `STA-001`/`STA-002` global closure 또는 어떤 ADC 항목의 VERIFIED를 의미하지 않는다.
