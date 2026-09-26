@@ -179,7 +179,7 @@ The services layer is application service code, not a hardware driver. The minim
 | S4-B OBSERVERS | VGA and PC UART shared-snapshot rendering, separately gated after S4-A review. |
 | S5 CLOSURE | Host/unit tests, RV32I build/image-size check, relevant existing regressions, clean local checkpoint. |
 
-S1 implemented none of S2–S5. S2 infrastructure, S3 providers and S4-A board I/O and S4-B observers are implemented; stop for owner review before S5. After S5, stop for review before Issue #6 C4-A/C4-B resumes. No push, vendor execution, baseline release, or global tracker closure is implicitly authorized.
+S1 implemented none of S2–S5. S2 infrastructure, S3 providers, S4-A board I/O and S4-B observers are implemented and accepted. S5 closure verification/documentation is complete; stop for S5 owner review. After S5, stop for review before Issue #6 C4-A/C4-B resumes. No push, vendor execution, baseline release, or global tracker closure is implicitly authorized.
 
 ### 10.1 Accepted S2 core ABI, ownership and deterministic signature
 
@@ -274,11 +274,11 @@ UART1 TX uses one bounded readiness attempt/at most one byte per service turn, w
 
 Host checks use literal logical-line fixtures and the accepted unchanged font asset with independent per-pixel raster placement. They assert bounds/determinism/no-MMIO, state/detail/footer, exact PC text, both completion orders, partial work, immutable N, independent timeout/abort release, backlog and all-active fair visits/progress. Real provider/driver/RTL integration checks every accepted framebuffer write's commit/address/data/back bank, the complete independently expected raster before SWAP, presentation bank after fresh DONE, and an independently decoded UART1 TX serial stream with the identical frozen EP/SIG. It simultaneously exercises UART0→UART1 RX and S3 strong peripherals, and is not CPU E2E. Run fresh external RUN_ROOT with `scripts/wsl/soc_health_observer_test.sh`, `soc_health_observer_rtl_test.sh`, and `soc_health_observer_negative_test.sh` (all under `scripts/wsl/`). Targeted isolated defects and successful-target/failed-guard fixtures must propagate nonzero and consistent FAIL artifacts. Build compiles only the new observer service with `-Os` to preserve the existing 16KiB IMEM without duplicating text/font infrastructure.
 
-Physical VGA image quality, UART cable/USB adapter/PuTTY, GPIO jumper, SW/LED/HEX/sensors/ADC, real-time quotas, stack high-water and vendor timing remain NOT_RUN. Stop for S4-B owner review before S5; C4 remains paused and no push is authorized.
+Physical VGA image quality, UART cable/USB adapter/PuTTY, GPIO jumper, SW/LED/HEX/sensors/ADC, real-time quotas, stack high-water and vendor timing remain NOT_RUN. S4-B owner review was accepted. Stop for S5 closure review; C4 remains paused and no push is authorized.
 
 ## 11. Acceptance and future falsification map
 
-Future tests shall connect contract → independently derived oracle → stimulus/checker → unique source/run → raw evidence/verdict. All were NOT_RUN at S1 freeze. S2 now has a passing host suite with an independent serialized-signature oracle, per-ID masks, padding/copy/lease tests, token/deadline tests and bounded scheduler/observer tests; six isolated defect mutations are rejected. Compile, target and guard failure fixtures propagate nonzero to the parent and consistent FAIL reports. The actual RV32I skeleton build passes; existing display_smoke before/after memory images are identical. Those hardware/board/review scopes were NOT_RUN in S2. S3 provider host tests and actual peripheral RTL integration now pass, including isolated defect rejection and relevant prior regressions. Physical peripheral execution, board wiring/display, real-time quotas and stack high-water remain NOT_RUN. S3 owner review was accepted before S4-A; S4-A host/RTL checks and targeted rejection are verified under §10.3, S4-A owner review was accepted; S4-B owner review is still required. Run `RUN_ROOT=<external-directory> scripts/wsl/soc_health_host_test.sh`; each run must use fresh output storage. Raw evidence is retained outside the checkout and reported through the stage result, not embedded in this contract.
+Future tests shall connect contract → independently derived oracle → stimulus/checker → unique source/run → raw evidence/verdict. All were NOT_RUN at S1 freeze. S2 now has a passing host suite with an independent serialized-signature oracle, per-ID masks, padding/copy/lease tests, token/deadline tests and bounded scheduler/observer tests; six isolated defect mutations are rejected. Compile, target and guard failure fixtures propagate nonzero to the parent and consistent FAIL reports. The actual RV32I skeleton build passes; existing display_smoke before/after memory images are identical. Those hardware/board/review scopes were NOT_RUN in S2. S3 provider host tests and actual peripheral RTL integration now pass, including isolated defect rejection and relevant prior regressions. Physical peripheral execution, board wiring/display, real-time quotas and stack high-water remain NOT_RUN. S3 owner review was accepted before S4-A; S4-A host/RTL checks and targeted rejection are verified under §10.3, S4-A owner review was accepted; S4-B owner review was accepted; S5 closure owner review is required. Run `RUN_ROOT=<external-directory> scripts/wsl/soc_health_host_test.sh`; each run must use fresh output storage. Raw evidence is retained outside the checkout and reported through the stage result, not embedded in this contract.
 
 | Criterion | Oracle / targeted defect that must be rejected |
 |---|---|
@@ -292,6 +292,35 @@ Future tests shall connect contract → independently derived oracle → stimulu
 | Build/regression | Actual RV32I image-size/build and relevant regression exits; failures propagate through leaf/guard/parent into final nonzero and consistent reports. |
 
 New/materially changed checkers shall accept valid cases and reject targeted counterexamples in isolated fixtures without mutating approved production or old evidence. Finite polling still cannot recover a terminal CPU/bus fault; signature equality still cannot prove physical output. Preserve failed attempts and keep runtime versus source-level alignment verdicts separate.
+
+### 11.1 S5 verification closure and C4 handoff boundary
+
+S5 completes without changing production C, drivers, peripheral RTL, checkers or the build script. Four S2/S3/S4-A/S4-B host suites and three provider/driver/RTL suites pass in fresh runs. Six S2 isolated mutations, ten S3 host/six RTL mutations, nineteen S4-A negative cases and thirty-two S4-B negative cases recheck actual targeted rejection/failure propagation. Inherited P06 Timer, P07 UART, P08B VGA/VRAM, P09 G-sensor host (real GS RTL covered by S3 integration), P10 HEX functional/shadow, P11 ADC/JOY C2/C3 and P04 GPIO/SW/LED host plus S4-A real RTL run successfully. These are not CPU E2E or physical acceptance. Raw command/source/hash/target/guard/parent evidence is retained externally and referenced by the S5 result comment.
+
+Fresh `soc_health_main` RV32I/ILP32/nostdlib build: `.imem` **13,492 / 16,384 bytes (82.3486%)**, headroom **2,892**, delta versus S4-B **0**. `.dmem_init` **1,048**, `.bss` **1,556**, allocated span **2,604 / 32,768**, headroom **30,164 bytes**. Actual ELF sections/map/symbols confirm these sizes; ELF/MIF/map/disassembly hashes are retained. No undefined symbols, printf/allocation/memcpy/memset/mul/div/mod helpers or unexpected libc/libgcc. Existing observer-only `-Os` remains; other code stays O2. Representative non-health `display_smoke` IMEM/DMEM binaries/MIFs are byte-identical to entry and exclude health services. Default depths remain 4096/8192.
+
+16 KiB baseline retained; capacity pressure observed: **YES**; closure fit: **YES**. Largest linked text symbols are board service 1,660, signature 1,288 and formatter 1,020 bytes. New observer formatter/UART service/VGA prepare are 1,020/384/332 bytes: a major part of S4-B growth, not the majority of total text. No further size optimization or memory enlargement was performed.
+
+This is the Issue #7 handoff matrix. RV32I BUILT means inclusion in the firmware image, not CPU execution. CPU/system host verification covers health core/scheduler only. Physical UART jumper/USB-UART/PuTTY, GPIO jumper, SW/LED/HEX mapping, VGA monitor, ADC/joystick/sensors, real-time quotas, stack high-water, soc_health_main CPU E2E and Quartus/TimeQuest all remain NOT_RUN. AES is EXCLUDED_PENDING_CLEANUP. Do not resume Issue #6 C4 until User/Chat accepts S5 and the Issue #7 handoff. No baseline release, Issue closure or push was performed.
+
+| Scope | Host | RTL/driver | Firmware image | Physical | CPU E2E | Vendor |
+|---|---|---|---|---|---|---|
+| CPU/system loop | HOST VERIFIED (health core/scheduler only) | — | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| Timer | HOST VERIFIED | RTL/DRIVER VERIFIED | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| UART heartbeat | HOST VERIFIED | RTL/DRIVER VERIFIED | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| UART observer | HOST VERIFIED | RTL/DRIVER VERIFIED | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| GPIO | HOST VERIFIED | RTL/DRIVER VERIFIED | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| G-sensor | HOST VERIFIED | RTL/DRIVER VERIFIED | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| ADC | HOST VERIFIED | RTL/DRIVER VERIFIED | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| Joystick | HOST VERIFIED | RTL/DRIVER VERIFIED | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| VGA heartbeat | HOST VERIFIED | RTL/DRIVER VERIFIED | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| VGA dashboard | HOST VERIFIED | RTL/DRIVER VERIFIED | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| SW | HOST VERIFIED | RTL/DRIVER VERIFIED | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| LED | HOST VERIFIED | RTL/DRIVER VERIFIED | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| HEX | HOST VERIFIED | RTL/DRIVER VERIFIED | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| AES-GCM | EXCLUDED | EXCLUDED | EXCLUDED | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| snapshot/formatter | HOST VERIFIED | RTL/DRIVER VERIFIED (observer outputs) | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| build flow | HOST VERIFIED (image compatibility) | — | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
 
 ## 12. Baseline-cleanup spec/FW reconciliation tracker (Role B)
 
@@ -348,6 +377,27 @@ No new owning spec/FW mismatch was discovered. HREC-HEX retains its S0 origin an
 
 | ID / IP | Source requirement | Observed gap at S4-A | Narrow S4-B disposition | Status / evidence |
 |---|---|---|---|---|
-| HREC-OBS-SEQ / UART, GSEN, ADC observer input | S4-B common-format SEQ and frozen-only text | Actual qualified tokens remained live; copied successful detail held baud=434/0/FRAME_COUNT, so truthful SEQ was unavailable. | Store actual qualified sequence in successful detail only; preserve core ABI, qualification and failure semantics. ADC FRAME_COUNT baseline remains provider-local. | IMPLEMENTED_HOST_RTL_VERIFIED; S4-B finding and real provider→snapshot→formatter assertions; owner review pending. |
+| HREC-OBS-SEQ / UART, GSEN, ADC observer input | S4-B common-format SEQ and frozen-only text | Actual qualified tokens remained live; copied successful detail held baud=434/0/FRAME_COUNT, so truthful SEQ was unavailable. | Store actual qualified sequence in successful detail only; preserve core ABI, qualification and failure semantics. ADC FRAME_COUNT baseline remains provider-local. | IMPLEMENTED_HOST_RTL_VERIFIED; S4-B finding and real provider→snapshot→formatter assertions; owner accepted at S4-B; S5 closure review pending. |
 
 No other owning specification or cleanup history is reconciled here. This finding does not reopen peripheral RTL, physical acceptance, C4 or P08B STOP gates.
+
+### 12.7 S5 Issue #7 reconciliation disposition
+
+The S0/S1 findings and original statuses above remain historical records. This table updates current Issue #7 status/evidence only; broad owning-spec debt and physical/runtime acceptance remain open.
+
+| ID | Current scoped status | S0–S5 disposition / evidence |
+|---|---|---|
+| HREC-APP | VERIFIED_ALIGNED (Issue #7 application-role split) | S1 role documentation and implemented canonical soc_health_main; final_main historical RC-car source preserved. |
+| HREC-BUILD | VERIFIED_ALIGNED (health build/README); OBSERVED (historical linker comments) | S5 fresh RV32I build, size/symbol audit and byte-identical display_smoke images; unrelated linker narrative debt retained. |
+| HREC-UART | VERIFIED_ALIGNED (health loop/observer); IMPLEMENTATION_ACCEPTED_DOC_STALE (old owning prose) | S3/S4-B accepted, S5 host/real serial RTL: UART0→UART1 RX qualified; UART1 TX observer only. |
+| HREC-GPIO | VERIFIED_ALIGNED (owned pair health); IMPLEMENTATION_ACCEPTED_DOC_STALE (historical prose) | S4-A accepted; S5 host faults and real RTL with simulated GPIO0→1 jumper; physical jumper NOT_RUN. |
+| HREC-GSENSOR | VERIFIED_ALIGNED (API/health progression) | S3 accepted and S5 host/RTL advancing coherent CAPTURE/read/RELEASE; physical sensor NOT_RUN. |
+| HREC-ADC | VERIFIED_ALIGNED (v2 API/health); IMPLEMENTATION_ACCEPTED_DOC_STALE (owning narrative) | S3 accepted, S5 C2/C3 and health host/RTL freshness/validity/errors; C4 still pending. |
+| HREC-JOY | VERIFIED_ALIGNED (pure model/health); OBSERVED (compatibility wrapper debt) | S5 raw HOLD/calibration independent oracle and C3 policy boundaries; wrapper limitations unchanged. |
+| HREC-VGA | VERIFIED_ALIGNED (health owner/dashboard); IMPLEMENTATION_ACCEPTED_DOC_STALE (historical waits); OBSERVED (legacy helper ordering) | S4-B accepted; S5 full raster/back-bank/fresh VSYNC/SWAP/DONE and immutable N; monitor NOT_RUN. |
+| HREC-HEX | VERIFIED_ALIGNED (API/getters/health) | S4-A accepted, S5 P10 functional/shadow and shared-SW host/RTL; physical illumination NOT_RUN. |
+| HREC-SW | VERIFIED_ALIGNED (API/health); IMPLEMENTATION_ACCEPTED_DOC_STALE (old owning prose) | S5 captured synchronized 10-bit input and shared generation tests; physical switches NOT_RUN. |
+| HREC-LED | VERIFIED_ALIGNED (API/health); IMPLEMENTATION_ACCEPTED_DOC_STALE (old owning prose) | S5 captured SW mirror/latch oracle; physical mapping NOT_RUN. |
+| HREC-AES | CLEANUP_PENDING; EXCLUDED_PENDING_CLEANUP | No AES execution/provider; separate cleanup approval required. |
+| HREC-OBS-SEQ | VERIFIED_ALIGNED (accepted successful diagnostic payload, host/RTL only) | S4-B user acceptance: UART/GSEN/ADC successful detail holds qualified 32-bit sequence; S5 exact eight-digit and upper-bit checks. |
+| HREC-CPU / HREC-TIMER | Original scoped status/debt retained | No startup/trap or legacy timer-wait changes; health bounded service only, CPU execution NOT_RUN. |

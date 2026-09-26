@@ -179,7 +179,7 @@ Services layer는 hardware driver가 아닌 application service다. 최소 `scri
 | S4-B OBSERVERS | S4-A 리뷰 후 별도 승인하는 VGA와 PC UART 공통 snapshot rendering. |
 | S5 CLOSURE | Host/unit test, RV32I build/image-size check, 관련 기존 regression, clean local checkpoint. |
 
-S1에서는 S2–S5를 구현하지 않았다. S2 기반 구조, S3 provider 및 S4-A board I/O와 S4-B observer를 구현했으며 S5 전 소유자 리뷰를 위해 중단한다. S5 이후에도 Issue #6 C4-A/C4-B 재개 전에 리뷰를 위해 중단한다. Push/vendor 실행/baseline release/global tracker closure를 암묵적으로 승인하지 않는다.
+S1에서는 S2–S5를 구현하지 않았다. S2 기반 구조, S3 provider, S4-A board I/O 및 S4-B observer는 구현/승인됐다. S5 closure 검증과 문서를 완료했으며 S5 소유자 리뷰를 위해 중단한다. S5 이후에도 Issue #6 C4-A/C4-B 재개 전에 리뷰를 위해 중단한다. Push/vendor 실행/baseline release/global tracker closure를 암묵적으로 승인하지 않는다.
 
 ### 10.1 승인된 S2 core ABI, ownership 및 결정적 signature
 
@@ -274,11 +274,11 @@ UART1 TX는 turn마다 bounded readiness attempt 한 번/최대 한 byte를 보�
 
 Host는 literal logical-line fixture 및 승인된 unchanged font asset을 독립 per-pixel raster로 배치하여 bounds/determinism/no-MMIO, state/detail/footer, exact PC text, 두 완료 순서, partial work, N 불변성, 독립 timeout/abort release, backlog 및 모든 active provider의 fair visit/progress를 assert한다. 실제 provider/driver/RTL 통합은 accepted framebuffer write별 commit/address/data/back bank, SWAP 전 독립 expected raster 전체, fresh DONE 후 presentation bank와 UART1 TX의 독립 serial decode를 검사하여 같은 frozen EP/SIG를 증명한다. UART0→UART1 RX와 S3 strong peripheral을 동시에 실행하지만 CPU E2E는 아니다. Fresh external RUN_ROOT로 `scripts/wsl/soc_health_observer_test.sh`, `soc_health_observer_rtl_test.sh`, `soc_health_observer_negative_test.sh`(모두 `scripts/wsl/` 아래)를 실행한다. 격리 결함 및 successful-target/failed-guard fixture는 nonzero와 일관된 FAIL artifact로 전파해야 한다. 기존 16KiB IMEM을 지키도록 새 observer service만 `-Os`로 build하며 text/font infrastructure를 중복하지 않는다.
 
-실제 VGA image quality, UART cable/USB adapter/PuTTY, GPIO jumper, SW/LED/HEX/sensor/ADC, real-time quota, stack high-water 및 vendor timing은 NOT_RUN이다. S5 이전 S4-B 소유자 리뷰에서 중단하며 C4 pause/no push를 유지한다.
+실제 VGA image quality, UART cable/USB adapter/PuTTY, GPIO jumper, SW/LED/HEX/sensor/ADC, real-time quota, stack high-water 및 vendor timing은 NOT_RUN이다. S4-B 소유자 리뷰는 승인됐다. S5 closure 결과 리뷰에서 중단하며 C4 pause/no push를 유지한다.
 
 ## 11. 합격 및 미래 반증 map
 
-미래 시험은 contract → 독립 oracle → stimulus/checker → 고유 source/run → raw evidence/verdict를 연결한다. S1 동결 시 모두 NOT_RUN이었다. S2는 독립 serialized-signature oracle, IP별 mask, padding/copy/lease, token/deadline 및 bounded scheduler/observer 시험을 포함한 host suite가 통과했고 격리된 여섯 결함 mutation을 거부했다. Compile/target/guard 실패 fixture는 parent nonzero 및 일관된 FAIL 보고서로 전파한다. 실제 RV32I skeleton build가 통과했고 기존 display_smoke의 전후 memory image는 동일하다. 그 hardware/board/review 범위는 S2에서 NOT_RUN이었다. S3 provider host 및 실제 peripheral RTL 통합, 격리 결함 거부와 관련 과거 regression은 통과했다. 실제 peripheral 실행, board 배선/display, real-time quota 및 stack high-water는 NOT_RUN이다. S3 소유자 리뷰는 S4-A 이전 승인됐으며 S4-A host/RTL 검사와 격리 결함 거부는 §10.3에서 검증했다. S4-A 소유자 리뷰는 승인했으며 S4-B 소유자 리뷰가 아직 필요하다. `RUN_ROOT=<external-directory> scripts/wsl/soc_health_host_test.sh`를 실행하며 매번 새 output storage를 사용한다. Raw evidence는 checkout 밖에 보존하고 stage 결과로 보고하며 계약에 내장하지 않는다.
+미래 시험은 contract → 독립 oracle → stimulus/checker → 고유 source/run → raw evidence/verdict를 연결한다. S1 동결 시 모두 NOT_RUN이었다. S2는 독립 serialized-signature oracle, IP별 mask, padding/copy/lease, token/deadline 및 bounded scheduler/observer 시험을 포함한 host suite가 통과했고 격리된 여섯 결함 mutation을 거부했다. Compile/target/guard 실패 fixture는 parent nonzero 및 일관된 FAIL 보고서로 전파한다. 실제 RV32I skeleton build가 통과했고 기존 display_smoke의 전후 memory image는 동일하다. 그 hardware/board/review 범위는 S2에서 NOT_RUN이었다. S3 provider host 및 실제 peripheral RTL 통합, 격리 결함 거부와 관련 과거 regression은 통과했다. 실제 peripheral 실행, board 배선/display, real-time quota 및 stack high-water는 NOT_RUN이다. S3 소유자 리뷰는 S4-A 이전 승인됐으며 S4-A host/RTL 검사와 격리 결함 거부는 §10.3에서 검증했다. S4-A 소유자 리뷰는 승인했으며 S4-B 소유자 리뷰는 승인됐고 S5 closure 결과의 소유자 리뷰가 필요하다. `RUN_ROOT=<external-directory> scripts/wsl/soc_health_host_test.sh`를 실행하며 매번 새 output storage를 사용한다. Raw evidence는 checkout 밖에 보존하고 stage 결과로 보고하며 계약에 내장하지 않는다.
 
 | 기준 | Oracle / 반드시 거부할 결함 |
 |---|---|
@@ -292,6 +292,35 @@ Host는 literal logical-line fixture 및 승인된 unchanged font asset을 독�
 | Build/regression | 실제 RV32I image-size/build 및 관련 regression exit. Leaf/guard/parent 실패가 최종 nonzero와 일관된 보고서에 전파되어야 한다. |
 
 신규/중요 변경 checker는 승인된 production/과거 evidence를 변경하지 않고 격리 fixture에서 valid case를 수락하고 targeted counterexample을 거부해야 한다. 유한 polling도 terminal CPU/bus fault를 복구하지 못하며 signature 일치도 물리 출력을 입증하지 못한다. 실패 시도를 보존하고 runtime 판정과 source-level alignment를 구분한다.
+
+### 11.1 S5 검증 closure 및 C4 인계 경계
+
+S5는 production C, driver, peripheral RTL, checker 및 build script를 변경하지 않고 완료했다. S2/S3/S4-A/S4-B host 4종 및 provider/driver/RTL 3종이 새 run에서 통과했다. S2 isolated mutation 6종, S3 host mutation 10종/RTL mutation 6종, S4-A negative 19종, S4-B negative 32종은 실제 targeted rejection/실패 전파를 다시 검증했다. Timer P06, UART P07, VGA/VRAM P08B, G-sensor P09 host(실제 GS RTL은 S3 integration), HEX P10 functional/shadow, ADC/JOY P11 C2/C3, GPIO/SW/LED P04 host 및 S4-A real RTL을 실행했다. 이 결과는 CPU E2E 또는 physical acceptance가 아니다. Raw command/source/hash/target/guard/parent 증거는 외부 run과 S5 결과 댓글에 보존한다.
+
+Fresh `soc_health_main` RV32I/ILP32/nostdlib build: `.imem` **13,492 / 16,384 bytes (82.3486%)**, headroom **2,892**, S4-B 대비 delta **0**. `.dmem_init` **1,048**, `.bss` **1,556**, allocated span **2,604 / 32,768**, headroom **30,164 bytes**. ELF section/map/symbol로 확인했으며 ELF/MIF/map/disassembly hash를 보존했다. Undefined symbol은 없고 printf/allocation/memcpy/memset/mul/div/mod helper 또는 예상 밖 libc/libgcc는 없다. Observer service만 기존 `-Os`, 나머지는 O2다. 대표 non-health `display_smoke`의 entry 대비 IMEM/DMEM binary/MIF가 동일하며 health service는 포함되지 않는다. Default depth는 4096/8192를 유지한다.
+
+16 KiB baseline retained; capacity pressure observed: **YES**; closure fit: **YES**. 가장 큰 linked text는 board service 1,660, signature 1,288, formatter 1,020 bytes다. 새 observer의 formatter/UART service/VGA prepare는 1,020/384/332 bytes이며 S4-B 성장의 주요 부분이나 전체 text를 지배하지 않는다. 추가 size optimization이나 memory 확대는 수행하지 않았다.
+
+아래는 Issue #7 인계 matrix다. RV32I BUILT는 firmware image에 해당 경로가 포함된다는 뜻이며 CPU 실행을 뜻하지 않는다. CPU/system의 host 검증은 health core/scheduler만 의미한다. Physical UART jumper/USB-UART/PuTTY, GPIO jumper, SW/LED/HEX mapping, VGA monitor, ADC/joystick/sensor, real-time quota, stack high-water, soc_health_main CPU E2E 및 Quartus/TimeQuest는 모두 NOT_RUN이다. AES는 EXCLUDED_PENDING_CLEANUP이다. S5 및 Issue #7 인계를 User/Chat이 승인하기 전 Issue #6 C4를 재개하지 않는다. Baseline release/Issue closure/push도 수행하지 않았다.
+
+| Scope | Host | RTL/driver | Firmware image | Physical | CPU E2E | Vendor |
+|---|---|---|---|---|---|---|
+| CPU/system loop | HOST VERIFIED (health core/scheduler only) | — | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| Timer | HOST VERIFIED | RTL/DRIVER VERIFIED | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| UART heartbeat | HOST VERIFIED | RTL/DRIVER VERIFIED | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| UART observer | HOST VERIFIED | RTL/DRIVER VERIFIED | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| GPIO | HOST VERIFIED | RTL/DRIVER VERIFIED | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| G-sensor | HOST VERIFIED | RTL/DRIVER VERIFIED | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| ADC | HOST VERIFIED | RTL/DRIVER VERIFIED | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| Joystick | HOST VERIFIED | RTL/DRIVER VERIFIED | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| VGA heartbeat | HOST VERIFIED | RTL/DRIVER VERIFIED | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| VGA dashboard | HOST VERIFIED | RTL/DRIVER VERIFIED | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| SW | HOST VERIFIED | RTL/DRIVER VERIFIED | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| LED | HOST VERIFIED | RTL/DRIVER VERIFIED | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| HEX | HOST VERIFIED | RTL/DRIVER VERIFIED | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| AES-GCM | EXCLUDED | EXCLUDED | EXCLUDED | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| snapshot/formatter | HOST VERIFIED | RTL/DRIVER VERIFIED (observer outputs) | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
+| build flow | HOST VERIFIED (image compatibility) | — | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
 
 ## 12. Baseline-cleanup spec/FW 정합성 트래커 (Role B)
 
@@ -348,6 +377,27 @@ S3에서 새로운 owning spec/FW 불일치를 발견하지 않았다. 기존 AP
 
 | ID / IP | Source requirement | S4-A에서 관측한 gap | 좁은 S4-B 조치 | Status / evidence |
 |---|---|---|---|---|
-| HREC-OBS-SEQ / UART, GSEN, ADC observer input | S4-B common-format SEQ 및 frozen-only text | Actual qualified token은 live에만 있고 copied 성공 detail은 baud=434/0/FRAME_COUNT라 실제 SEQ를 표시할 수 없었다. | 성공 detail에만 qualified sequence 기록; core ABI/qualification/failure 의미 보존. ADC FRAME_COUNT baseline은 provider-local 유지. | IMPLEMENTED_HOST_RTL_VERIFIED; S4-B finding 및 실제 provider→snapshot→formatter assertion; owner review pending. |
+| HREC-OBS-SEQ / UART, GSEN, ADC observer input | S4-B common-format SEQ 및 frozen-only text | Actual qualified token은 live에만 있고 copied 성공 detail은 baud=434/0/FRAME_COUNT라 실제 SEQ를 표시할 수 없었다. | 성공 detail에만 qualified sequence 기록; core ABI/qualification/failure 의미 보존. ADC FRAME_COUNT baseline은 provider-local 유지. | IMPLEMENTED_HOST_RTL_VERIFIED; S4-B finding 및 실제 provider→snapshot→formatter assertion; owner accepted at S4-B; S5 closure review pending. |
 
 다른 owning spec/cleanup history는 조정하지 않는다. 이 finding은 peripheral RTL, physical acceptance, C4 또는 P08B STOP gate를 재개하지 않는다.
+
+### 12.7 S5 Issue #7 정합성 disposition
+
+위 S0/S1 finding과 원래 status는 이력으로 보존한다. 아래는 Issue #7만의 현행 status/evidence이며 broad owning-spec debt 또는 physical/runtime acceptance를 종결하지 않는다.
+
+| ID | Current scoped status | S0–S5 disposition / evidence |
+|---|---|---|
+| HREC-APP | VERIFIED_ALIGNED (Issue #7 application-role split) | S1 역할 문서 및 구현된 canonical soc_health_main; historical RC-car final_main source 보존. |
+| HREC-BUILD | VERIFIED_ALIGNED (health build/README); OBSERVED (historical linker comments) | S5 fresh RV32I build/size/symbol 감사 및 display_smoke image byte 일치; 관련 없는 linker 설명 부채 유지. |
+| HREC-UART | VERIFIED_ALIGNED (health loop/observer); IMPLEMENTATION_ACCEPTED_DOC_STALE (old owning prose) | S3/S4-B 승인 및 S5 host/real serial RTL: UART0→UART1 RX qualification; UART1 TX observer 전용. |
+| HREC-GPIO | VERIFIED_ALIGNED (owned pair health); IMPLEMENTATION_ACCEPTED_DOC_STALE (historical prose) | S4-A 승인; S5 host fault 및 simulated GPIO0→1 jumper의 real RTL; physical jumper NOT_RUN. |
+| HREC-GSENSOR | VERIFIED_ALIGNED (API/health progression) | S3 승인 및 S5 host/RTL advancing coherent CAPTURE/read/RELEASE; physical sensor NOT_RUN. |
+| HREC-ADC | VERIFIED_ALIGNED (v2 API/health); IMPLEMENTATION_ACCEPTED_DOC_STALE (owning narrative) | S3 승인; S5 C2/C3 및 health host/RTL freshness/validity/error; C4 pending 유지. |
+| HREC-JOY | VERIFIED_ALIGNED (pure model/health); OBSERVED (compatibility wrapper debt) | S5 raw HOLD/calibration 독립 oracle 및 C3 policy boundary; wrapper 한계 유지. |
+| HREC-VGA | VERIFIED_ALIGNED (health owner/dashboard); IMPLEMENTATION_ACCEPTED_DOC_STALE (historical waits); OBSERVED (legacy helper ordering) | S4-B 승인; S5 full raster/back-bank/fresh VSYNC/SWAP/DONE 및 N 불변성; monitor NOT_RUN. |
+| HREC-HEX | VERIFIED_ALIGNED (API/getters/health) | S4-A 승인; S5 P10 functional/shadow 및 shared-SW host/RTL; physical illumination NOT_RUN. |
+| HREC-SW | VERIFIED_ALIGNED (API/health); IMPLEMENTATION_ACCEPTED_DOC_STALE (old owning prose) | S5 captured synchronized 10-bit input 및 shared generation 검사; physical switch NOT_RUN. |
+| HREC-LED | VERIFIED_ALIGNED (API/health); IMPLEMENTATION_ACCEPTED_DOC_STALE (old owning prose) | S5 captured SW mirror/latch oracle; physical mapping NOT_RUN. |
+| HREC-AES | CLEANUP_PENDING; EXCLUDED_PENDING_CLEANUP | AES 실행/provider 없음; 별도 cleanup 승인 필요. |
+| HREC-OBS-SEQ | VERIFIED_ALIGNED (accepted successful diagnostic payload, host/RTL only) | S4-B 사용자 승인: UART/GSEN/ADC 성공 detail은 qualified 32-bit seq; S5 exact eight-digit/upper-bit 검사. |
+| HREC-CPU / HREC-TIMER | Original scoped status/debt retained | Startup/trap 또는 legacy timer-wait 변경 없음; health bounded service만 검증, CPU execution NOT_RUN. |
