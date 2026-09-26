@@ -276,6 +276,123 @@ Host는 literal logical-line fixture 및 승인된 unchanged font asset을 독�
 
 실제 VGA image quality, UART cable/USB adapter/PuTTY, GPIO jumper, SW/LED/HEX/sensor/ADC, real-time quota, stack high-water 및 vendor timing은 NOT_RUN이다. S4-B 소유자 리뷰는 승인됐다. S5 closure 결과 리뷰에서 중단하며 C4 pause/no push를 유지한다.
 
+### 10.5 최종 software architecture
+
+이 map은 S5 checkpoint의 최종 SYSFW-01 구현을 설명한다. 아래 path는 실제 tree의 관련 부분이며 제안 구조가 아니다. App은 health service를 통해 production driver API를 조정한다. `joystick_policy.c`는 MMIO driver가 아닌 순수 policy model이다. S4-A에서 `hex_display.c/.h`에 side-effect-free masked RAW_LOW/RAW_HIGH getter를 추가했으므로 모든 driver가 변경되지 않았다고 표현하지 않는다.
+
+#### 코드 구조
+
+```text
+firmware/
+├── apps/
+│   └── soc_health_main.c         # 진입점; 협력형 loop 및 callback 연결
+├── include/
+│   ├── soc_health.h              # Stable ID, state/evidence, core/snapshot/lease ABI
+│   ├── soc_health_providers.h    # Strong-provider state, dispatcher 및 callback interface
+│   ├── soc_health_board_io.h     # GPIO/SW/LED/HEX provider context 및 interface
+│   ├── soc_health_observers.h    # 최종 formatter/observer cursor 및 VGA hook
+│   └── hex_display.h             # HEX API; S4-A RAW_LOW/RAW_HIGH getter
+├── services/
+│   ├── soc_health.c              # Live record/history, copied snapshot 및 FNV-1a
+│   ├── soc_health_probes.c       # S2 placeholder dispatch; 호환성/단위시험
+│   ├── soc_health_providers.c    # Strong-provider FSM; 단일 VGA operation owner
+│   ├── soc_health_board_io.c     # GPIO loop, 공유 SW generation, LED/HEX 검사
+│   ├── soc_health_observers.c    # 최종 공유 text, VGA preparation 및 UART1 TX
+│   └── soc_health_render.c       # S2 non-MMIO observer skeleton; 호환성/시험
+└── drivers/
+    ├── timer.c                   # Timer MMIO command/status
+    ├── uart.c                    # UART0/1 MMIO 및 bounded byte API
+    ├── gsensor.c                 # Coherent CAPTURE/read/RELEASE API
+    ├── adc.c                     # ADC v2 identity, HOLD, error 및 calibration
+    ├── joystick_policy.c         # 순수 raw-frame/calibration policy; MMIO 없음
+    ├── gpio.c                    # GPIO direction/latch/input MMIO
+    ├── sw.c                      # 전용 synchronized SW register API
+    ├── led.c                     # 전용 LED latch/readback API
+    ├── hex_display.c             # HEX shadow/packing 및 S4-A raw getter
+    ├── vram.c                    # Framebuffer write 및 VGA status/operation
+    └── vga_text.c                # 기존 8x8 font 및 packed framebuffer text
+```
+
+`soc_health_observers.c`와 `soc_health_observers.h`가 최종 S4-B hardware observer 경로다. App의 변수명은 `render`지만 type은 `soc_health_observers_t`다. App은 `soc_health_observers_vga_prepare`/`soc_health_observers_vga_release`를 provider context에 연결하고 loop마다 `soc_health_observers_uart_service`를 호출한다. `soc_health_render.c`는 S2 bounded non-MMIO cursor skeleton, `soc_health_probes.c`는 S2 pending-only dispatch로 남아 있으며 최종 app hardware 경로가 아니다. 호환성/단위시험 API는 유지되고 health build 목록에 포함되지만 사용하지 않는 function은 link-time section GC로 제거될 수 있다.
+
+#### 데이터 및 제어 흐름
+
+```text
++------------------------------------------------------------------------------+
+| soc_health_main.c -- one cooperative software epoch per loop                 |
+| Epoch/system record -> one bounded provider dispatch -> UART observer tick   |
+| Then check publication cadence; no full-provider sweep in one turn.          |
++------------------------------------------------------------------------------+
+                                       |
+                                       v
++------------------------------------------------------------------------------+
+| Provider layer: soc_health_providers.c + soc_health_board_io.c               |
+| Timer: COUNT/READY/ACK/restart    GPIO: settled 0,1,1,0 pin loop             |
+| UART: UART0 TX -> UART1 RX       SW: captured synchronized 10-bit generation |
+| GSEN: CAPTURE/read/RELEASE + seq LED: same SW generation -> mirror/readback  |
+| ADC: coherent HOLD/seq/count    HEX: same SW -> decoder/raw readback         |
+| JOY: HW status vs pure FW policy; ADC may qualify JOY in its bounded step.   |
+| VGA: sole operation-owner FSM; invokes observers VGA prepare/release hooks.  |
+| Reports: fresh progress token/detail, failure, pending or deadline miss.     |
++------------------------------------------------------------------------------+
+                                       |
+                                       v
++------------------------------------------------------------------------------+
+| soc_health.c -- live core state (single cooperative owner)                   |
+| 12 stable IP records: state/evidence/HB/last_progress/misses/detail          |
+| Fresh progress -> current PASS; FAIL/deadline miss -> sticky_fail_mask.      |
+| Recovery changes current state; sticky failure history remains.              |
+| AES-GCM: EXCLUDED_PENDING_CLEANUP; never dispatched as a provider.           |
++------------------------------------------------------------------------------+
+                                       |
+                                       v
++------------------------------------------------------------------------------+
+| soc_health_publish_snapshot -- two static copied slots, no allocation        |
+| Copy logical fields; derive current PASS/WARN/FAIL/EXCLUDED masks here.      |
+| Compute deterministic 32-bit FNV-1a over explicit little-endian fields.      |
+| Slot reader bits = VGA | UART; any held lease prevents slot overwrite.       |
+| Publication due after 32 epochs since last success, only if app pair idle;   |
+| otherwise increment backlog; no free slot also increments core backlog.      |
++------------------------------------------------------------------------------+
+                                       |
+                                       v
++------------------------------------------------------------------------------+
+| soc_health_observers.c -- same const snapshot N -> one common formatter      |
+| soc_health_format_line: copied EP/SIG/masks/records; no live reads or MMIO.  |
+| Both observers retain N across turns; explicit cursors bound work.           |
++------------------------------------------------------------------------------+
+               | same frozen N                  | same frozen N
+               v                                v
++-------------------------------------+  +-------------------------------------+
+| VGA dashboard (observers.c)         |  | UART1 PC-TX observer (observers.c)  |
+| Called inside provider VGA FSM      |  | One byte/readiness attempt per turn |
+| 640x480; 8x8; 16px row pitch        |  | Same EP/SIG and logical lines       |
+| Bounded back-buffer clear/glyphs    |  | Append-only CRLF; banner/separator  |
+| Then owner: stale-event ACK ->      |  | Final-byte drain before release     |
+| fresh VSYNC -> SWAP -> fresh DONE   |  | Timeout releases UART lease only    |
+| No ABORT -> live VGA progress       |  | TX never qualifies UART heartbeat   |
+| VGA hook releases its own lease     |  | UART cursor clears on own release   |
++-------------------------------------+  +-------------------------------------+
+```
+
+Diagram은 mutable health record와 copied view를 구분한다. Current mask는 live core에 계속 저장하지 않고 `soc_health_publish_snapshot`에서 생성한다. UNKNOWN은 네 current mask에 포함되지 않는다. Signature는 explicit-field deterministic consistency identifier이며 cryptographic hash 또는 physical output 증명이 아니다. Mutable reader bit와 structure padding은 signature 입력에 포함하지 않는다.
+
+VGA preparation은 기존 `soc_health_vga_service` owner의 callback이며 두 번째 operation controller가 아니다. Prepare visit마다 최대 eight-word clear 또는 four-glyph render 후 dispatcher로 복귀한다. Owner만 fresh VSYNC/SWAP/associated DONE을 진행하고 ABORT를 거부한다. UART observer는 선택한 provider dispatch 뒤에 별도로 진행한다. 두 output 모두 health state를 재계산하지 않고 같은 `soc_health_format_line`과 snapshot EP/SIG를 사용한다. 자동 UART evidence는 12-byte UART0 TX -> UART1 RX token loop이며 UART1 TX는 observer-only다.
+
+#### 한 publication cycle
+
+1. `soc_health_epoch_begin`은 software epoch를 증가시키고 system-loop progress를 report한다. 이는 software 실행 기록이며 독립 CPU hardware qualification은 아니다.
+2. `soc_health_providers_service`는 bounded dispatch 하나를 선택한다. 초기 setup visit 다섯 번(UART, Timer, GSEN, ADC, VGA) 뒤 provider ID 1-10을 round robin으로 방문한다. Dispatch는 transaction을 한 단계 진행하며 모든 provider를 완료하지 않는다. Eligible ADC capture는 정확히 같은 HOLD로 JOY를 함께 qualify할 수 있다.
+3. Progress/failure/pending/deadline report가 live record를 갱신하며 core API는 WARN도 지원한다. Fresh progress token만 HB를 qualify하고 pending work는 progress를 만들지 않는다. Failure의 sticky history는 recovery 뒤에도 유지한다. SW는 LED/HEX가 retire할 때까지 하나의 captured generation을 보존한다.
+4. Provider dispatch 뒤 UART1은 기존 observer cursor를 최대 one byte 진행한다. 마지막 성공 publication 이후 최소 32 epoch가 지나고 현재 두 observer가 모두 idle일 때만 app이 publish하며 busy이면 backlog를 증가시킨다. 이는 software cadence이지 측정된 wall-clock rate가 아니다.
+5. Core는 reader가 없는 slot을 선택해 logical record/metadata를 복사하고 current mask를 생성하며 explicit-field FNV-1a와 두 reader lease bit를 설정한다. Free slot이 없으면 overwrite 대신 backlog를 기록한다. `soc_health_observers_begin`은 같은 const N을 두 cursor에 전달한다.
+6. 이후 VGA dispatch에서 단일 owner가 N의 전체 back buffer를 단계적으로 준비하고 stale event를 acknowledge한 뒤 fresh VSYNC를 기다려 SWAP한다. Fresh associated DONE과 no ABORT가 필요하다. Completion은 live VGA progress를 qualify하고 VGA lease를 release한다. Failure/timeout이면 성공 completion 없이 해당 lease를 release한다.
+7. 사이에 실행되는 UART observer visit은 같은 logical line을 banner/CRLF/separator와 함께 출력한다. 마지막 byte drain 뒤 UART lease를 release하고 timeout은 UART lease만 release하며 live observer miss를 기록한다. 어느 observer든 먼저 완료할 수 있다.
+8. 두 reader bit가 모두 해제된 뒤에만 slot을 재사용하며 release 시 observer pointer를 지운다. N 관측 중 provider progress/observer metadata 갱신은 live state만 바꾸고 이후 N+1에 나타난다. 따라서 N의 VGA record는 자기 dashboard SWAP completion 이전 상태다.
+
+**Evidence 경계:** Host/unit verified; provider/driver/RTL verified; RV32I image built. `soc_health_main` CPU E2E, physical board 및 Quartus/TimeQuest는 NOT_RUN이고 AES는 excluded다. S5 readiness matrix와 남은 gate는 §11.1을 참조한다. 이 설명은 새 verification 또는 C4 권한을 추가하지 않는다.
+
+
 ## 11. 합격 및 미래 반증 map
 
 미래 시험은 contract → 독립 oracle → stimulus/checker → 고유 source/run → raw evidence/verdict를 연결한다. S1 동결 시 모두 NOT_RUN이었다. S2는 독립 serialized-signature oracle, IP별 mask, padding/copy/lease, token/deadline 및 bounded scheduler/observer 시험을 포함한 host suite가 통과했고 격리된 여섯 결함 mutation을 거부했다. Compile/target/guard 실패 fixture는 parent nonzero 및 일관된 FAIL 보고서로 전파한다. 실제 RV32I skeleton build가 통과했고 기존 display_smoke의 전후 memory image는 동일하다. 그 hardware/board/review 범위는 S2에서 NOT_RUN이었다. S3 provider host 및 실제 peripheral RTL 통합, 격리 결함 거부와 관련 과거 regression은 통과했다. 실제 peripheral 실행, board 배선/display, real-time quota 및 stack high-water는 NOT_RUN이다. S3 소유자 리뷰는 S4-A 이전 승인됐으며 S4-A host/RTL 검사와 격리 결함 거부는 §10.3에서 검증했다. S4-A 소유자 리뷰는 승인했으며 S4-B 소유자 리뷰는 승인됐고 S5 closure 결과의 소유자 리뷰가 필요하다. `RUN_ROOT=<external-directory> scripts/wsl/soc_health_host_test.sh`를 실행하며 매번 새 output storage를 사용한다. Raw evidence는 checkout 밖에 보존하고 stage 결과로 보고하며 계약에 내장하지 않는다.

@@ -276,6 +276,123 @@ Host checks use literal logical-line fixtures and the accepted unchanged font as
 
 Physical VGA image quality, UART cable/USB adapter/PuTTY, GPIO jumper, SW/LED/HEX/sensors/ADC, real-time quotas, stack high-water and vendor timing remain NOT_RUN. S4-B owner review was accepted. Stop for S5 closure review; C4 remains paused and no push is authorized.
 
+### 10.5 Final software architecture
+
+This map describes the final SYSFW-01 implementation at the S5 checkpoint. Paths below are a relevant subset of the actual tree, not a proposal. The application orchestrates production driver APIs through health services; `joystick_policy.c` is a pure policy model rather than an MMIO driver. S4-A extended `hex_display.c/.h` with side-effect-free, masked RAW_LOW/RAW_HIGH getters; the driver layer is not uniformly untouched.
+
+#### Code structure
+
+```text
+firmware/
+├── apps/
+│   └── soc_health_main.c         # Entry point; cooperative loop and callback wiring
+├── include/
+│   ├── soc_health.h              # Stable IDs, states/evidence, core/snapshot/lease ABI
+│   ├── soc_health_providers.h    # Strong-provider state, dispatcher and callback interfaces
+│   ├── soc_health_board_io.h     # GPIO/SW/LED/HEX provider context and interface
+│   ├── soc_health_observers.h    # Final formatter/observer cursors and VGA hooks
+│   └── hex_display.h             # HEX API; S4-A RAW_LOW/RAW_HIGH getters
+├── services/
+│   ├── soc_health.c              # Live records/history, copied snapshots and FNV-1a
+│   ├── soc_health_probes.c       # S2 placeholder dispatch; compatibility/unit tests
+│   ├── soc_health_providers.c    # Strong-provider FSMs; sole VGA operation owner
+│   ├── soc_health_board_io.c     # GPIO loop, shared SW generation, LED/HEX checks
+│   ├── soc_health_observers.c    # Final shared text, VGA preparation and UART1 TX
+│   └── soc_health_render.c       # S2 non-MMIO observer skeleton; compatibility/tests
+└── drivers/
+    ├── timer.c                   # Timer MMIO commands/status
+    ├── uart.c                    # UART0/1 MMIO and bounded byte APIs
+    ├── gsensor.c                 # Coherent CAPTURE/read/RELEASE API
+    ├── adc.c                     # ADC v2 identity, HOLD, errors and calibration
+    ├── joystick_policy.c         # Pure raw-frame/calibration policy; no MMIO
+    ├── gpio.c                    # GPIO direction/latch/input MMIO
+    ├── sw.c                      # Dedicated synchronized SW register API
+    ├── led.c                     # Dedicated LED latch/readback API
+    ├── hex_display.c             # HEX shadow/packing and S4-A raw getters
+    ├── vram.c                    # Framebuffer writes and VGA status/operations
+    └── vga_text.c                # Existing 8x8 font and packed framebuffer text
+```
+
+`soc_health_observers.c` and `soc_health_observers.h` are the final S4-B hardware observer path. Although the application's variable is named `render`, its type is `soc_health_observers_t`. The app installs `soc_health_observers_vga_prepare` and `soc_health_observers_vga_release` into the provider context and calls `soc_health_observers_uart_service` each loop. `soc_health_render.c` remains the S2 bounded, non-MMIO cursor skeleton, and `soc_health_probes.c` remains S2 pending-only dispatch: neither is the application's final hardware path. Their compatibility/unit-test APIs remain available; the health build lists them, while unused functions can be discarded by link-time section GC.
+
+#### Data and control flow
+
+```text
++------------------------------------------------------------------------------+
+| soc_health_main.c -- one cooperative software epoch per loop                 |
+| Epoch/system record -> one bounded provider dispatch -> UART observer tick   |
+| Then check publication cadence; no full-provider sweep in one turn.          |
++------------------------------------------------------------------------------+
+                                       |
+                                       v
++------------------------------------------------------------------------------+
+| Provider layer: soc_health_providers.c + soc_health_board_io.c               |
+| Timer: COUNT/READY/ACK/restart    GPIO: settled 0,1,1,0 pin loop             |
+| UART: UART0 TX -> UART1 RX       SW: captured synchronized 10-bit generation |
+| GSEN: CAPTURE/read/RELEASE + seq LED: same SW generation -> mirror/readback  |
+| ADC: coherent HOLD/seq/count    HEX: same SW -> decoder/raw readback         |
+| JOY: HW status vs pure FW policy; ADC may qualify JOY in its bounded step.   |
+| VGA: sole operation-owner FSM; invokes observers VGA prepare/release hooks.  |
+| Reports: fresh progress token/detail, failure, pending or deadline miss.     |
++------------------------------------------------------------------------------+
+                                       |
+                                       v
++------------------------------------------------------------------------------+
+| soc_health.c -- live core state (single cooperative owner)                   |
+| 12 stable IP records: state/evidence/HB/last_progress/misses/detail          |
+| Fresh progress -> current PASS; FAIL/deadline miss -> sticky_fail_mask.      |
+| Recovery changes current state; sticky failure history remains.              |
+| AES-GCM: EXCLUDED_PENDING_CLEANUP; never dispatched as a provider.           |
++------------------------------------------------------------------------------+
+                                       |
+                                       v
++------------------------------------------------------------------------------+
+| soc_health_publish_snapshot -- two static copied slots, no allocation        |
+| Copy logical fields; derive current PASS/WARN/FAIL/EXCLUDED masks here.      |
+| Compute deterministic 32-bit FNV-1a over explicit little-endian fields.      |
+| Slot reader bits = VGA | UART; any held lease prevents slot overwrite.       |
+| Publication due after 32 epochs since last success, only if app pair idle;   |
+| otherwise increment backlog; no free slot also increments core backlog.      |
++------------------------------------------------------------------------------+
+                                       |
+                                       v
++------------------------------------------------------------------------------+
+| soc_health_observers.c -- same const snapshot N -> one common formatter      |
+| soc_health_format_line: copied EP/SIG/masks/records; no live reads or MMIO.  |
+| Both observers retain N across turns; explicit cursors bound work.           |
++------------------------------------------------------------------------------+
+               | same frozen N                  | same frozen N
+               v                                v
++-------------------------------------+  +-------------------------------------+
+| VGA dashboard (observers.c)         |  | UART1 PC-TX observer (observers.c)  |
+| Called inside provider VGA FSM      |  | One byte/readiness attempt per turn |
+| 640x480; 8x8; 16px row pitch        |  | Same EP/SIG and logical lines       |
+| Bounded back-buffer clear/glyphs    |  | Append-only CRLF; banner/separator  |
+| Then owner: stale-event ACK ->      |  | Final-byte drain before release     |
+| fresh VSYNC -> SWAP -> fresh DONE   |  | Timeout releases UART lease only    |
+| No ABORT -> live VGA progress       |  | TX never qualifies UART heartbeat   |
+| VGA hook releases its own lease     |  | UART cursor clears on own release   |
++-------------------------------------+  +-------------------------------------+
+```
+
+The diagram separates mutable health records from the copied view. Current masks are derived in `soc_health_publish_snapshot`, not continuously stored in the live core. UNKNOWN contributes to none of the four current masks. The signature is an explicit-field, deterministic consistency identifier, not a cryptographic hash or proof of physical output; mutable reader bits and structure padding are outside its input.
+
+VGA preparation is a callback of the existing `soc_health_vga_service` owner, not a second operation controller. It clears at most eight words or renders at most four glyphs per prepare visit, then returns to the dispatcher. The owner alone sequences fresh VSYNC/SWAP/associated DONE and rejects ABORT. The UART observer advances separately after the selected provider dispatch. Neither output recomputes health state; both use the same `soc_health_format_line` and snapshot EP/SIG. Automated UART evidence remains the 12-byte UART0 TX -> UART1 RX token loop; UART1 TX is observer-only.
+
+#### One publication cycle
+
+1. `soc_health_epoch_begin` increments the software epoch and reports system-loop progress. This records software execution, not independent CPU hardware qualification.
+2. `soc_health_providers_service` selects one bounded dispatch: five initial setup visits (UART, Timer, GSEN, ADC, VGA), then round robin over provider IDs 1-10. A dispatch advances a transaction rather than completing every provider; an eligible ADC capture may also qualify JOY from that exact HOLD.
+3. Progress/failure/pending/deadline reports update live records; the core API also supports WARN. Fresh progress tokens qualify HB; pending work does not invent progress. Failures set sticky history, retained after recovery. SW keeps one captured generation until LED and HEX retire it.
+4. After the provider dispatch, UART1 advances its existing observer cursor by at most one byte. When at least 32 epochs have elapsed since the last successful publication, the app publishes only if both current observers are idle; otherwise it increments backlog. This is a software cadence, not a measured wall-clock rate.
+5. The core chooses a slot with no readers, copies logical records/metadata, derives current masks, computes explicit-field FNV-1a and sets both reader lease bits. If no slot is free, it records backlog rather than overwriting. `soc_health_observers_begin` gives both cursors the same const N.
+6. On later VGA dispatches, the sole owner incrementally prepares N's complete back buffer, acknowledges stale events, waits for fresh VSYNC, issues SWAP, and requires fresh associated DONE with no ABORT. Completion qualifies live VGA progress and releases VGA's lease; failure/timeout releases that lease without successful completion.
+7. Interleaved UART observer visits emit the same logical lines with banner, CRLF and separator. The cursor waits for the final byte to drain before releasing UART's lease; a timeout releases only that lease and records a live observer miss. Either observer can finish first.
+8. The slot is reusable only after both reader bits are cleared; observer pointers are cleared on release. Provider progress and observer metadata updates while N is observed change live state and appear only in a later N+1. N's VGA record therefore predates its own dashboard SWAP completion.
+
+**Evidence boundary:** Host/unit verified; provider/driver/RTL verified; RV32I image built. `soc_health_main` CPU E2E, physical board and Quartus/TimeQuest remain NOT_RUN; AES remains excluded. See §11.1 for the S5 readiness matrix and remaining gates. This walkthrough adds no new verification or C4 authorization.
+
+
 ## 11. Acceptance and future falsification map
 
 Future tests shall connect contract → independently derived oracle → stimulus/checker → unique source/run → raw evidence/verdict. All were NOT_RUN at S1 freeze. S2 now has a passing host suite with an independent serialized-signature oracle, per-ID masks, padding/copy/lease tests, token/deadline tests and bounded scheduler/observer tests; six isolated defect mutations are rejected. Compile, target and guard failure fixtures propagate nonzero to the parent and consistent FAIL reports. The actual RV32I skeleton build passes; existing display_smoke before/after memory images are identical. Those hardware/board/review scopes were NOT_RUN in S2. S3 provider host tests and actual peripheral RTL integration now pass, including isolated defect rejection and relevant prior regressions. Physical peripheral execution, board wiring/display, real-time quotas and stack high-water remain NOT_RUN. S3 owner review was accepted before S4-A; S4-A host/RTL checks and targeted rejection are verified under §10.3, S4-A owner review was accepted; S4-B owner review was accepted; S5 closure owner review is required. Run `RUN_ROOT=<external-directory> scripts/wsl/soc_health_host_test.sh`; each run must use fresh output storage. Raw evidence is retained outside the checkout and reported through the stage result, not embedded in this contract.

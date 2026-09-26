@@ -26,6 +26,47 @@ Benchmark and Dhrystone application sources are intentionally excluded from this
 
 For each peripheral, keep the register map, C header/driver, smoke test, and RTL aligned with the approved specification. Firmware must not invent behavior absent from the specification.
 
+## Implementation map / code structure
+
+The relevant final SYSFW-01 files are shown below. `soc_health_main.c` wires one cooperative provider dispatch per epoch, the board callback and the final observers; each visit advances bounded work. Services orchestrate driver APIs and update the health core rather than duplicating a whole peripheral driver.
+
+```text
+firmware/
+├── apps/
+│   └── soc_health_main.c         # Entry point; cooperative loop and callback wiring
+├── include/
+│   ├── soc_health.h              # Stable IDs, states/evidence, core/snapshot/lease ABI
+│   ├── soc_health_providers.h    # Strong-provider state, dispatcher and callback interfaces
+│   ├── soc_health_board_io.h     # GPIO/SW/LED/HEX provider context and interface
+│   ├── soc_health_observers.h    # Final formatter/observer cursors and VGA hooks
+│   └── hex_display.h             # HEX API; S4-A RAW_LOW/RAW_HIGH getters
+├── services/
+│   ├── soc_health.c              # Live records/history, copied snapshots and FNV-1a
+│   ├── soc_health_probes.c       # S2 placeholder dispatch; compatibility/unit tests
+│   ├── soc_health_providers.c    # Strong-provider FSMs; sole VGA operation owner
+│   ├── soc_health_board_io.c     # GPIO loop, shared SW generation, LED/HEX checks
+│   ├── soc_health_observers.c    # Final shared text, VGA preparation and UART1 TX
+│   └── soc_health_render.c       # S2 non-MMIO observer skeleton; compatibility/tests
+└── drivers/
+    ├── timer.c                   # Timer MMIO commands/status
+    ├── uart.c                    # UART0/1 MMIO and bounded byte APIs
+    ├── gsensor.c                 # Coherent CAPTURE/read/RELEASE API
+    ├── adc.c                     # ADC v2 identity, HOLD, errors and calibration
+    ├── joystick_policy.c         # Pure raw-frame/calibration policy; no MMIO
+    ├── gpio.c                    # GPIO direction/latch/input MMIO
+    ├── sw.c                      # Dedicated synchronized SW register API
+    ├── led.c                     # Dedicated LED latch/readback API
+    ├── hex_display.c             # HEX shadow/packing and S4-A raw getters
+    ├── vram.c                    # Framebuffer writes and VGA status/operations
+    └── vga_text.c                # Existing 8x8 font and packed framebuffer text
+```
+
+`soc_health_observers.c/.h` is the final VGA/UART1 observer implementation. The app's `render` variable uses `soc_health_observers_t`; `soc_health_render.c` and `soc_health_probes.c` retain only S2 non-MMIO observer/pending-dispatch compatibility and unit-test paths. `joystick_policy.c` is a pure model. S4-A intentionally added side-effect-free RAW_LOW/RAW_HIGH getters to `hex_display.c/.h`.
+
+Runtime flow is **one bounded provider dispatch -> live records/sticky history -> copied two-slot snapshot -> common formatter -> VGA and UART1**. Both observers use the same frozen N and EP/SIG; updates during observation appear in a later N+1. The VGA preparation/release callbacks run inside the existing sole operation-owner FSM. UART1 TX advances separately and remains observer-only; automated UART heartbeat is the UART0 TX -> UART1 RX token loop. AES is EXCLUDED_PENDING_CLEANUP and has no active provider. See [Final software architecture](../spec/22_soc_health_firmware.md#105-final-software-architecture) for the ASCII diagram and publication walkthrough.
+
+Host/unit and provider/driver/RTL are verified and the RV32I image is built; `soc_health_main` CPU E2E, physical board and Quartus/TimeQuest remain NOT_RUN. These are the existing [S5 closure boundaries](../spec/22_soc_health_firmware.md#111-s5-verification-closure-and-c4-handoff-boundary), not new test execution or permission to resume C4.
+
 ## SYSFW-01 S5 closure and handoff
 
 Production C/drivers/RTL/build policy remain unchanged from accepted S4-B. Final host/provider-driver-RTL and narrow inherited regressions pass; accepted isolated defect/failure guards still reject counterexamples. Fresh RV32I image uses IMEM **13,492 / 16,384 bytes (82.3486%)**, headroom **2,892**, delta versus S4-B **0**; DMEM initialized **1,048** + BSS **1,556** = **2,604 / 32,768**, headroom **30,164 bytes**. No undefined/library/helper dependencies. Observer service retains its scoped `-Os`; unrelated `display_smoke` uses unchanged O2 and entry-identical memory images. **16 KiB baseline retained; capacity pressure observed: YES; closure fit: YES.**
