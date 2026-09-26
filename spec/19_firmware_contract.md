@@ -1,5 +1,9 @@
 # SoC Firmware Contract
 
+> **Issue #7 S1 application-role freeze:** `firmware/apps/final_main.c` is **HISTORICAL RC-CAR SYSTEM DEMO FIRMWARE**, retained for provenance/demo reproduction and dependent on the external STM32-based RC-car system. It is not the canonical standalone SoC integration-test firmware and, after Issue #7 completion/review, is not the basis for Issue #6 C4-A/C4-B. Owner-provided [FPGA SoC + STM32 RC-car demo](https://www.youtube.com/shorts/XYbi3uSHmUU).
+>
+> The future canonical app is `firmware/apps/soc_health_main.c`; its approved contract and temporary baseline-cleanup spec/FW reconciliation ledger are [spec 22](22_soc_health_firmware.md). S1 is documentation only: app/services/providers/getters remain unimplemented and C4 remains paused. The monitor reports `AES_GCM = EXCLUDED_PENDING_CLEANUP`, contributes AES to neither PASS nor FAIL, and executes no AES operations. This application exclusion does not alter the existing AES hardware/driver contract. Existing per-IP rules and historical sections remain intact; broad reconciliation is deferred to the ledger's later coordinated pass.
+
 > **P09 closure note (2026-09-17):** Section 12 defines the active coherent G-sensor firmware contract (`gsensor_read_sample()`) and supersedes the historical raw telemetry description. RV32I builds and host mock-MMIO tests pass; `FW-008` is `IN_PROGRESS` for residual negative/race coverage.
 
 > **P07 closure note (2026-09-16):** Section 38 is the current UART/LoRa

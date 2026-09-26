@@ -39,6 +39,7 @@ spec/
 ├─ 19_firmware_contract.md       # current + approved target software contract
 ├─ 20_board_io_architecture.md   # target cross-cutting architecture
 ├─ 21_cpu_core.md                # detailed supplemental baseline CPU microarchitecture
+├─ 22_soc_health_firmware.md     # future health contract + spec/FW reconciliation ledger
 ├─ timing_constraints.md         # canonical cross-cutting STA policy
 ├─ baseline_cleanup.md           # active consolidated cleanup tracker
 └─ kor/
@@ -64,6 +65,7 @@ spec/
    ├─ 19_firmware_contract.ko.md
    ├─ 20_board_io_architecture.ko.md
    ├─ 21_cpu_core.ko.md
+   ├─ 22_soc_health_firmware.ko.md
    ├─ timing_constraints.ko.md
    └─ baseline_cleanup.ko.md
 ```
@@ -87,6 +89,8 @@ Most documents through `16_hex_display.md` reconstruct and document the currentl
 `19_firmware_contract.md` intentionally contains both layers: current firmware rules that apply to the active baseline and approved target firmware rules that become active only with the corresponding cleanup implementation/evidence.
 
 `21_cpu_core.md` reconstructs the active CPU microarchitecture in detail and records CPU-local cleanup findings plus approved spec-owner policy decisions. Its GPR-reset, machine-identification, FENCE/FENCE.I, EBREAK, and machine-counter cleanup policies are now resolved; target behavior shall still not be cited as active RTL behavior until implementation and verification evidence exists.
+
+[22_soc_health_firmware.md](22_soc_health_firmware.md) and its [Korean companion](kor/22_soc_health_firmware.ko.md) freeze the future standalone `soc_health_main` contract and the temporary baseline-cleanup spec/FW reconciliation ledger. S1 is documentation only, not implemented firmware or runtime/board acceptance. `final_main` remains a historical RC-car system demo; owning IP specifications and `baseline_cleanup.md` retain their authority.
 
 `baseline_cleanup.md` does not supersede these contracts. It coordinates implementation order, status, severity, dependencies, verification, FPGA acceptance, and evidence. If a tracker item requires behavior different from a canonical specification, the specification shall be updated first.
 
@@ -144,6 +148,7 @@ led.md                   -> spec/18_led.md
 firmware_contract.md     -> spec/19_firmware_contract.md
 board_io_architecture.md -> spec/20_board_io_architecture.md
 cpu_core.md              -> spec/21_cpu_core.md
+soc_health_firmware.md   -> spec/22_soc_health_firmware.md
 baseline_cleanup.md      -> spec/baseline_cleanup.md
 
 soc_architecture.ko.md      -> spec/kor/00_soc_architecture.ko.md
@@ -162,6 +167,7 @@ led.ko.md                   -> spec/kor/18_led.ko.md
 firmware_contract.ko.md     -> spec/kor/19_firmware_contract.ko.md
 board_io_architecture.ko.md -> spec/kor/20_board_io_architecture.ko.md
 cpu_core.ko.md              -> spec/kor/21_cpu_core.ko.md
+soc_health_firmware.ko.md   -> spec/kor/22_soc_health_firmware.ko.md
 baseline_cleanup.ko.md      -> spec/kor/baseline_cleanup.ko.md
 ```
 

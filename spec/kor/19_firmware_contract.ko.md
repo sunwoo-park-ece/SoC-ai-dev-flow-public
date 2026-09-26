@@ -1,5 +1,9 @@
 # SoC Firmware Contract — 한국어 Companion
 
+> **Issue #7 S1 애플리케이션 역할 동결:** `firmware/apps/final_main.c`는 **HISTORICAL RC-CAR SYSTEM DEMO FIRMWARE**다. 출처/데모 재현을 위해 유지하고 외부 STM32 기반 RC-car 시스템에 의존한다. 정식 독립 SoC 통합 시험 펌웨어가 아니며 Issue #7 완료/리뷰 이후 Issue #6 C4-A/C4-B의 기반으로 사용하지 않는다. 소유자 제공 [FPGA SoC + STM32 RC-car demo](https://www.youtube.com/shorts/XYbi3uSHmUU).
+>
+> 미래 정식 app은 `firmware/apps/soc_health_main.c`이며 승인 계약과 임시 baseline-cleanup spec/FW 정합성 ledger는 [spec 22](22_soc_health_firmware.ko.md)에 있다. S1은 문서 단계로 app/service/provider/getter는 미구현이며 C4는 중단 상태다. Monitor는 `AES_GCM = EXCLUDED_PENDING_CLEANUP`을 보고하고 AES를 PASS/FAIL 어느 쪽에도 포함하지 않으며 AES operation을 실행하지 않는다. 이 application 제외는 기존 AES hardware/driver 계약을 바꾸지 않는다. 기존 IP별 규칙과 과거 section을 유지하고 광범위 조정은 ledger를 이용한 이후 통합 작업으로 연기한다.
+
 > **P09 종결 주석(2026-09-17):** §12가 현행 코히어런트 G-sensor 펌웨어 계약(`gsensor_read_sample()`)을 정의하며 과거 원시 텔레메트리 설명을 대체한다. RV32I 빌드와 호스트 mock-MMIO 테스트가 통과했다; `FW-008`은 잔여 negative/경합 커버리지를 위해 `IN_PROGRESS`를 유지한다.
 
 > **P07 종결 주석(2026-09-16):** §38이 현행 UART/LoRa firmware 계약이며

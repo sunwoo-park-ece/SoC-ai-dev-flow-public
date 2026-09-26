@@ -35,6 +35,9 @@ Key baseline subsystems:
 Physical FPGA board demonstrations, execution captures, and development logs are published on the project owner's YouTube channel:
 
 - **YouTube — FPGA / SoC / Embedded Project Demos:** https://www.youtube.com/channel/UC9DlYapKa23KqJkNadjSObQ
+- **Historical FPGA SoC + STM32 RC-car demo:** [board/system recording](https://www.youtube.com/shorts/XYbi3uSHmUU). `firmware/apps/final_main.c` is **HISTORICAL RC-CAR SYSTEM DEMO FIRMWARE**, retained for provenance/demo reproduction and dependent on that external system; it is not the canonical standalone SoC integration-test firmware.
+
+The future standalone `soc_health_main` application is defined by the [SoC health firmware contract and reconciliation tracker](spec/22_soc_health_firmware.md). S1 freezes documentation only; implementation and runtime acceptance remain pending. After Issue #7 completion/review, it replaces the historical demo as the Issue #6 C4-A/C4-B firmware basis; C4 has not resumed. AES-GCM is excluded from its health qualification as `EXCLUDED_PENDING_CLEANUP`.
 
 Demonstration recordings and photographs serve as supporting visual evidence confirming hardware bring-up on the physical DE10-Lite FPGA board. Engineering claims and verification statuses are substantiated by formal in-tree evidence packages:
 - **P08B VGA Hardware Clear & W1C Status Integration:** Documented in [CS-009](docs/engineering/CS-009-p08b-vga-hwclear-w1c.md) with measured execution evidence in [P08B-VGA-EV-01](reports/evidence/vga-hwclear/summary.md).
