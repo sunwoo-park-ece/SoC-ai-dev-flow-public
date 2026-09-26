@@ -1,6 +1,6 @@
 # SoC Health Firmware Contract and Reconciliation Tracker
 
-> **Status:** S1 contract preserved; S2 health core/snapshot/scheduler skeleton implemented and locally host-tested/built for RV32I. Peripheral providers and hardware observers remain unimplemented; no board, timing, or Clean Baseline acceptance.
+> **Status:** S1/S2 contracts preserved; S3 Timer/UART/G-sensor/ADC/joystick/VGA providers implemented, locally host-tested, integrated with real peripheral RTL and built for RV32I. S4 board I/O and hardware dashboard observers remain unimplemented; no physical board, timing, or Clean Baseline acceptance.
 > **Language:** English is canonical; [Korean companion](kor/22_soc_health_firmware.ko.md) mirrors this contract.
 > **Roles:** Role A defines the standalone health firmware. Role B consolidates baseline-cleanup spec/FW reconciliation debt without replacing owning IP specifications.
 > **Source anchor:** `390db6da2dcc8bbfa1c93b444525b0ba1e852056`. Trace IDs: Issue #7 S0 result `5845036298`, S0 acceptance `5845199371`, S1 task `5845199693`; these are internal governance locators, not public runtime evidence.
@@ -13,7 +13,7 @@ Owner-provided demonstration: [FPGA SoC + STM32 RC-car demo](https://www.youtube
 
 The future canonical application is `firmware/apps/soc_health_main.c`. It shall run standalone without the external RC-car system, exercise production peripheral contracts, report progress and failures, and freeze one snapshot for VGA and PC UART observers. It remains a reusable system diagnostic rather than an ADC-only test.
 
-S1 changes documentation only. The application, services, providers, scheduler, and HEX raw getters do not exist as S1 deliverables. S2 now adds only the infrastructure described in §10.1. S2 results require owner review before S3; Issue #6 C4 remains paused. Owning IP specifications remain authoritative for registers, hardware behavior, and existing acceptance scope. Preserve all existing STOP gates; this document does not reopen P08B, add interrupts/PLIC, redesign ADC/peripheral RTL, change pins, or close global cleanup/STA/board requirements.
+S1 changes documentation only. The application, services, providers, scheduler, and HEX raw getters do not exist as S1 deliverables. S2 added §10.1 infrastructure; S3 adds only the strong/functional providers in §10.2. S3 results require owner review before S4; Issue #6 C4 remains paused. Owning IP specifications remain authoritative for registers, hardware behavior, and existing acceptance scope. Preserve all existing STOP gates; this document does not reopen P08B, add interrupts/PLIC, redesign ADC/peripheral RTL, change pins, or close global cleanup/STA/board requirements.
 
 ## 2. Health model and failure history
 
@@ -156,7 +156,7 @@ Record aborts before a helper clears stale status. Acknowledge events so later c
 
 ## 10. Implemented infrastructure and future stage gates
 
-The following paths now exist for S2 infrastructure and host verification:
+The following paths exist for the accepted S2 infrastructure and host verification:
 
 ```text
 firmware/apps/soc_health_main.c
@@ -169,7 +169,7 @@ verification/firmware/soc_health_mmio.h
 scripts/wsl/soc_health_host_test.sh
 ```
 
-The services layer is application service code, not a hardware driver. The minimal `scripts/firmware/build_fw.sh` change includes the three health services only for the new app; existing app flows are preserved. Builds require external RUN_ROOT; the supported command is `scripts/firmware/build_fw.sh soc_health_main` with that environment set. Preserve RV32I/ILP32 freestanding behavior, existing startup/trap, **16 KiB IMEM / 32 KiB DMEM**, and explicit paired memory-image identity. Memory capacity and startup/trap are unchanged. S2 builds the skeleton; peripheral acceptance remains deferred.
+The services layer is application service code, not a hardware driver. The minimal `scripts/firmware/build_fw.sh` change includes the core/probes/render/providers services only for the new app; existing app flows are preserved. Builds require external RUN_ROOT; the supported command is `scripts/firmware/build_fw.sh soc_health_main` with that environment set. Preserve RV32I/ILP32 freestanding behavior, existing startup/trap, **16 KiB IMEM / 32 KiB DMEM**, and explicit paired memory-image identity. Memory capacity and startup/trap are unchanged. S3 builds the strong-provider application; physical peripheral acceptance remains deferred.
 
 | Stage | Approved future boundary |
 |---|---|
@@ -178,13 +178,13 @@ The services layer is application service code, not a hardware driver. The minim
 | S4 BOARD I/O + OBSERVERS | GPIO0→1, SW, SW-mirrored LED, HEX dual mode/raw getters, VGA and PC UART shared-snapshot rendering. |
 | S5 CLOSURE | Host/unit tests, RV32I build/image-size check, relevant existing regressions, clean local checkpoint. |
 
-S1 implemented none of S2–S5. S2 infrastructure is now implemented; stop for owner review before S3. After S5, stop for review before Issue #6 C4-A/C4-B resumes. No push, vendor execution, baseline release, or global tracker closure is implicitly authorized.
+S1 implemented none of S2–S5. S2 infrastructure and S3 providers are implemented; stop for owner review before S4. After S5, stop for review before Issue #6 C4-A/C4-B resumes. No push, vendor execution, baseline release, or global tracker closure is implicitly authorized.
 
-### 10.1 S2 core ABI, ownership and deterministic signature
+### 10.1 Accepted S2 core ABI, ownership and deterministic signature
 
 Stable IDs are SYSTEM_SERVICE=0, TIMER=1, UART_LOOP=2, GPIO=3, GSENSOR=4, ADC=5, JOY_POLICY=6, VGA=7, SW=8, LED=9, HEX=10, AES_GCM=11. Mask bit `1u << id` is fixed. State and evidence enum order matches §2. Each record stores state, evidence, heartbeat_count, last_progress_epoch, miss_count and detail. Current masks are derived from copied records at publication; UNKNOWN contributes no bit. FAIL sets sticky history; recovery does not clear it. No runtime sticky-clear API exists.
 
-One cooperative owner advances a software epoch without Timer. Each turn visits one of ten round-robin pending providers (IDs 1–10) and at most two observer characters. SYSTEM_SERVICE progress means only that the software service turn ran. All peripheral placeholders stay UNKNOWN with `SOC_HEALTH_NOT_IMPLEMENTED` (0x4e4f5451, NOT QUALIFYING HARDWARE EVIDENCE). AES remains EXCLUDED_PENDING_CLEANUP with no provider/callback; all report attempts for AES are rejected. Production S2 code performs no MMIO.
+At the S2 checkpoint, one cooperative owner advances a software epoch without Timer. Each turn visits one of ten round-robin pending providers (IDs 1–10) and at most two observer characters. SYSTEM_SERVICE progress means only that the software service turn ran. S2 peripheral placeholders stay UNKNOWN with `SOC_HEALTH_NOT_IMPLEMENTED` (0x4e4f5451, NOT QUALIFYING HARDWARE EVIDENCE). AES remains EXCLUDED_PENDING_CLEANUP with no provider/callback; all report attempts for AES are rejected. Production S2 code performs no MMIO.
 
 Progress and deadline-miss tokens are deduplicated per IP/event stream. After the first event, a token must advance modulo 2^32 by a nonzero amount less than 2^31; replay/old completion cannot recover FAIL. PENDING updates detail only. An armed deadline uses unsigned epoch elapsed time, budget less than 2^31, and disarms after one expiry. These are bounded software-turn budgets, not physical time measurements; callers must service deadlines before an entire epoch wrap elapses. Terminal CPU/bus faults remain outside recovery guarantees.
 
@@ -201,9 +201,26 @@ Signature is 32-bit FNV-1a (seed 2166136261, prime 16777619), processing each ex
 
 The signature itself, struct padding, pointers, slot leases and live deduplication tokens are excluded. Equal logical fields give equal signatures; this checksum is neither collision-free nor hardware acceptance evidence.
 
+### 10.2 S3 strong providers and verification scope
+
+`firmware/include/soc_health_providers.h` and `firmware/services/soc_health_providers.c` add provider-local state; the generic S2 core is unchanged. `soc_health_main` now calls the real provider dispatcher. The S2 pending-dispatch API remains for its unit tests; the current application uses the strong dispatcher. Both use the stable ID order. Initial bounded visits configure UART, Timer, G-sensor, ADC and VGA in that order, then a ten-way round robin visits IDs 1–10. Every step is finite: UART sends at most one byte with one readiness poll and receives/drains at most four; ADC enable requests once using `adc_enable(0)` then polls acknowledgement across turns; VGA writes at most one deterministic back-bank word. JOY shares ADC acquisition. GPIO/SW/LED/HEX remain pending placeholders; AES is never dispatched. S2 cursors still perform no hardware output.
+
+Default provider budgets are 262144 software epochs; Timer compare is 50000 PCLK counts. These are initial bounded engineering parameters, not measured wall-clock quotas or board guarantees. A 12-byte single outstanding UART transaction fits the 16-byte RX FIFO under the owned-peer assumption; RX error still fails explicitly. No scheduler-count token qualifies hardware progress.
+
+| Provider | Bounded qualification / actual progress token | Failure/recovery |
+|---|---|---|
+| Timer | STOP/W1C/RELOAD, START known compare and baseline COUNT; observe advancement, fresh READY, W1C and confirmed clear; restart and observe new COUNT advancement. Token is completed-interval generation, incremented only at that qualification. | Frozen COUNT, absent READY, stuck ACK or restart failure fail/miss. Bounded stop/restart retries preserve sticky history. |
+| UART | Both divisors 434; exact `A5 5A / seq32 LE / ~seq32 LE / C3 3C`. Concurrent bounded TX/RX validates each expected byte; only all 12 bytes with all TX issued qualify the transaction seq. | Bad/stale bytes, RX error or deadline fail. Bounded drain to an observed empty FIFO, reset partial state, then increment next transaction seq; old partial data cannot complete a new token. UART1 TX/UART0 RX/AUX are unused. |
+| G-sensor | Production `gsensor_read_sample()` CAPTURE/read/RELEASE and fresh actual sample.seq; static XYZ is allowed. | NO_NEW/BUSY/repeated/stale seq remain pending until deadline. Check expiry before late qualifying recovery so misses/sticky history survive; invalid result fails. |
+| ADC | Canonical `adc_init`, retained calibration/count/error baseline, ENABLE request and acknowledgement; production CAPTURE, CH1/2 valid, fresh HOLD seq, supporting FRAME_COUNT delta in (0, 2^31), errors checked before and after CAPTURE. Token is HOLD frame.seq, never FRAME_COUNT. | Identity failure remains latched until explicit reinit. Enable/NO_NEW/stale/frozen-count deadlines fail; invalid mask or sticky errors fail. No provider clears ADC errors or uses compatibility joystick wrappers. Count jumps >1 are accepted. |
+| JOY | Retained exact eligible ADC HOLD, current calibration readback, independent `joystick_policy_eval` versus all six hardware bits before another CAPTURE. Token is the compared HOLD seq. | Mismatch records expected/actual and fails. Same-HOLD calibration changes are rechecked but cannot create duplicate progress or recover an already-qualified seq; fresh eligible generation can recover while sticky stays. Invalid/error ADC frames are ineligible. |
+| VGA | Sole operation owner: READY/idle, one back-bank word, acknowledge stale VSYNC/DONE, fresh VSYNC, issue SWAP (no CLEAR), fresh associated DONE/no BUSY/no ABORT. Token is completed SWAP generation. | Record ABORT before any helper W1C, readiness loss or deadline fails. Recover via bounded READY/idle/event preparation; no dashboard, monolithic frame helper or second MMIO owner. Terminal bus/CPU faults remain outside recovery. |
+
+Run `RUN_ROOT=<fresh-external-directory> scripts/wsl/soc_health_provider_test.sh` for the real providers and production drivers against independent register/transaction inputs. Run `RUN_ROOT=<fresh-external-directory> scripts/wsl/soc_health_provider_rtl_test.sh` for the same C code against production Timer/UART/G-sensor/ADC+JOY/VGA RTL. The RTL fixture drives APB/AHB accesses, simulated UART0-to-UART1 serial continuity, a static digital sensor peer and ADC PCLK publication inputs; portable PLL/RAM models remain simulation abstractions. It does not execute the RISC-V CPU or replace the separately rerun P09 CPU/P11 acquisition+CDC regressions. Neither host nor simulated UART continuity is physical jumper/board acceptance. Guards retain raw target logs and reject missing required asserted cases/source drift; isolated faults and failure-exit fixtures verify rejection and nonzero parent propagation.
+
 ## 11. Acceptance and future falsification map
 
-Future tests shall connect contract → independently derived oracle → stimulus/checker → unique source/run → raw evidence/verdict. All were NOT_RUN at S1 freeze. S2 now has a passing host suite with an independent serialized-signature oracle, per-ID masks, padding/copy/lease tests, token/deadline tests and bounded scheduler/observer tests; six isolated defect mutations are rejected. Compile, target and guard failure fixtures propagate nonzero to the parent and consistent FAIL reports. The actual RV32I skeleton build passes; existing display_smoke before/after memory images are identical. RTL regressions, actual peripheral execution, physical board tests and independent owner review remain NOT_RUN in S2. Run `RUN_ROOT=<external-directory> scripts/wsl/soc_health_host_test.sh`; each run must use fresh output storage. Raw evidence is retained outside the checkout and reported through the stage result, not embedded in this contract.
+Future tests shall connect contract → independently derived oracle → stimulus/checker → unique source/run → raw evidence/verdict. All were NOT_RUN at S1 freeze. S2 now has a passing host suite with an independent serialized-signature oracle, per-ID masks, padding/copy/lease tests, token/deadline tests and bounded scheduler/observer tests; six isolated defect mutations are rejected. Compile, target and guard failure fixtures propagate nonzero to the parent and consistent FAIL reports. The actual RV32I skeleton build passes; existing display_smoke before/after memory images are identical. Those hardware/board/review scopes were NOT_RUN in S2. S3 provider host tests and actual peripheral RTL integration now pass, including isolated defect rejection and relevant prior regressions. Physical peripheral execution, board wiring/display, real-time quotas, stack high-water and independent S3 owner review remain NOT_RUN. Run `RUN_ROOT=<external-directory> scripts/wsl/soc_health_host_test.sh`; each run must use fresh output storage. Raw evidence is retained outside the checkout and reported through the stage result, not embedded in this contract.
 
 | Criterion | Oracle / targeted defect that must be rejected |
 |---|---|
@@ -260,3 +277,7 @@ Later IP additions shall specify production API, evidence strength, bounded fail
 ### 12.3 S2 reconciliation scope
 
 No new spec/FW mismatch was discovered in S2 infrastructure work. The S0/S1 ledger above is retained without closing peripheral or cleanup debt; S2 implements only §10.1 and does not promote any hardware provider to runtime verified.
+
+### 12.4 S3 reconciliation scope
+
+No new owning spec/FW mismatch was discovered in S3. Existing provider integration uses accepted APIs without changing peripheral RTL/drivers, ADC ABI or the prior cleanup ledger.

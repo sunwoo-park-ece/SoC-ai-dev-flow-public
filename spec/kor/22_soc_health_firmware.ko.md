@@ -1,6 +1,6 @@
 # SoC Health Firmware 계약 및 정합성 트래커
 
-> **상태:** S1 계약 보존; S2 health core/snapshot/scheduler skeleton 구현 및 로컬 host 시험/RV32I build 완료. Peripheral provider와 hardware observer는 미구현이며 board, timing 또는 Clean Baseline 합격 근거가 아니다.
+> **상태:** S1/S2 계약 보존; S3 Timer/UART/G-sensor/ADC/joystick/VGA provider 구현, 로컬 host 시험, 실제 peripheral RTL 통합 및 RV32I build 완료. S4 board I/O와 hardware dashboard observer는 미구현이며 실제 board, timing 또는 Clean Baseline 합격 근거가 아니다.
 > **언어:** [영어 문서](../22_soc_health_firmware.md)가 정본이며 이 한국어 companion은 같은 계약을 반영한다.
 > **역할:** Role A는 독립 health firmware를 정의한다. Role B는 개별 IP 명세를 대체하지 않고 baseline-cleanup spec/FW 정합성 부채를 모은다.
 > **소스 기준:** `390db6da2dcc8bbfa1c93b444525b0ba1e852056`. Trace ID: Issue #7 S0 결과 `5845036298`, S0 승인 `5845199371`, S1 명령 `5845199693`. 내부 governance locator이며 공개 runtime evidence가 아니다.
@@ -13,7 +13,7 @@
 
 미래 정식 애플리케이션은 `firmware/apps/soc_health_main.c`다. 외부 RC-car 시스템 없이 독립 실행하며 production peripheral 계약을 사용하고, 진행과 실패를 보고하며 VGA와 PC UART 관찰자에 전달할 하나의 snapshot을 동결한다. ADC 전용 시험이 아닌 재사용 가능한 시스템 진단 자산이다.
 
-S1은 문서만 변경한다. 애플리케이션, service, provider, scheduler 및 HEX raw getter는 S1 구현 산출물이 아니다. S2는 §10.1의 기반 구조만 추가한다. S3 이전 S2 결과의 소유자 리뷰가 필요하며 Issue #6 C4는 중단 상태를 유지한다. 레지스터, hardware 동작 및 기존 합격 범위의 권위는 owning IP spec에 있다. 기존 STOP gate를 보존한다. 이 문서는 P08B 재개, IRQ/PLIC 추가, ADC/peripheral RTL 재설계, pin 변경 또는 전역 cleanup/STA/board 종결을 승인하지 않는다.
+S1은 문서만 변경한다. 애플리케이션, service, provider, scheduler 및 HEX raw getter는 S1 구현 산출물이 아니다. S2는 §10.1 기반 구조를 추가했고 S3는 §10.2 strong/functional provider만 추가한다. S4 이전 S3 결과의 소유자 리뷰가 필요하며 Issue #6 C4는 중단 상태를 유지한다. 레지스터, hardware 동작 및 기존 합격 범위의 권위는 owning IP spec에 있다. 기존 STOP gate를 보존한다. 이 문서는 P08B 재개, IRQ/PLIC 추가, ADC/peripheral RTL 재설계, pin 변경 또는 전역 cleanup/STA/board 종결을 승인하지 않는다.
 
 ## 2. Health 모델 및 실패 이력
 
@@ -169,7 +169,7 @@ verification/firmware/soc_health_mmio.h
 scripts/wsl/soc_health_host_test.sh
 ```
 
-Services layer는 hardware driver가 아닌 application service다. 최소 `scripts/firmware/build_fw.sh` 수정으로 기존 app flow를 유지하면서 새 app에만 세 health service를 포함한다. Build에는 외부 RUN_ROOT가 필요하며 해당 환경을 설정한 지원 명령은 `scripts/firmware/build_fw.sh soc_health_main`이다. RV32I/ILP32 freestanding 동작, 기존 startup/trap, **16 KiB IMEM / 32 KiB DMEM** 및 명시적인 두 memory image identity를 보존한다. Memory 용량 및 startup/trap은 변경하지 않았다. S2는 skeleton을 build하며 peripheral 합격 판정은 유보한다.
+Services layer는 hardware driver가 아닌 application service다. 최소 `scripts/firmware/build_fw.sh` 수정으로 기존 app flow를 유지하면서 새 app에만 core/probes/render/providers service를 포함한다. Build에는 외부 RUN_ROOT가 필요하며 해당 환경을 설정한 지원 명령은 `scripts/firmware/build_fw.sh soc_health_main`이다. RV32I/ILP32 freestanding 동작, 기존 startup/trap, **16 KiB IMEM / 32 KiB DMEM** 및 명시적인 두 memory image identity를 보존한다. Memory 용량 및 startup/trap은 변경하지 않았다. S3는 strong-provider app을 build하며 실제 peripheral 합격 판정은 유보한다.
 
 | Stage | 승인된 미래 경계 |
 |---|---|
@@ -178,13 +178,13 @@ Services layer는 hardware driver가 아닌 application service다. 최소 `scri
 | S4 BOARD I/O + OBSERVERS | GPIO0→1, SW, SW-mirrored LED, HEX dual mode/raw getter, VGA와 PC UART 공통 snapshot rendering. |
 | S5 CLOSURE | Host/unit test, RV32I build/image-size check, 관련 기존 regression, clean local checkpoint. |
 
-S1에서는 S2–S5를 구현하지 않았다. 현재 S2 기반 구조를 구현했으며 S3 전 소유자 리뷰를 위해 중단한다. S5 이후에도 Issue #6 C4-A/C4-B 재개 전에 리뷰를 위해 중단한다. Push/vendor 실행/baseline release/global tracker closure를 암묵적으로 승인하지 않는다.
+S1에서는 S2–S5를 구현하지 않았다. S2 기반 구조 및 S3 provider를 구현했으며 S4 전 소유자 리뷰를 위해 중단한다. S5 이후에도 Issue #6 C4-A/C4-B 재개 전에 리뷰를 위해 중단한다. Push/vendor 실행/baseline release/global tracker closure를 암묵적으로 승인하지 않는다.
 
-### 10.1 S2 core ABI, ownership 및 결정적 signature
+### 10.1 승인된 S2 core ABI, ownership 및 결정적 signature
 
 Stable ID는 SYSTEM_SERVICE=0, TIMER=1, UART_LOOP=2, GPIO=3, GSENSOR=4, ADC=5, JOY_POLICY=6, VGA=7, SW=8, LED=9, HEX=10, AES_GCM=11이다. Mask bit `1u << id`는 고정한다. State/evidence enum 순서는 §2와 같다. Record는 state, evidence, heartbeat_count, last_progress_epoch, miss_count, detail을 보관한다. 현재 mask는 publication 시 복사한 record에서 산출하며 UNKNOWN은 bit가 없다. FAIL은 sticky 이력을 설정하고 복구해도 지우지 않는다. Runtime sticky-clear API는 없다.
 
-한 cooperative owner가 Timer 없이 software epoch를 증가시킨다. 각 turn은 열 개 pending provider(ID 1–10) 중 하나를 round-robin 방문하고 observer character를 최대 두 개 처리한다. SYSTEM_SERVICE progress는 software service turn 실행만 뜻한다. 모든 peripheral placeholder는 UNKNOWN 및 `SOC_HEALTH_NOT_IMPLEMENTED`(0x4e4f5451, NOT QUALIFYING HARDWARE EVIDENCE)을 유지한다. AES는 provider/callback 없이 EXCLUDED_PENDING_CLEANUP이며 AES report는 모두 거부한다. Production S2 code는 MMIO를 수행하지 않는다.
+S2 checkpoint에서 한 cooperative owner가 Timer 없이 software epoch를 증가시킨다. 각 turn은 열 개 pending provider(ID 1–10) 중 하나를 round-robin 방문하고 observer character를 최대 두 개 처리한다. SYSTEM_SERVICE progress는 software service turn 실행만 뜻한다. S2 peripheral placeholder는 UNKNOWN 및 `SOC_HEALTH_NOT_IMPLEMENTED`(0x4e4f5451, NOT QUALIFYING HARDWARE EVIDENCE)을 유지한다. AES는 provider/callback 없이 EXCLUDED_PENDING_CLEANUP이며 AES report는 모두 거부한다. Production S2 code는 MMIO를 수행하지 않는다.
 
 Progress/deadline-miss token은 IP/event stream별 중복을 제거한다. 첫 event 이후 token은 modulo 2^32에서 0이 아닌 2^31 미만의 차이로 전진해야 한다. Replay/old completion으로 FAIL을 복구할 수 없다. PENDING은 detail만 갱신한다. Armed deadline은 unsigned epoch 경과 및 2^31 미만 budget으로 검사하며 한 번 만료 후 disarm한다. 이는 실제 시간 측정이 아닌 유한 software-turn budget이다. Caller는 epoch 전체 wrap 전에 deadline을 service해야 한다. Terminal CPU/bus fault는 복구 보장 밖이다.
 
@@ -201,9 +201,26 @@ Signature는 32-bit FNV-1a(seed 2166136261, prime 16777619)이며 각 explicit u
 
 Signature 자체, struct padding, pointer, slot lease 및 live deduplication token은 제외한다. 같은 logical field는 같은 signature를 만들지만 checksum은 collision-free 보장이나 hardware 합격 근거가 아니다.
 
+### 10.2 S3 strong provider 및 검증 범위
+
+`firmware/include/soc_health_providers.h`와 `firmware/services/soc_health_providers.c`가 provider-local state를 추가한다. Generic S2 core는 변경하지 않았다. `soc_health_main`은 실제 provider dispatcher를 호출한다. S2 pending-dispatch API는 unit test용으로 유지하며 현재 app은 strong dispatcher를 사용한다. 두 API 모두 stable ID 순서를 따른다. 초기 bounded visit은 UART, Timer, G-sensor, ADC, VGA 순서이며 이후 열 개 ID 1–10을 round-robin 방문한다. 각 step은 유한하다. UART는 readiness poll 한 번으로 최대 한 byte 송신 및 최대 네 byte 수신/drain, ADC는 `adc_enable(0)`으로 한 번 요청 후 turn별 acknowledgement 확인, VGA는 deterministic back-bank word 한 개만 기록한다. JOY는 ADC acquisition을 공유한다. GPIO/SW/LED/HEX는 pending placeholder이고 AES는 dispatch하지 않는다. S2 cursor는 hardware output을 하지 않는다.
+
+기본 provider budget은 262144 software epoch, Timer compare는 50000 PCLK count다. 초기 유한 engineering parameter이며 측정된 wall-clock quota나 board 보장이 아니다. 소유한 peer 가정에서 하나의 outstanding 12-byte UART transaction은 16-byte RX FIFO에 들어가며 RX error는 명시적으로 FAIL한다. Scheduler count로 hardware progress를 만들지 않는다.
+
+| Provider | 유한 qualification / 실제 progress token | 실패/복구 |
+|---|---|---|
+| Timer | STOP/W1C/RELOAD, 알려진 compare START 및 baseline COUNT; 증가, 새 READY, W1C 및 clear 확인; 재시작 후 새 COUNT 증가 확인. 이 완료 시에만 interval generation token을 증가시킨다. | Frozen COUNT, READY 부재, ACK 고착 또는 restart 실패는 fail/miss. 유한 stop/restart 재시도는 sticky를 보존한다. |
+| UART | 두 divisor 434; 정확한 `A5 5A / seq32 LE / ~seq32 LE / C3 3C`. 유한 TX/RX가 각 expected byte를 검사하고 TX 전체 발행 및 12-byte 검증 완료 시 transaction seq를 인정한다. | Bad/stale byte, RX error 또는 deadline은 fail. Empty FIFO 관측까지 유한 drain, partial state 초기화 후 다음 seq를 증가시켜 이전 partial이 새 token을 완료하지 못한다. UART1 TX/UART0 RX/AUX는 사용하지 않는다. |
+| G-sensor | Production `gsensor_read_sample()` CAPTURE/read/RELEASE 및 새 실제 sample.seq. Static XYZ 허용. | NO_NEW/BUSY/repeated/stale seq는 deadline까지 pending. 늦은 적격 복구 전 만료 검사로 miss/sticky를 보존하며 invalid result는 fail. |
+| ADC | Canonical `adc_init`, 보관한 calibration/count/error baseline, ENABLE 요청/ack; production CAPTURE, CH1/2 valid, 새 HOLD seq, (0, 2^31) FRAME_COUNT delta, CAPTURE 전후 error 확인. Token은 FRAME_COUNT가 아닌 HOLD frame.seq다. | Identity 실패는 명시적 reinit까지 유지. Enable/NO_NEW/stale/frozen-count deadline, invalid mask 또는 sticky error는 fail. Provider는 ADC error를 clear하거나 compatibility joystick wrapper를 사용하지 않는다. Count jump >1 허용. |
+| JOY | 정확한 eligible ADC HOLD 보관, current calibration readback, 다음 CAPTURE 전 독립 `joystick_policy_eval`과 HW 여섯 bit 비교. Token은 비교한 HOLD seq다. | Mismatch의 expected/actual을 보존하고 fail. Same-HOLD calibration 변경은 재검사하되 중복 progress나 이미 인정한 seq의 복구를 만들지 않는다. 새 eligible generation은 sticky 보존하며 복구 가능. Invalid/error ADC frame은 ineligible이다. |
+| VGA | 단일 operation owner: READY/idle, back-bank word 하나, stale VSYNC/DONE acknowledgement, 새 VSYNC, SWAP 발행(CLEAR 없음), fresh associated DONE/BUSY 없음/ABORT 없음. Token은 완료된 SWAP generation이다. | Helper W1C 전 ABORT 보존, readiness 상실 또는 deadline은 fail. 유한 READY/idle/event 준비로 복구하며 dashboard/monolithic frame helper/두 번째 MMIO owner를 추가하지 않는다. Terminal bus/CPU fault는 복구 밖이다. |
+
+`RUN_ROOT=<fresh-external-directory> scripts/wsl/soc_health_provider_test.sh`는 실제 provider 및 production driver를 독립 register/transaction 입력으로 시험한다. `RUN_ROOT=<fresh-external-directory> scripts/wsl/soc_health_provider_rtl_test.sh`는 같은 C code를 production Timer/UART/G-sensor/ADC+JOY/VGA RTL과 연결한다. RTL fixture는 APB/AHB access, 모의 UART0→UART1 serial continuity, static digital sensor peer 및 ADC PCLK publication input을 구동하며 portable PLL/RAM model은 simulation abstraction이다. RISC-V CPU를 실행하지 않으며 별도 재실행한 P09 CPU/P11 acquisition+CDC regression을 대체하지 않는다. Host/모의 UART continuity는 실제 jumper/board 합격이 아니다. Guard는 raw target log를 보존하며 필수 asserted case 누락/source drift를 거부한다. 격리 결함 및 실패 exit fixture로 거부와 parent nonzero 전파를 검증한다.
+
 ## 11. 합격 및 미래 반증 map
 
-미래 시험은 contract → 독립 oracle → stimulus/checker → 고유 source/run → raw evidence/verdict를 연결한다. S1 동결 시 모두 NOT_RUN이었다. S2는 독립 serialized-signature oracle, IP별 mask, padding/copy/lease, token/deadline 및 bounded scheduler/observer 시험을 포함한 host suite가 통과했고 격리된 여섯 결함 mutation을 거부했다. Compile/target/guard 실패 fixture는 parent nonzero 및 일관된 FAIL 보고서로 전파한다. 실제 RV32I skeleton build가 통과했고 기존 display_smoke의 전후 memory image는 동일하다. RTL regression, 실제 peripheral 실행, 물리 board test 및 독립 소유자 리뷰는 S2에서 NOT_RUN이다. `RUN_ROOT=<external-directory> scripts/wsl/soc_health_host_test.sh`를 실행하며 매번 새 output storage를 사용한다. Raw evidence는 checkout 밖에 보존하고 stage 결과로 보고하며 계약에 내장하지 않는다.
+미래 시험은 contract → 독립 oracle → stimulus/checker → 고유 source/run → raw evidence/verdict를 연결한다. S1 동결 시 모두 NOT_RUN이었다. S2는 독립 serialized-signature oracle, IP별 mask, padding/copy/lease, token/deadline 및 bounded scheduler/observer 시험을 포함한 host suite가 통과했고 격리된 여섯 결함 mutation을 거부했다. Compile/target/guard 실패 fixture는 parent nonzero 및 일관된 FAIL 보고서로 전파한다. 실제 RV32I skeleton build가 통과했고 기존 display_smoke의 전후 memory image는 동일하다. 그 hardware/board/review 범위는 S2에서 NOT_RUN이었다. S3 provider host 및 실제 peripheral RTL 통합, 격리 결함 거부와 관련 과거 regression은 통과했다. 실제 peripheral 실행, board 배선/display, real-time quota, stack high-water 및 독립 S3 소유자 리뷰는 NOT_RUN이다. `RUN_ROOT=<external-directory> scripts/wsl/soc_health_host_test.sh`를 실행하며 매번 새 output storage를 사용한다. Raw evidence는 checkout 밖에 보존하고 stage 결과로 보고하며 계약에 내장하지 않는다.
 
 | 기준 | Oracle / 반드시 거부할 결함 |
 |---|---|
@@ -260,3 +277,7 @@ Evidence ID: **E0** = 기준 소스의 S0 static source inspection 및 승인된
 ### 12.3 S2 정합성 범위
 
 S2 기반 구조 작업에서 새로운 spec/FW 불일치를 발견하지 않았다. 위 S0/S1 ledger는 peripheral/cleanup 부채를 닫지 않고 유지한다. S2는 §10.1만 구현하며 hardware provider를 runtime verified로 승격하지 않는다.
+
+### 12.4 S3 정합성 범위
+
+S3에서 새로운 owning spec/FW 불일치를 발견하지 않았다. 기존 API를 사용하며 peripheral RTL/driver, ADC ABI 또는 과거 cleanup ledger는 변경하지 않았다.
