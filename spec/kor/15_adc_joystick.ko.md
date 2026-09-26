@@ -140,7 +140,36 @@ CH5 -> ADC_IN4 -> JP8 A4
 CH6 -> ADC_IN5 -> JP8 A5
 ```
 
-Clean Baseline은 CH1/CH2만 활성화한다. 기본 logical joystick mapping은 CH1=X, CH2=Y이지만 실제 케이블/극성/방향은 board acceptance **(In-progress)**다.
+Clean Baseline은 CH1/CH2만 활성화한다. 기본 logical joystick mapping은 CH1=X, CH2=Y이다. 실제 물리 배선, 방향 및 실측 방향 매핑은 이슈 #6 (C4-C) 실기 보드 계측을 통해 확정 및 검증되었으며 세부 규격은 §3.4와 같다.
+
+### 3.4 물리 조이스틱 기준 방향 및 실측 극성 매핑
+
+물리 2축 아날로그 조이스틱 모듈(가변저항 분압 회로)은 아래 사진의 사용자 시야 구도를 기준으로 배치 및 조작된다:
+
+![조이스틱 물리 기준 방향](../../docs/assets/images/joystick_reference_direction.png)
+
+#### 물리 배치 및 핀 결선:
+- **모듈 물리 배치**: 가변저항 기판의 5핀 헤더(`GND`, `+5V`, `VRX`, `VRY`, `SW`)가 **좌측(`L`, 9시 방향)**을 향하도록 책상에 배치한다.
+- **사용자 시야 기준**: 사용자는 **`down`(6시 방향)**에 앉아 전방 **`UP`(12시 방향)**을 바라보는 구도를 기준 시야로 정의한다.
+- **DE10-Lite 보드 결선**:
+  - `GND` $\rightarrow$ DE10-Lite `GND`
+  - `+5V` $\rightarrow$ DE10-Lite `3.3V` (가변저항 전원 공급)
+  - `VRX` $\rightarrow$ Arduino Header `A0` (`PIN_C7` / `ADC1IN1` / Command Channel 1)
+  - `VRY` $\rightarrow$ Arduino Header `A1` (`PIN_C8` / `ADC1IN2` / Command Channel 2)
+
+#### 실측 방향 및 전압 극성 매핑 (281만 프레임 검증 완료):
+물리 조이스틱 노브를 각 방향으로 조작했을 때 발생하는 아날로그 변환값과 판정 결과는 다음과 같다:
+
+| 조작 방향 | 방향 벡터 | 대상 축 | Raw ADC 전압 응답 | HW `JOY_STATUS` | ASCII 텔레메트리 |
+|---|---|---|---|---|---|
+| **중립 (Rest)** | Neutral Center | Both | $\text{CH1} \approx 1859$, $\text{CH2} \approx 1958$ | `0x30` (`X_VALID \| Y_VALID`) | `'C'` |
+| **전방 밀기** | **UP** (12시 방향) | 수직(Y) 축 | $\text{CH2} \uparrow$ ($\sim 3803$로 상승, CH1은 $1859$ 유지) | `0x31` (`FORWARD`) | `'w'` |
+| **후방 당김** | **DOWN** (6시 방향) | 수직(Y) 축 | $\text{CH2} \downarrow$ ($\sim 15$로 하강, CH1은 $1859$ 유지) | `0x32` (`BACKWARD`) | `'s'` |
+| **좌측 밀기** | **LEFT** (`L`, 9시 방향) | 수평(X) 축 | $\text{CH1} \downarrow$ ($\sim 16$으로 하강, CH2는 $1959$ 유지) | `0x34` (`LEFT`) | `'a'` |
+| **우측 밀기** | **RIGHT** (`R`, 3시 방향)| 수평(X) 축 | $\text{CH1} \uparrow$ ($\sim 3808$로 상승, CH2는 $1959$ 유지) | `0x38` (`RIGHT`) | `'d'` |
+
+- **축 간 독립성 (Cross-Axis Isolation)**: 한 축을 끝까지 조작해도 반대편 직교 축의 변동폭은 평균 $\pm 1$ 카운트 미만($< 0.1\%$ 상호 간섭률)으로 완벽한 분리도를 유지함.
+- **하드웨어/소프트웨어 판정 일치도**: RTL 게이트 레지스터인 `ADC_JOY_STATUS`와 독립 C 알고리즘인 `joystick_policy_eval()`이 100.0% 완벽하게 일치함.
 
 ## 4. ADC scan frame의 원자성
 

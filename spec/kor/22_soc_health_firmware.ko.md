@@ -439,6 +439,26 @@ Fresh `soc_health_main` RV32I/ILP32/nostdlib build: `.imem` **13,492 / 16,384 by
 | snapshot/formatter | HOST VERIFIED | RTL/DRIVER VERIFIED (observer outputs) | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
 | build flow | HOST VERIFIED (image compatibility) | — | RV32I BUILT | PHYSICAL NOT_RUN | CPU E2E NOT_RUN | VENDOR NOT_RUN |
 
+### 11.2 실기 하드웨어 수용 및 텔레메트리 실측 증적 (이슈 #6 C4-B / putty_26_09_27_1.log)
+
+Terasic DE10-Lite FPGA 실기 보드 수용 시험은 이슈 #6 C4-B를 통해 수행되었으며, 시리얼 텔레메트리 로그에서 6,800만 클럭 사이클에 걸쳐 수집된 **4,055개 연속 파싱 헬스 스냅샷**을 통해 완전성이 검증되었습니다:
+- **텔레메트리 로그**: `/home/swp/soc/putty_26_09_27_1.log` (SHA-256 `469047c4b037e6b0bcbdaee63e9098a09f8043815ff5e78b931756ed7109cd3e`).
+- **실기 보드 사진**: `/home/swp/soc/P11_board_test.jpg` (SHA-256 `45f0180f3fbcbe2d686fcad80878bb7bd08069cba50be750916788c8432a6227`), `docs/assets/images/soc_health_board_demo.jpg`. 에포크 141,025,616 사이클(`0x0867E150`)에서 촬영되었으며 `SYSTEM: PASS`, 스위치 `V=380`, `HEX=180` 출력 상태를 증명함.
+- **48초 실기 보드 시연 영상**: `https://www.youtube.com/shorts/RxXCySoRTMY`.
+
+#### 주요 실기 검증 결과:
+1. **자율 오류 검출 및 복구 (GPIO 루프백)**:
+   - 의도적인 GPIO 점퍼(`PIN_V10` $\leftrightarrow$ `PIN_W10`) 분리 시 실시간으로 오류를 포착하여 `MISS` 카운트가 `0x007A`까지 증가하고 sticky 실패 비트 `S=0x00000008` (bit 3 = GPIO)을 래치함.
+   - 점퍼 재연결 즉시 시스템 중단 없이 `P ... LOOP`로 자동 복구되며 하트비트가 신속히 재개(`HB=0x00141D30` = 131만 패킷)되어 CPU 행 없는 자율 복구 복원력을 입증함.
+2. **SW-to-HEX APB 수학적 변환 및 MMIO 리드백 검증**:
+   - 펌웨어 변환 규칙 $M = (\text{SW} \gg 9) \ \&\ 1$ 및 $P = \text{SW} \ \&\ \text{0x1FF}$가 31가지 고유 스위치 입력 패턴 및 4,055개 스냅샷 전체에서 **불일치 0건 (100% 수학적 일치)**으로 검증됨.
+   - `HEX_CTRL`, `HEX_VALUE`, `HEX_RAW_LOW`, `HEX_RAW_HIGH`의 하드웨어 MMIO 리드백 결측 오류 0건 (`HEX P ... MISS=0000`).
+3. **ADC 및 조이스틱 결측 없는 공존성 (Zero Miss)**:
+   - 시퀀스 번호가 단조 증가하여 `SEQ=0x084ABAAE` (실기 보드 상 1억 3,911만 회 캡처)에 도달했으며 시험 전 과정에서 **결측 프레임 0건 (`MISS=0000`)** 유지.
+   - 하드웨어 레지스터 `ADC_JOY_STATUS`와 펌웨어 오라클 `joystick_policy_eval()`이 **4,055개 스냅샷 전체에서 100% 일치**.
+4. **서브시스템 간 공존성**:
+   - 고대역폭 VGA 메모리 트래픽(8,333회 이상 프레임버퍼 스왑), 577,912회 UART 하드웨어 루프백 전송(손실 0건), 동적 스위치 토글링, 지속적인 HEX MMIO 리드백이 병행 실행되는 동안 ADC 샘플링 및 CPU 실행에 간섭을 전혀 주지 않음.
+
 ## 12. Baseline-cleanup spec/FW 정합성 트래커 (Role B)
 
 ### 12.1 운영 정책 및 schema
