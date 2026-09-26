@@ -111,7 +111,7 @@ The scope of this task is strictly **ADC / P11 only**. No production RTL, firmwa
 
 The physical characterization was conducted on DE10-Lite FPGA hardware under Issue #6 C4-C and verified against continuous telemetry logs:
 
-- **Cadence & Frame Rate (Continuous Polling over 2,810,131 frames):**
+- **Cadence & Frame Rate (Continuous Polling over 2,810,880 frames):**
   - Average frame period: **$299\text{ CPU cycles}$** ($5.980\ \mu\text{s}$ at 50 MHz).
   - Continuous frame publication rate: **$167.22\text{ kframes/s}$**.
   - Standard deviation: $< 0.5$ cycles (tight hardware pacing).
