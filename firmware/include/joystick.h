@@ -1,18 +1,31 @@
 #ifndef JOYSTICK_H
 #define JOYSTICK_H
 
+/**
+ * @file joystick.h
+ * @brief DEPRECATED compatibility wrapper over generic ADC v2 driver (adc.h)
+ *        and firmware joystick policy (joystick_policy.h).
+ *
+ * This header and its corresponding driver (joystick.c) are preserved solely
+ * as a thin transitional compatibility wrapper during P11 migration.
+ * Active production firmware shall use adc.h and joystick_policy.h directly.
+ */
+
 #include <stdint.h>
+#include "adc.h"
+#include "joystick_policy.h"
 
-#define JOY_CTRL_ENABLE       (1u << 0)
-#define JOY_CTRL_CLEAR_FLAGS  (1u << 1)
-#define JOY_CTRL_CLEAR_COUNT  (1u << 2)
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-#define JOY_DIR_FORWARD       (1u << 0)
-#define JOY_DIR_BACKWARD      (1u << 1)
-#define JOY_DIR_LEFT          (1u << 2)
-#define JOY_DIR_RIGHT         (1u << 3)
-#define JOY_DIR_X_VALID       (1u << 4)
-#define JOY_DIR_Y_VALID       (1u << 5)
+/* Legacy direction status bit definitions (mapped directly to policy flags) */
+#define JOY_DIR_FORWARD       JOY_POLICY_DIR_FORWARD
+#define JOY_DIR_BACKWARD      JOY_POLICY_DIR_BACKWARD
+#define JOY_DIR_LEFT          JOY_POLICY_DIR_LEFT
+#define JOY_DIR_RIGHT         JOY_POLICY_DIR_RIGHT
+#define JOY_DIR_X_VALID       JOY_POLICY_DIR_X_VALID
+#define JOY_DIR_Y_VALID       JOY_POLICY_DIR_Y_VALID
 
 typedef struct {
     uint32_t dir_status;
@@ -29,4 +42,8 @@ uint32_t joystick_dir_status(void);
 joystick_sample_t joystick_read(void);
 char joystick_dir_to_ascii(uint32_t dir_status);
 
+#ifdef __cplusplus
+}
 #endif
+
+#endif /* JOYSTICK_H */

@@ -40,11 +40,14 @@ module APB_ADC_Controller (
     // Error event pulses from CDC (PCLK domain)
     input  wire [3:0]  error_pulse_pclk,
 
-    // C3 boundary for Joystick policy input (tied to 0 in C2)
+    // C3 boundary for Joystick policy
     input  wire [5:0]  joy_status_i,
     output wire [11:0] joy_center_x_o,
     output wire [11:0] joy_center_y_o,
-    output wire [11:0] joy_deadzone_o
+    output wire [11:0] joy_deadzone_o,
+    output wire [11:0] hold_ch1_o,
+    output wire [11:0] hold_ch2_o,
+    output wire [5:0]  hold_valid_mask_o
 );
 
     assign PREADY = 1'b1;
@@ -156,6 +159,10 @@ module APB_ADC_Controller (
     reg [31:0] hold_seq;
     reg [5:0]  hold_mask;
     reg [11:0] hold_ch1, hold_ch2, hold_ch3, hold_ch4, hold_ch5, hold_ch6;
+
+    assign hold_ch1_o        = hold_ch1;
+    assign hold_ch2_o        = hold_ch2;
+    assign hold_valid_mask_o = hold_mask;
 
     wire new_frame = live_valid && (!hold_valid || (live_seq != hold_seq));
 

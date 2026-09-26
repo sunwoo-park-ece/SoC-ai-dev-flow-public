@@ -646,6 +646,25 @@ adc_error_event_cdc u_adc_error_event_cdc (
     .error_pulse_pclk (adc_error_pulse_pclk)
 );
 
+// C3 Joystick Policy & Calibration Boundary
+wire [11:0] adc_joy_center_x;
+wire [11:0] adc_joy_center_y;
+wire [11:0] adc_joy_deadzone;
+wire [11:0] adc_hold_ch1;
+wire [11:0] adc_hold_ch2;
+wire [5:0]  adc_hold_valid_mask;
+wire [5:0]  adc_joy_status;
+
+Joystick_Policy u_joystick_policy (
+    .hold_ch1        (adc_hold_ch1),
+    .hold_ch2        (adc_hold_ch2),
+    .hold_valid_mask (adc_hold_valid_mask),
+    .center_x        (adc_joy_center_x),
+    .center_y        (adc_joy_center_y),
+    .deadzone        (adc_joy_deadzone),
+    .joy_status      (adc_joy_status)
+);
+
 APB_ADC_Controller u_adc_controller (
     .PCLK                (PCLK),
     .PRESETn             (PRESETn),
@@ -665,10 +684,13 @@ APB_ADC_Controller u_adc_controller (
     .samples_flat_pclk   (adc_samples_flat_pclk),
     .mailbox_busy        (adc_mailbox_busy),
     .error_pulse_pclk    (adc_error_pulse_pclk),
-    .joy_status_i        (6'b000000), // C3 functional policy boundary; tied to 0 in C2
-    .joy_center_x_o      (),
-    .joy_center_y_o      (),
-    .joy_deadzone_o      ()
+    .joy_status_i        (adc_joy_status),
+    .joy_center_x_o      (adc_joy_center_x),
+    .joy_center_y_o      (adc_joy_center_y),
+    .joy_deadzone_o      (adc_joy_deadzone),
+    .hold_ch1_o          (adc_hold_ch1),
+    .hold_ch2_o          (adc_hold_ch2),
+    .hold_valid_mask_o   (adc_hold_valid_mask)
 );
 
 	APB_HEX_display u_hex_display (

@@ -36,6 +36,7 @@ rtl/peripherals/APB_SW.v
 rtl/peripherals/APB_TIMER.v
 rtl/peripherals/APB_UART_LORA_RT.v
 rtl/peripherals/APB_UART_RT.v
+rtl/peripherals/Joystick_Policy.v
 rtl/peripherals/aes_gcm/pipe0/apb_aes_gcm_ip.v
 rtl/peripherals/gsensor/APB_GSENSOR_MB.v
 rtl/peripherals/gsensor/reset_delay.v

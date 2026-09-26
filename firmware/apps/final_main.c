@@ -4,7 +4,8 @@
 #include "led.h"
 #include "sw.h"
 #include "hex_display.h"
-#include "joystick.h"
+#include "adc.h"
+#include "joystick_policy.h"
 #include "lora_uart.h"
 #include "timer.h"
 #include "uart.h"
@@ -132,7 +133,7 @@ static int32_t prev_map_y_cm = 0;
 static uint8_t prev_map_valid = 0u;
 
 /* Debug output must never stall the control application indefinitely. */
-static void app_uart1_putc(char c)
+static void __attribute__((unused)) app_uart1_putc(char c)
 {
     if (uart1_putc_timeout(c, UART_DEFAULT_POLL_BUDGET) != UART_RESULT_SUCCESS) {
         last_error = ERR_UART_TIMEOUT;
@@ -883,21 +884,34 @@ static void sync_mode(uint8_t mode, uint8_t reason)
     }
 }
 
+static const joystick_calibration_t s_joy_cal = {
+    2048u,
+    2048u,
+    300u
+};
+
 static void manual_step(void)
 {
-    joystick_sample_t joy = joystick_read();
-    char cmd = joystick_dir_to_ascii(joy.dir_status);
+    adc_frame_t frame;
+    adc_status_t status = adc_capture(&frame);
+    if (status != ADC_OK) {
+        return;
+    }
+
+    uint8_t dir_status = joystick_policy_eval(&frame, &s_joy_cal);
+    char cmd = joystick_direction_to_char(dir_status);
     uint8_t payload[8];
     frame_t ack;
 
-    if (cmd == '\0') {
+    if (cmd == ' ' || (dir_status & (JOY_POLICY_DIR_X_VALID | JOY_POLICY_DIR_Y_VALID)) !=
+                      (JOY_POLICY_DIR_X_VALID | JOY_POLICY_DIR_Y_VALID)) {
         return;
     }
 
     payload[0] = (uint8_t)cmd;
-    put_u16(&payload[1], joy.x_raw);
-    put_u16(&payload[3], joy.y_raw);
-    payload[5] = (uint8_t)(joy.dir_status & 0xffu);
+    put_u16(&payload[1], frame.ch[0]);
+    put_u16(&payload[3], frame.ch[1]);
+    payload[5] = dir_status;
     payload[6] = (uint8_t)(tx_seq & 0xffu);
     payload[7] = 0u;
 
@@ -916,9 +930,9 @@ static void manual_step(void)
     uart1_puts("MANUAL cmd=");
     uart1_puts(cmd_text(cmd));
     uart1_puts(" x=");
-    uart1_put_hex32((uint32_t)joy.x_raw);
+    uart1_put_hex32((uint32_t)frame.ch[0]);
     uart1_puts(" y=");
-    uart1_put_hex32((uint32_t)joy.y_raw);
+    uart1_put_hex32((uint32_t)frame.ch[1]);
     uart1_puts("\n");
 }
 
@@ -1005,7 +1019,11 @@ int main(void)
     led_write(0u);
     timer_start(TIMER_TIMEBASE_COMPARE);
     lora_uart_init(0u);
-    joystick_init(1u, 2u, 2048u, 2048u, 300u);
+    (void)adc_init();
+    adc_set_calibration(s_joy_cal.center_x, s_joy_cal.center_y, s_joy_cal.deadzone);
+    if (adc_enable(100000u) != ADC_OK) {
+        uart1_puts("[WARN] ADC enable timed out\n");
+    }
     hex_display_enable(1);
     hex_display_set_raw_mode(0);
     parser_reset(&pc_parser);

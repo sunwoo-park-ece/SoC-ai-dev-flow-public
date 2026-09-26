@@ -192,6 +192,30 @@ module tb_soc_adc_v2_integration;
 
         $display("[PASS] Frame 1 captured: CH1=0x%03h, CH2=0x%03h", ch1_sample_1, ch2_sample_1);
 
+        // C3: Verify JOY_STATUS (0x4C) reflects real Joystick_Policy output from HOLD bank
+        // Default calibration: center_x=2048, center_y=2048, deadzone=300
+        // CH1=0x600 (1536) < 1748 -> LEFT=1, RIGHT=0
+        // CH2=0xa00 (2560) > 2348 -> FORWARD=1, BACKWARD=0
+        // MASK=3 -> X_VALID=1, Y_VALID=1
+        // Expected JOY_STATUS = 6'b110101 (0x35)
+        ahb_read(32'h4005_004C, read_val);
+        check(read_val == 32'h35, "ADC_JOY_STATUS reflects real policy (LEFT + FORWARD + X_VALID + Y_VALID)");
+        $display("[PASS] C3 Hardware Joystick Policy evaluated at 0x4C: read 0x%02h", read_val);
+
+        // C3 Live Calibration test: change deadzone via APB without new CAPTURE
+        // deadzone = 600 -> low_x = 2048 - 600 = 1448; high_y = 2048 + 600 = 2648
+        // With CH1=1536 and CH2=2560, both are now within deadzone -> neutral!
+        // Expected JOY_STATUS = 6'b110000 (0x30)
+        ahb_write(32'h4005_0048, 32'd600); // ADC_JOY_DEADZONE
+        ahb_read(32'h4005_004C, read_val);
+        check(read_val == 32'h30, "ADC_JOY_STATUS updated immediately on deadzone calibration write without new CAPTURE");
+        $display("[PASS] Live calibration dynamic update without CAPTURE confirmed: read 0x%02h", read_val);
+
+        // Restore deadzone to 300
+        ahb_write(32'h4005_0048, 32'd300);
+        ahb_read(32'h4005_004C, read_val);
+        check(read_val == 32'h35, "ADC_JOY_STATUS restored to 0x35");
+
         // 5. Disable & Quiesce: Verify LIVE invalidation and HOLD preservation
         ahb_write(32'h4005_000C, 32'h0); // ENABLE=0
         $display("[PASS] APB ENABLE=0 written");

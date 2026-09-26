@@ -12,7 +12,8 @@
 #define TIMER_BASE           0x40020000u
 #define GSENSOR_BASE         0x40030000u
 #define AES_GCM_BASE         0x40040000u
-#define JOYSTICK_BASE        0x40050000u
+#define ADC_BASE             0x40050000u
+#define JOYSTICK_BASE        ADC_BASE /* DEPRECATED transitional alias; use ADC_BASE */
 #define UART1_BASE           0x40060000u
 #define HEX_DISPLAY_BASE     0x40070000u
 #define SW_BASE              0x40080000u
@@ -59,17 +60,60 @@
 #define AES_PAYLOAD_OUT0     0x60u
 #define AES_TAG_OUT0         0x70u
 
-#define JOY_CTRL             0x0cu
-#define JOY_STATUS           0x10u
-#define JOY_X_CHANNEL        0x14u
-#define JOY_Y_CHANNEL        0x18u
-#define JOY_X_RAW            0x1cu
-#define JOY_Y_RAW            0x20u
-#define JOY_CENTER_X         0x24u
-#define JOY_CENTER_Y         0x28u
-#define JOY_DEADZONE         0x2cu
-#define JOY_DIR_STATUS       0x30u
-#define JOY_SAMPLE_COUNT     0x34u
+/* ========================================================================= */
+/* Generic ADC Peripheral v2 Registers (ADC_BASE = 0x40050000u)              */
+/* ========================================================================= */
+#define ADC_NAME0            0x00u
+#define ADC_NAME1            0x04u
+#define ADC_VERSION          0x08u
+#define ADC_CTRL             0x0cu
+#define ADC_STATUS           0x10u
+#define ADC_FRAME_SEQ        0x14u
+#define ADC_VALID_MASK       0x18u
+#define ADC_CH1_RAW          0x1cu
+#define ADC_CH2_RAW          0x20u
+#define ADC_CH3_RAW          0x24u
+#define ADC_CH4_RAW          0x28u
+#define ADC_CH5_RAW          0x2cu
+#define ADC_CH6_RAW          0x30u
+#define ADC_LIVE_SEQ         0x34u
+#define ADC_LIVE_VALID_MASK  0x38u
+#define ADC_ACTIVE_MASK      0x3cu
+#define ADC_JOY_CENTER_X     0x40u
+#define ADC_JOY_CENTER_Y     0x44u
+#define ADC_JOY_DEADZONE     0x48u
+#define ADC_JOY_STATUS       0x4cu
+#define ADC_FRAME_COUNT      0x60u
+#define ADC_ERROR_STATUS     0x64u
+
+/* ADC_CTRL bitfields */
+#define ADC_CTRL_ENABLE       (1u << 0)
+#define ADC_CTRL_CAPTURE      (1u << 1)
+#define ADC_CTRL_CLEAR_ERROR  (1u << 2)
+
+/* ADC_STATUS bitfields */
+#define ADC_STATUS_ENABLE_REQ     (1u << 0)
+#define ADC_STATUS_ENGINE_ENABLED (1u << 1)
+#define ADC_STATUS_LIVE_VALID     (1u << 2)
+#define ADC_STATUS_HOLD_VALID     (1u << 3)
+#define ADC_STATUS_NEW_FRAME      (1u << 4)
+#define ADC_STATUS_MAILBOX_BUSY   (1u << 5)
+/* bit 6: strictly RESERVED / 0 */
+#define ADC_STATUS_ERROR_PENDING  (1u << 7)
+
+/* ADC_JOY_STATUS bitfields */
+#define ADC_JOY_FORWARD       (1u << 0)
+#define ADC_JOY_BACKWARD      (1u << 1)
+#define ADC_JOY_LEFT          (1u << 2)
+#define ADC_JOY_RIGHT         (1u << 3)
+#define ADC_JOY_X_VALID       (1u << 4)
+#define ADC_JOY_Y_VALID       (1u << 5)
+
+/* ADC_ERROR_STATUS bitfields */
+#define ADC_ERROR_UNEXPECTED_CHANNEL (1u << 0)
+#define ADC_ERROR_DUPLICATE_CHANNEL  (1u << 1)
+#define ADC_ERROR_ORDER_ERROR        (1u << 2)
+#define ADC_ERROR_PACKET_ERROR       (1u << 3)
 
 #define VRAM_STATUS          0x10000u
 #define VRAM_CONTROL         0x10004u
