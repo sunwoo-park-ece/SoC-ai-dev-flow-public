@@ -1,6 +1,6 @@
 # SoC Health Firmware Contract and Reconciliation Tracker
 
-> **Status:** S1 contract freeze; health firmware implementation NOT_STARTED. This is an approved future application contract, not runtime, board, timing, or Clean Baseline acceptance.
+> **Status:** S1 contract preserved; S2 health core/snapshot/scheduler skeleton implemented and locally host-tested/built for RV32I. Peripheral providers and hardware observers remain unimplemented; no board, timing, or Clean Baseline acceptance.
 > **Language:** English is canonical; [Korean companion](kor/22_soc_health_firmware.ko.md) mirrors this contract.
 > **Roles:** Role A defines the standalone health firmware. Role B consolidates baseline-cleanup spec/FW reconciliation debt without replacing owning IP specifications.
 > **Source anchor:** `390db6da2dcc8bbfa1c93b444525b0ba1e852056`. Trace IDs: Issue #7 S0 result `5845036298`, S0 acceptance `5845199371`, S1 task `5845199693`; these are internal governance locators, not public runtime evidence.
@@ -13,7 +13,7 @@ Owner-provided demonstration: [FPGA SoC + STM32 RC-car demo](https://www.youtube
 
 The future canonical application is `firmware/apps/soc_health_main.c`. It shall run standalone without the external RC-car system, exercise production peripheral contracts, report progress and failures, and freeze one snapshot for VGA and PC UART observers. It remains a reusable system diagnostic rather than an ADC-only test.
 
-S1 changes documentation only. The application, services, providers, scheduler, and HEX raw getters do not exist as S1 deliverables. Issue #6 C4 remains paused; S2 requires owner review. Owning IP specifications remain authoritative for registers, hardware behavior, and existing acceptance scope. Preserve all existing STOP gates; this document does not reopen P08B, add interrupts/PLIC, redesign ADC/peripheral RTL, change pins, or close global cleanup/STA/board requirements.
+S1 changes documentation only. The application, services, providers, scheduler, and HEX raw getters do not exist as S1 deliverables. S2 now adds only the infrastructure described in §10.1. S2 results require owner review before S3; Issue #6 C4 remains paused. Owning IP specifications remain authoritative for registers, hardware behavior, and existing acceptance scope. Preserve all existing STOP gates; this document does not reopen P08B, add interrupts/PLIC, redesign ADC/peripheral RTL, change pins, or close global cleanup/STA/board requirements.
 
 ## 2. Health model and failure history
 
@@ -154,9 +154,9 @@ Compose a bounded state machine: wait READY/idle; clear the writable back bank a
 
 Record aborts before a helper clears stale status. Acknowledge events so later cycles require new progress, not repeated reads of one sticky bit. `vga_text_begin_frame()` is bounded but waits/switches/clears before returning; it shall not substitute for the explicit render-then-present cooperative sequence. The physical screen image remains a separate human check; internal heartbeat proves display-domain/ownership progress only.
 
-## 10. Future implementation paths and stage gates
+## 10. Implemented infrastructure and future stage gates
 
-These are planned paths, not existing S1 implementation:
+The following paths now exist for S2 infrastructure and host verification:
 
 ```text
 firmware/apps/soc_health_main.c
@@ -169,7 +169,7 @@ verification/firmware/soc_health_mmio.h
 scripts/wsl/soc_health_host_test.sh
 ```
 
-The services layer is application service code, not a hardware driver. A later minimal `scripts/firmware/build_fw.sh` change shall include services for the new app while preserving existing app flows. Builds require external RUN_ROOT; future command is `scripts/firmware/build_fw.sh soc_health_main` with that environment set. Preserve RV32I/ILP32 freestanding behavior, existing startup/trap, **16 KiB IMEM / 32 KiB DMEM**, and explicit paired memory-image identity. Do not enlarge memory or start the application build in S1.
+The services layer is application service code, not a hardware driver. The minimal `scripts/firmware/build_fw.sh` change includes the three health services only for the new app; existing app flows are preserved. Builds require external RUN_ROOT; the supported command is `scripts/firmware/build_fw.sh soc_health_main` with that environment set. Preserve RV32I/ILP32 freestanding behavior, existing startup/trap, **16 KiB IMEM / 32 KiB DMEM**, and explicit paired memory-image identity. Memory capacity and startup/trap are unchanged. S2 builds the skeleton; peripheral acceptance remains deferred.
 
 | Stage | Approved future boundary |
 |---|---|
@@ -178,11 +178,32 @@ The services layer is application service code, not a hardware driver. A later m
 | S4 BOARD I/O + OBSERVERS | GPIO0→1, SW, SW-mirrored LED, HEX dual mode/raw getters, VGA and PC UART shared-snapshot rendering. |
 | S5 CLOSURE | Host/unit tests, RV32I build/image-size check, relevant existing regressions, clean local checkpoint. |
 
-S1 shall implement none of S2–S5. After S5, stop for review before Issue #6 C4-A/C4-B resumes. No push, vendor execution, baseline release, or global tracker closure is implicitly authorized.
+S1 implemented none of S2–S5. S2 infrastructure is now implemented; stop for owner review before S3. After S5, stop for review before Issue #6 C4-A/C4-B resumes. No push, vendor execution, baseline release, or global tracker closure is implicitly authorized.
 
-## 11. Future acceptance and falsification map
+### 10.1 S2 core ABI, ownership and deterministic signature
 
-Future tests shall connect contract → independently derived oracle → stimulus/checker → unique source/run → raw evidence/verdict. Build, host tests, RTL regressions, physical board tests and independent review are NOT_RUN for this S1 contract freeze.
+Stable IDs are SYSTEM_SERVICE=0, TIMER=1, UART_LOOP=2, GPIO=3, GSENSOR=4, ADC=5, JOY_POLICY=6, VGA=7, SW=8, LED=9, HEX=10, AES_GCM=11. Mask bit `1u << id` is fixed. State and evidence enum order matches §2. Each record stores state, evidence, heartbeat_count, last_progress_epoch, miss_count and detail. Current masks are derived from copied records at publication; UNKNOWN contributes no bit. FAIL sets sticky history; recovery does not clear it. No runtime sticky-clear API exists.
+
+One cooperative owner advances a software epoch without Timer. Each turn visits one of ten round-robin pending providers (IDs 1–10) and at most two observer characters. SYSTEM_SERVICE progress means only that the software service turn ran. All peripheral placeholders stay UNKNOWN with `SOC_HEALTH_NOT_IMPLEMENTED` (0x4e4f5451, NOT QUALIFYING HARDWARE EVIDENCE). AES remains EXCLUDED_PENDING_CLEANUP with no provider/callback; all report attempts for AES are rejected. Production S2 code performs no MMIO.
+
+Progress and deadline-miss tokens are deduplicated per IP/event stream. After the first event, a token must advance modulo 2^32 by a nonzero amount less than 2^31; replay/old completion cannot recover FAIL. PENDING updates detail only. An armed deadline uses unsigned epoch elapsed time, budget less than 2^31, and disarms after one expiry. These are bounded software-turn budgets, not physical time measurements; callers must service deadlines before an entire epoch wrap elapses. Terminal CPU/bus faults remain outside recovery guarantees.
+
+Two static snapshot slots hold copied logical records and metadata. Publishing acquires both observer leases; occupied slots are never overwritten. If both are occupied, publication returns null and increments live backlog. Each observer releases exactly its own lease on completion or timeout; the slot can be reused only after both releases. A pointer is valid only for its acquired lease lifetime, and must not be used after release/reinitialization. There is no concurrent/interrupt ownership protocol. Live updates and releases change future-snapshot metadata, never published content. Observer completion tracks placeholder consumption, not physical display or UART delivery.
+
+The two const-input cursors consume the same snapshot pointer, epoch and signature. Each ready cursor emits one character of `EPOCH=xxxxxxxx SIG=xxxxxxxx` per service call. A 64-epoch budget releases a stalled observer and increments only live observer misses; the other observer can finish independently. The application requests publication every 32 software turns and retains an active render until completion/timeout. Full hardware presentation remains S3/S4 work.
+
+Signature is 32-bit FNV-1a (seed 2166136261, prime 16777619), processing each explicit uint32 word as four little-endian bytes. Target prime multiplication is implemented with shifts/adds; no multiply/divide helper is required. Exact 97-word order:
+
+1. Version tag 0x53483201, epoch, publication_id.
+2. pass_mask, warn_mask, fail_mask, excluded_mask, sticky_fail_mask, publication_backlog.
+3. observer_miss_count[0], [1], then observer_last_epoch[0], [1].
+4. For each ID 0 through 11: ID, state, evidence, heartbeat_count, last_progress_epoch, miss_count, detail.
+
+The signature itself, struct padding, pointers, slot leases and live deduplication tokens are excluded. Equal logical fields give equal signatures; this checksum is neither collision-free nor hardware acceptance evidence.
+
+## 11. Acceptance and future falsification map
+
+Future tests shall connect contract → independently derived oracle → stimulus/checker → unique source/run → raw evidence/verdict. All were NOT_RUN at S1 freeze. S2 now has a passing host suite with an independent serialized-signature oracle, per-ID masks, padding/copy/lease tests, token/deadline tests and bounded scheduler/observer tests; six isolated defect mutations are rejected. Compile, target and guard failure fixtures propagate nonzero to the parent and consistent FAIL reports. The actual RV32I skeleton build passes; existing display_smoke before/after memory images are identical. RTL regressions, actual peripheral execution, physical board tests and independent owner review remain NOT_RUN in S2. Run `RUN_ROOT=<external-directory> scripts/wsl/soc_health_host_test.sh`; each run must use fresh output storage. Raw evidence is retained outside the checkout and reported through the stage result, not embedded in this contract.
 
 | Criterion | Oracle / targeted defect that must be rejected |
 |---|---|
@@ -235,3 +256,7 @@ All rows originate from Issue #7/S0, carried into S1. `firmware/` prefixes in th
 Broad rewrites of `08_vga.md`, `09_uart.md`, `10_timer.md`, `11_gpio.md`, `12_gsensor.md`, `14_aes_gcm.md`, `15_adc_joystick.md`, `16_hex_display.md`, `17_sw.md`, `18_led.md` and companions remain deferred, as do unrelated firmware-contract sections/linker historical comments. Only the historical/new-health entry in firmware contract is added now. This ledger does not replace `baseline_cleanup.md` or change existing requirement status.
 
 Later IP additions shall specify production API, evidence strength, bounded failure behavior, independent oracle and tests, then update both language contracts/trackers after approval. Reconciliation shall retain origin, prior status, final disposition and evidence. AES can join only after its separately approved cleanup/provider work; no future expansion is implied by its placeholder.
+
+### 12.3 S2 reconciliation scope
+
+No new spec/FW mismatch was discovered in S2 infrastructure work. The S0/S1 ledger above is retained without closing peripheral or cleanup debt; S2 implements only §10.1 and does not promote any hardware provider to runtime verified.

@@ -93,6 +93,14 @@ while IFS= read -r src; do
   objects+=("${obj}")
 done < <(find "${DRIVER_DIR}" "${PROTOCOL_DIR}" -maxdepth 1 -name '*.c' | sort)
 
+if [[ "${FW_NAME}" == "soc_health_main" ]]; then
+  for service in soc_health soc_health_probes soc_health_render; do
+    obj="${OUT_DIR}/service_${service}.o"
+    "${CC}" "${CFLAGS[@]}" -c "${ROOT_DIR}/firmware/services/${service}.c" -o "${obj}"
+    objects+=("${obj}")
+  done
+fi
+
 echo "[3/6] compile firmware app"
 if [[ -d "${BENCH_APP_DIR}" ]]; then
   while IFS= read -r src; do
