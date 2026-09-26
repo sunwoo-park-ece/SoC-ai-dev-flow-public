@@ -529,7 +529,7 @@ S3에서 새로운 owning spec/FW 불일치를 발견하지 않았다. 기존 AP
 | HREC-UART | VERIFIED_ALIGNED (health loop/observer); IMPLEMENTATION_ACCEPTED_DOC_STALE (old owning prose) | S3/S4-B 승인 및 S5 host/real serial RTL: UART0→UART1 RX qualification; UART1 TX observer 전용. |
 | HREC-GPIO | VERIFIED_ALIGNED (owned pair health); IMPLEMENTATION_ACCEPTED_DOC_STALE (historical prose) | S4-A 승인; S5 host fault 및 simulated GPIO0→1 jumper의 real RTL; physical jumper NOT_RUN. |
 | HREC-GSENSOR | VERIFIED_ALIGNED (API/health progression) | S3 승인 및 S5 host/RTL advancing coherent CAPTURE/read/RELEASE; physical sensor NOT_RUN. |
-| HREC-ADC | VERIFIED_ALIGNED (v2 API/health); IMPLEMENTATION_ACCEPTED_DOC_STALE (owning narrative) | S3 승인; S5 C2/C3 및 health host/RTL freshness/validity/error; C4 pending 유지. |
+| HREC-ADC | VERIFIED_ALIGNED (v2 API/health/보드 수락) | S3 승인, S5 C2/C3 및 C4 (C4-A..D) 실기 특성화: 167 kHz 연속 케이던스, 100% HW/FW 오라클 일치, 타이밍 원인 분석 종결; 블로커 없음. |
 | HREC-JOY | VERIFIED_ALIGNED (pure model/health); OBSERVED (compatibility wrapper debt) | S5 raw HOLD/calibration 독립 oracle 및 C3 policy boundary; wrapper 한계 유지. |
 | HREC-VGA | VERIFIED_ALIGNED (health owner/dashboard); IMPLEMENTATION_ACCEPTED_DOC_STALE (historical waits); OBSERVED (legacy helper ordering) | S4-B 승인; S5 full raster/back-bank/fresh VSYNC/SWAP/DONE 및 N 불변성; monitor NOT_RUN. |
 | HREC-HEX | VERIFIED_ALIGNED (API/getters/health) | S4-A 승인; S5 P10 functional/shadow 및 shared-SW host/RTL; physical illumination NOT_RUN. |

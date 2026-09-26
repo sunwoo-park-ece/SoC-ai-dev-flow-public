@@ -366,7 +366,7 @@ return GSENSOR_OK (sample populated in *out)
 - Any transfer interrupted by reset has no guaranteed return value.
 - Following reset release, `VALID` remains 0 until the 12-write initialization completes and the first full digital burst finishes.
 
-## 13. ADC / Joystick Firmware Rules — P11 Target (In-progress)
+## 13. ADC / Joystick Firmware Rules — P11 Frozen Baseline
 
 P11 introduces a generic ADC driver contract at `ADC_BASE = 0x4005_0000`. A temporary `JOYSTICK_BASE` alias may exist only as migration compatibility; new code shall use the generic ADC naming.
 
@@ -374,8 +374,8 @@ Firmware shall not program runtime channel selection in P11. The Clean Baseline 
 
 ```text
 ACTIVE_MASK = 0x03
-command CH1 -> raw slot CH1
-command CH2 -> raw slot CH2
+command CH1 -> raw slot CH1 (Logical/Physical X)
+command CH2 -> raw slot CH2 (Logical/Physical Y)
 ```
 
 CH3..CH6 addresses are reserved canonical RO raw-data locations and return zero/invalid in this baseline.
@@ -420,13 +420,18 @@ JOY_STATUS = current center/deadzone applied to current HOLD sample
 
 Thus changing calibration may change direction without a new CAPTURE.
 
-Physical X/Y polarity and application/ASCII mapping remain **(In-progress)** board acceptance. Firmware shall not preserve the historical LEFT->`d`, RIGHT->`a` quirk as an architectural requirement.
+Physical X/Y polarity and direction mapping were characterized and verified under Issue #6 C4-C (§3.4 of `spec/15_adc_joystick.md`):
+- `CH1`: Physical/logical X axis (Horizontal). Increasing counts -> **RIGHT**, decreasing counts -> **LEFT**.
+- `CH2`: Physical/logical Y axis (Vertical). Increasing counts -> **UP / FORWARD**, decreasing counts -> **DOWN / BACKWARD**.
+- Neutral center: `CH1 ~ 1859`, `CH2 ~ 1958` (counts out of 4095).
+- Hardware `ADC_JOY_STATUS` and firmware `joystick_policy_eval()` maintain 100.0% agreement across physical characterization logs.
 
 ### 13.4 Error and count use
 
 `ERROR_STATUS` contains sticky acquisition/protocol errors and is cleared only by the defined W1P clear command. `FRAME_COUNT` counts completed frames published into PCLK LIVE, not individual ADC responses or CAPTURE calls.
 
 Normal firmware shall use exact 32-bit aligned v2 offsets and shall not rely on historical local mirrors or removed live response-debug fields.
+
 
 ## 14. HEX Display Rules
 
@@ -748,7 +753,7 @@ Firmware shall reject/use-no-sample semantics before first valid acquisition and
 
 The private ADXL345 SPI transport remains hardware-owned unless a separate generic SPI peripheral is later approved.
 
-## 27. Target ADC / Joystick Contract — P11 Frozen (In-progress)
+## 27. Target ADC / Joystick Contract — P11 Frozen
 
 The P11 firmware target is frozen as follows:
 
@@ -762,7 +767,7 @@ The P11 firmware target is frozen as follows:
 - CH3..CH6 raw addresses are reserved now for future six-channel activation;
 - joystick hardware policy is optional convenience/acceleration logic, not the owner of ADC acquisition;
 - firmware independently recomputes joystick policy and serves as a golden/reference implementation;
-- board-specific cable polarity and ASCII/control mapping remain outside generic ADC semantics.
+- board-specific cable polarity and physical direction mapping are verified under C4-C characterization (CH1=X, CH2=Y; right/left, up/down).
 
 Suggested driver layering:
 

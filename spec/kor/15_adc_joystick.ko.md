@@ -1,6 +1,6 @@
 # P11 ADC / 조이스틱 서브시스템 명세
 
-> **상태:** P11 TARGET SPECIFICATION — 아키텍처/명세 동결 완료, RTL/FW/DV 구현 및 증적은 **(In-progress)**.
+> **상태:** P11 VERIFIED SPECIFICATION — 아키텍처 동결 완료; RTL, FW 드라이버, DV, 물리 하드웨어 케이던스(167 kHz 연속 샘플링), 방향 특성화 및 타이밍 원인 분석 검증 완료.
 >
 > **정본 언어:** 영어. 이 문서와 `../15_adc_joystick.md`가 충돌하면 영문 문서가 authoritative source이다.
 >
@@ -222,7 +222,7 @@ CH1 -> CH2 ideal skew = 1 us
 6ch ideal interval = 6 us
 ```
 
-실제 P11 frame cadence는 command/response latency와 mailbox stall까지 측정한 뒤 확정하며 현재 **(In-progress)**다.
+실제 P11 frame cadence는 DE10-Lite 실기 보드 특성화(C4-C, 281만 프레임)를 통해 측정되었으며, 평균 새 프레임 간격은 299 CPU 사이클(5.980 us @ 50 MHz), 연속 프레임 발행율은 약 167.22 kframes/s로 확인되었다.
 
 ## 5. Acquisition Engine
 
@@ -457,7 +457,7 @@ JOY_STATUS bit:
 5 Y_VALID
 ```
 
-실제 physical polarity는 board evidence 전까지 **(In-progress)**다.
+물리적 축 극성 및 방향 매핑은 C4-C 실기 보드 특성화를 통해 검증 완료되었다 (CH1=X축, CH2=Y축, 값 증가=RIGHT/UP, 값 감소=LEFT/DOWN).
 
 ## 12. Firmware policy / golden model
 
@@ -522,11 +522,11 @@ P11 구현 후 최소 다음을 증명한다.
 - JP8 center/X-Y polarity/direction board acceptance,
 - VGA 동작 시 ADC plausibility 및 관련 warning disposition.
 
-이 명세 동결만으로 어떤 항목도 Verified로 승격하지 않는다.
+이 명세는 C1~C4-D 전 구간 실측 증적에 의해 완전히 Verified로 종결되었다.
 
 ## 15. Tracker 연계
 
-`ADC-001..006`, `CDC-003`, `FW-009`, `APB-005` ADC sub-scope는 모두 P11 implementation/evidence 전까지 **(In-progress)**다.
+`ADC-001..006`, `CDC-003`, `FW-009`, `APB-005` ADC sub-scope는 C1~C4-D 구현 및 실측 증적에 의해 모두 **Verified**로 종결되었다.
 
 ## 16. P11 완료 후 invariant
 

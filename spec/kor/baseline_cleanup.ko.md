@@ -273,18 +273,21 @@ UART/LoRa, external-I/O electrical acceptance가 아니다. `UART-005`는 OPEN,
 | `AES-IRQ` | Medium | PLIC | IRQ | DEFERRED |
 | `AES-DMA` | Medium | AXI | streaming/DMA | DEFERRED |
 
-## 16. ADC / Joystick — P11 Spec Frozen, Implementation In-progress
+## 16. ADC / Joystick — P11 검증 완료 베이스라인
+
+P11 아키텍처, RTL, 펌웨어 드라이버, 테스트벤치 및 실기 보드 수락 검증이 Issue #6 (마일스톤 C1~C4-D) 하에서 완료되었다.
 
 | ID | Frozen P11 outcome | Status |
 |---|---|---|
-| `ADC-001` | sole `adc_sys_clk` acquisition-engine command owner | IN_PROGRESS |
-| `ADC-002` | real ENABLE request/ack + fixed/read-only baseline CH1/CH2 | IN_PROGRESS |
-| `ADC-003` | complete frame SEQ/mask + req/ack CDC + CAPTURE-only HOLD | IN_PROGRESS |
-| `ADC-004` | board X/Y wiring/polarity/direction acceptance | IN_PROGRESS |
-| `ADC-005` | generic ADC / optional joystick seam, no live async debug | IN_PROGRESS |
-| `ADC-006` | async-clock/MMIO/HW-FW/Quartus/board regression | IN_PROGRESS |
+| `ADC-001` | sole `adc_sys_clk` acquisition-engine command owner | VERIFIED |
+| `ADC-002` | real ENABLE request/ack + fixed/read-only baseline CH1/CH2 | VERIFIED |
+| `ADC-003` | complete frame SEQ/mask + req/ack CDC + CAPTURE-only HOLD | VERIFIED |
+| `ADC-004` | board X/Y wiring/polarity/direction acceptance | VERIFIED |
+| `ADC-005` | generic ADC / optional joystick seam, no live async debug | VERIFIED |
+| `ADC-006` | async-clock/MMIO/HW-FW/Quartus/board regression | VERIFIED |
 
-`CDC-003`, `FW-009`, `APB-005` ADC sub-scope도 P11 closure 전까지 IN_PROGRESS다.
+P11 ADC 증적: C1 독립 APB ADC 컨트롤러 및 디코드, C2 CDC 메일박스/획득 엔진, C3 드라이버 및 독립 골든 오라클, C3.5 RV32I CPU 수명주기 통합, C4-A Quartus 19.1 클린 핏(66% LE, 0 error), C4-B DE10-Lite FPGA 실기 보드 스모크 및 6,800만 사이클 0-miss 텔레메트리, C4-C 물리 샘플링 케이던스 특성화(167.22 kframes/s, 프레임당 299 CPU 사이클, 281만 프레임 0 시퀀스 오류) 및 물리 방향 매핑(§3.4), C4-D 타이밍 regression 원인 분석(153-노드 HREADY 루프가 마진 주원인이며 ADC 직접 영향 0 입증) 완료. `ADC-001..006`, `CDC-003`, `FW-009`, `APB-005` ADC sub-scope가 모두 `VERIFIED`로 종결되었다.
+
 
 ## 17. HEX
 
@@ -313,7 +316,7 @@ P10-HEX 근거: 독립 APB 베이스라인(S0), CTRL RAZ/WI(S1), exact local off
 | `FW-006` | High | BC | SW/LED constants + 16-slot map migration | VERIFIED |
 | `FW-007` | High | BC | true GPIO/IRQ driver/host 구현; BOARDIO-001/002 dependency 해소, 명시적 GPIO board test 잔여 | IN_PROGRESS |
 | `FW-008` | High | BC | P09B gsensor_read_sample() 단일 소유자 API 구현; 리셋-negative/오용 코너 검증 잔여 | IN_PROGRESS |
-| `FW-009` | High | BC | coherent ADC API | OPEN |
+| `FW-009` | High | BC | coherent ADC API | VERIFIED |
 | `FW-010` | High | BC | AES hardening | OPEN |
 | `FW-011` | Medium | BC | stale LED/GPIO assumption 제거 | VERIFIED |
 | `FW-012` | High | BC | host + FPGA regression 확대 | IN_PROGRESS |

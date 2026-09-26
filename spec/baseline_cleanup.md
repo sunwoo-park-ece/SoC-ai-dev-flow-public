@@ -285,20 +285,20 @@ Phase 4A-GSENSOR evidence (private local evidence archive): the **G-sensor inter
 | `AES-IRQ` | Medium | PLIC | No completion/error IRQ contract. | Define only if desired in PLIC stage. | future PLIC | PLIC-stage | DEFERRED |
 | `AES-DMA` | Medium | AXI | Current accelerator is one 128-bit register window. | Define streaming/DMA independently in future AXI/DMA work. | future AXI/DMA | later | DEFERRED |
 
-## 16. ADC / Joystick — P11 Specification Frozen, Implementation (In-progress)
+## 16. ADC / Joystick — P11 Verified Baseline
 
-P11A preflight and owner/Chat review froze the target architecture in `15_adc_joystick.md`. Status below is `IN_PROGRESS` because specification freeze is not implementation or verification evidence.
+P11 architecture, RTL, firmware driver, testbenches, and physical board acceptance are verified under Issue #6 (milestones C1 through C4-D).
 
 | ID | Sev | Gate | Frozen P11 outcome | Dependent specs | Required verification before Verified | Status |
 |---|---|---|---|---|---|---|
-| `ADC-001` | Blocker | BC | One `adc_sys_clk` ADC Acquisition Engine is the sole project-local command owner; historical top scanner/APB duplicate ownership removed. | `15_adc_joystick` | real command waveform, CH1->CH2 ordering, mutation/ownership negative checks | IN_PROGRESS |
-| `ADC-002` | High | BC | Real ENABLE persistent level request crosses safely to ADC domain; `ENGINE_ENABLED` acknowledges state. Baseline active channels fixed/read-only, `ACTIVE_MASK=0x03`. | `15_adc_joystick`, `06_reset_clock` | enable/disable/partial-frame/reset tests | IN_PROGRESS |
-| `ADC-003` | High | BC | Complete sequential scan frame gets 32-bit SEQ + VALID_MASK, crosses via req/ack mailbox, updates LIVE, and software uses CAPTURE-only HOLD. | `15_adc_joystick`, `19_firmware_contract` | async-clock/torn-frame/seq/mask/capture tests | IN_PROGRESS |
-| `ADC-004` | High | BC | Logical policy is frozen; actual joystick X/Y wiring, X polarity, and final application direction mapping require board acceptance. | `15_adc_joystick`, `19_firmware_contract` | JP8 center/left/right/forward/back raw log + logical mapping | IN_PROGRESS |
-| `ADC-005` | Medium | BC | Generic `APB_ADC_Controller` separated from stateless combinational `Joystick_Policy`; no live async Qsys debug fields exposed. | `15_adc_joystick`, `05_apb_subsystem` | exact MMIO/status regression + structural review | IN_PROGRESS |
-| `ADC-006` | High | BC | Cleanup-grade engine/mailbox/APB/HW-FW equivalence/Quartus/board regression plan is defined. | `15_adc_joystick` | required P11 DV + vendor/STA/board evidence | IN_PROGRESS |
+| `ADC-001` | Blocker | BC | One `adc_sys_clk` ADC Acquisition Engine is the sole project-local command owner; historical top scanner/APB duplicate ownership removed. | `15_adc_joystick` | real command waveform, CH1->CH2 ordering, mutation/ownership negative checks | VERIFIED |
+| `ADC-002` | High | BC | Real ENABLE persistent level request crosses safely to ADC domain; `ENGINE_ENABLED` acknowledges state. Baseline active channels fixed/read-only, `ACTIVE_MASK=0x03`. | `15_adc_joystick`, `06_reset_clock` | enable/disable/partial-frame/reset tests | VERIFIED |
+| `ADC-003` | High | BC | Complete sequential scan frame gets 32-bit SEQ + VALID_MASK, crosses via req/ack mailbox, updates LIVE, and software uses CAPTURE-only HOLD. | `15_adc_joystick`, `19_firmware_contract` | async-clock/torn-frame/seq/mask/capture tests | VERIFIED |
+| `ADC-004` | High | BC | Logical policy is frozen; actual joystick X/Y wiring, X polarity, and final application direction mapping require board acceptance. | `15_adc_joystick`, `19_firmware_contract` | JP8 center/left/right/forward/back raw log + logical mapping | VERIFIED |
+| `ADC-005` | Medium | BC | Generic `APB_ADC_Controller` separated from stateless combinational `Joystick_Policy`; no live async Qsys debug fields exposed. | `15_adc_joystick`, `05_apb_subsystem` | exact MMIO/status regression + structural review | VERIFIED |
+| `ADC-006` | High | BC | Cleanup-grade engine/mailbox/APB/HW-FW equivalence/Quartus/board regression plan is defined. | `15_adc_joystick` | required P11 DV + vendor/STA/board evidence | VERIFIED |
 
-P11 does not close global `STA-001`/`STA-002`; ADC evidence contributes only its scoped generated-clock/reset/electrical/physical portion.
+P11 ADC evidence: C1 standalone APB ADC controller and exact decode, C2 CDC mailbox and acquisition engine, C3 driver and independent behavioral golden oracle, C3.5 RV32I CPU lifecycle integration, C4-A Quartus Prime 19.1 clean fit (66% LE, 0 errors), C4-B physical DE10-Lite FPGA board smoke and zero-miss telemetry over 68M cycles, C4-C physical sampling cadence characterization (167.22 kframes/s, 299 CPU cycles/frame, 0 sequence errors over 2.81M frames) and physical direction mapping (§3.4), and C4-D timing regression root-cause analysis (proving the 153-node HREADY loop accounts for the timing margin while ADC direct impact is zero) are complete. This closes `ADC-001..006` and `FW-009` as `VERIFIED`. External I/O timing/electrical sign-off (`STA-002`) and whole-SoC physical closure remain open.
 
 ## 17. HEX Display
 
@@ -327,7 +327,8 @@ P10-HEX evidence: standalone APB baseline (S0), CTRL RAZ/WI (S1), exact local of
 | `FW-006` | High | BC | Historical SW/LED constants and 16-slot map migration gap. | Keep SW/LED constants and 16-slot map matched to RTL. | `APB-001`, `BOARDIO-003/004` | P04 address-map regression | VERIFIED |
 | `FW-007` | High | BC | P04 implements and host-tests the true-GPIO/IRQ driver; resolved `BOARDIO-001/002` dependencies remove the old blocker, while the explicit GPIO board test remains. | Preserve finalized true-GPIO/IRQ driver and complete board acceptance. | `BOARDIO-001/002` | GPIO host + board tests | IN_PROGRESS |
 | `FW-008` | High | BC | P09B implements coherent `gsensor_read_sample()` API with single-owner CAPTURE/RELEASE lifecycle; complete residual negative/robustness closure. | `GS-001/002` | driver lifecycle + host and CPU MMIO/fault checks PASS; complete reset-negative, misuse/concurrent corner cases remain | IN_PROGRESS |
-| `FW-009` | High | BC | P11 FW contract frozen: coherent CAPTURE-only ADC frame API + independent firmware joystick policy/golden model. | `ADC-001..005`, `CDC-003` | host MMIO ordering, CAPTURE/no-new, HW/FW policy equivalence, RV32I integration | IN_PROGRESS |
+| `FW-009` | High | BC | P11 FW contract frozen: coherent CAPTURE-only ADC frame API + independent firmware joystick policy/golden model. | `ADC-001..005`, `CDC-003` | host MMIO ordering, CAPTURE/no-new, HW/FW policy equivalence, RV32I integration, C4-C physical cadence/orientation | VERIFIED |
+
 | `FW-010` | High | BC | Harden AES argument/busy/auth/timeout/zeroization handling. | `AES-001..007` | KAT/wrong-tag/timeout tests | OPEN |
 | `FW-011` | Medium | BC | Historical `gpio_led_write()` and LEDR9 reset-ownership assumptions. | Keep stale board-I/O assumptions removed. | board-I/O migration | P04 code search + display smoke | VERIFIED |
 | `FW-012` | High | BC | Expand host MMIO regressions and FPGA acceptance applications. | all cleanup blocks | logs + board results | IN_PROGRESS |

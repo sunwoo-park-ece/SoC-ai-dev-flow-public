@@ -334,7 +334,7 @@ GSENSOR_OK 반환 (*out에 샘플 수합 완료)
 - 리셋으로 중단된 전송은 반환 값을 보장하지 않는다.
 - 리셋 해제 후 12-write 초기화가 완료되고 첫 완전 디지털 버스트가 끝날 때까지 `VALID`는 0을 유지한다.
 
-## 13. ADC / Joystick — P11 Target (In-progress)
+## 13. ADC / Joystick — P11 Frozen Baseline
 
 P11 firmware는 generic ADC frame을 사용한다. `ADC_CTRL.ENABLE`은 실제 acquisition request이고 `ADC_STATUS.ENGINE_ENABLED`가 실제 engine state를 알려준다.
 
@@ -347,7 +347,12 @@ HW: HOLD -> combinational Joystick_Policy -> JOY_STATUS
 FW: HOLD -> independent joystick_policy_eval() -> golden/reference result
 ```
 
-두 경로는 동일한 current center/deadzone register 값을 사용하되 독립 구현이어야 한다. Physical polarity 및 application mapping은 board acceptance 전까지 **(In-progress)**다.
+두 경로는 동일한 current center/deadzone register 값을 사용하되 독립 구현이어야 한다. 물리적 축 극성 및 방향 매핑은 Issue #6 C4-C 실기 보드 특성화를 통해 검증 완료되었다:
+- `CH1`: 물리/논리 X축 (수평). 값 증가 $\rightarrow$ **RIGHT**, 값 감소 $\rightarrow$ **LEFT**.
+- `CH2`: 물리/논리 Y축 (수직). 값 증가 $\rightarrow$ **UP / FORWARD**, 값 감소 $\rightarrow$ **DOWN / BACKWARD**.
+- 중립 중심: `CH1 ~ 1859`, `CH2 ~ 1958` (4095 풀스케일 기준).
+- 하드웨어 `ADC_JOY_STATUS`와 펌웨어 `joystick_policy_eval()` 오라클은 실기 보드 검증 전 구간에서 100.0% 일치함을 입증함.
+
 
 ## 14. HEX Display
 
@@ -606,9 +611,9 @@ RTL reconstruction bug가 발견되면 software 보정이 아니라 RTL+spec을 
 
 Private ADXL345 SPI는 별도 generic SPI가 승인되기 전까지 hardware-owned다.
 
-## 27. Target ADC / Joystick — P11 Frozen (In-progress)
+## 27. Target ADC / Joystick — P11 Frozen
 
-P11 target은 generic ADC MMIO, real ENABLE request/ack, fixed/read-only baseline channel set, CAPTURE-only HOLD, reserved CH3..CH6 raw ABI, no live async debug, optional HW joystick child, independent FW golden policy로 동결됐다.
+P11 target은 generic ADC MMIO, real ENABLE request/ack, fixed/read-only baseline channel set, CAPTURE-only HOLD, reserved CH3..CH6 raw ABI, no live async debug, optional HW joystick child, independent FW golden policy로 동결됐으며, 실기 보드 특성화를 통해 물리적 축 극성(CH1=X, CH2=Y) 검증을 완료했다.
 
 세부 register 및 error semantics는 `15_adc_joystick.md`가 정본이다.
 
@@ -859,4 +864,5 @@ ADC snapshot lifecycle은 CAPTURE-only다. 새 LIVE가 있으면 atomic HOLD 교
 
 FW는 raw HOLD + current center/deadzone으로 독립 `joystick_policy_eval()` 계열 함수를 구현하여 HW `JOY_STATUS`의 golden/reference oracle로 사용한다. Calibration write는 HOLD raw가 그대로여도 HW/FW direction 결과를 즉시 바꿀 수 있다.
 
-Physical axis polarity와 ASCII mapping은 board acceptance **(In-progress)**다.
+물리적 축 극성 및 방향 매핑(CH1=X, CH2=Y; right/left, up/down)은 C4-C 실기 보드 특성화를 통해 검증 완료되었다.
+

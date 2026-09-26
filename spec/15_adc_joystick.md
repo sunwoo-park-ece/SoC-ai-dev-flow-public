@@ -1,6 +1,6 @@
 # P11 ADC / Joystick Subsystem Specification
 
-> **Status:** P11 TARGET SPECIFICATION — architecture/specification frozen; RTL/FW/DV implementation and evidence are **(In-progress)**.
+> **Status:** P11 VERIFIED SPECIFICATION — architecture frozen; RTL, FW driver, behavioral DV, physical hardware cadence (167 kHz continuous), direction characterization, and timing regression root cause are fully verified and signed off under Issue #6.
 >
 > **Canonical language:** English. If this file and `kor/15_adc_joystick.ko.md` conflict, this file is authoritative.
 >
@@ -35,7 +35,8 @@ APB_ADC_Controller           generic software-visible ADC peripheral
 
 The P11 baseline remains polling based. No ADC interrupt or PLIC source is introduced by this specification.
 
-The following P11 features are frozen but remain **(In-progress)** until implementation and verification evidence exist:
+The following P11 features are frozen and verified through C1–C4-D implementation and verification evidence:
+
 
 - sole-owner ADC command engine,
 - six-channel-capable internal frame representation,
@@ -313,7 +314,7 @@ future 6-channel first-last skew = 5 us
 future 6-channel ideal interval  = 6 us
 ```
 
-The effective P11 scan-frame cadence is **(In-progress)** and shall be measured from accepted command / response timestamps after the acquisition engine is implemented. The specification shall not equate the 2 us ideal two-channel interval with a measured end-to-end frame period until that evidence exists.
+The effective P11 scan-frame cadence was empirically characterized on physical DE10-Lite hardware under Issue #6 C4-C (using continuous polling over 2.81 million frames): measured average new-frame interval is **299 CPU cycles = 5.980 us** (@ 50 MHz), yielding an effective continuous frame publication rate of **~167.22 kframes/s**. No sequence discontinuity or freshness regression was observed during characterization.
 
 ## 5. Acquisition Engine Contract
 
@@ -800,7 +801,7 @@ The RTL may implement low-side comparison with 13-bit addition/comparison to avo
 | 5 | `Y_VALID` |
 | 31:6 | zero |
 
-Physical X/Y polarity and final LEFT/RIGHT mapping remain **(In-progress)** board acceptance. The logical bit definitions above shall not be silently reversed to preserve a historical ASCII quirk.
+Physical X/Y polarity and final LEFT/RIGHT/UP/DOWN mapping are verified under C4-C physical board characterization (§3.4). CH1 maps to X (increase -> RIGHT, decrease -> LEFT), and CH2 maps to Y (increase -> UP/FORWARD, decrease -> DOWN/BACKWARD).
 
 ## 11. Firmware Policy and Golden-Model Contract
 
@@ -898,7 +899,7 @@ Any future interrupt architecture shall separately define:
 
 ## 14. Verification and Acceptance Requirements
 
-All P11 acceptance work is **(In-progress)** until evidence is attached to the P11 implementation/closure flow.
+P11 acceptance evidence is attached and closed across milestones C1 (RTL/DV), C2 (Mailbox CDC), C3 (Driver/Oracle), C3.5 (CPU Integration), C4-A (Clean Compile), C4-B (Board Smoke), C4-C (Physical Cadence & Orientation Characterization), and C4-D (Timing Root Cause).
 
 ### 14.1 Command ownership and ENABLE
 
@@ -974,17 +975,17 @@ P11 evidence shall not by itself promote global `STA-001` or `STA-002` to closed
 
 ## 15. P11 Requirement Mapping
 
-| Tracker ID | P11 target | Freeze status |
-|---|---|---|
-| `ADC-001` | sole acquisition-engine command owner | (In-progress) |
-| `ADC-002` | real ENABLE request/ack; fixed RO baseline channel configuration | (In-progress) |
-| `ADC-003` | coherent frame + sequence/mask/error + CAPTURE HOLD | (In-progress) |
-| `ADC-004` | physical X/Y polarity and direction mapping board acceptance | (In-progress) |
-| `ADC-005` | generic ADC / optional joystick seam; no live async debug MMIO | (In-progress) |
-| `ADC-006` | async-clock, MMIO, HW/FW policy, Quartus and board regressions | (In-progress) |
-| `CDC-003` | stable frame req/ack mailbox | (In-progress) |
-| `FW-009` | coherent ADC API + independent FW joystick policy | (In-progress) |
-| `APB-005` ADC sub-scope | exact local offsets, no mirrors | (In-progress) |
+| Tracker ID | P11 target | Status | Verification Evidence Reference |
+|---|---|---|---|
+| `ADC-001` | sole acquisition-engine command owner | Verified | Phase 4A C1/C2 directed waveform & ownership tests |
+| `ADC-002` | real ENABLE request/ack; fixed RO baseline channel configuration | Verified | C1/C2 persistent level req/ack handshake tests |
+| `ADC-003` | coherent frame + sequence/mask/error + CAPTURE HOLD | Verified | C2/C3 async mailbox CDC + CAPTURE-only HOLD |
+| `ADC-004` | physical X/Y polarity and direction mapping board acceptance | Verified | C4-C physical board characterization (2.81M frames, §3.4) |
+| `ADC-005` | generic ADC / optional joystick seam; no live async debug MMIO | Verified | C1/C3 MMIO regression + structural review |
+| `ADC-006` | async-clock, MMIO, HW/FW policy, Quartus and board regressions | Verified | C3.5 CPU E2E + C4-A Quartus + C4-B/C/D evidence |
+| `CDC-003` | stable frame req/ack mailbox | Verified | C2 async-clock/jitter mailbox regression |
+| `FW-009` | coherent ADC API + independent FW joystick policy | Verified | C3 driver/golden oracle host & RV32I tests |
+| `APB-005` ADC sub-scope | exact local offsets, no mirrors | Verified | C1 exact local decode, unmapped returns error/zero |
 
 ## 16. Baseline Invariants After P11 Closure
 
@@ -1011,7 +1012,8 @@ joystick FW policy               = independent reference/golden function
 interrupt                        = none / polling
 ```
 
-Do not replace `(In-progress)` with `Verified` solely because this specification is frozen.
+All listed items are verified by raw evidence across C1..C4-D.
+
 
 ## 17. Historical / Pre-P11 Baseline
 

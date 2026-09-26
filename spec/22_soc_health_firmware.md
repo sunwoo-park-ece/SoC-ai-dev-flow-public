@@ -529,7 +529,7 @@ The S0/S1 findings and original statuses above remain historical records. This t
 | HREC-UART | VERIFIED_ALIGNED (health loop/observer); IMPLEMENTATION_ACCEPTED_DOC_STALE (old owning prose) | S3/S4-B accepted, S5 host/real serial RTL: UART0→UART1 RX qualified; UART1 TX observer only. |
 | HREC-GPIO | VERIFIED_ALIGNED (owned pair health); IMPLEMENTATION_ACCEPTED_DOC_STALE (historical prose) | S4-A accepted; S5 host faults and real RTL with simulated GPIO0→1 jumper; physical jumper NOT_RUN. |
 | HREC-GSENSOR | VERIFIED_ALIGNED (API/health progression) | S3 accepted and S5 host/RTL advancing coherent CAPTURE/read/RELEASE; physical sensor NOT_RUN. |
-| HREC-ADC | VERIFIED_ALIGNED (v2 API/health); IMPLEMENTATION_ACCEPTED_DOC_STALE (owning narrative) | S3 accepted, S5 C2/C3 and health host/RTL freshness/validity/errors; C4 still pending. |
+| HREC-ADC | VERIFIED_ALIGNED (v2 API/health/board acceptance) | S3 accepted, S5 C2/C3, and C4 (C4-A..D) physical characterization: 167 kHz continuous cadence, 100% HW/FW oracle match, timing root cause closed; no blockers. |
 | HREC-JOY | VERIFIED_ALIGNED (pure model/health); OBSERVED (compatibility wrapper debt) | S5 raw HOLD/calibration independent oracle and C3 policy boundaries; wrapper limitations unchanged. |
 | HREC-VGA | VERIFIED_ALIGNED (health owner/dashboard); IMPLEMENTATION_ACCEPTED_DOC_STALE (historical waits); OBSERVED (legacy helper ordering) | S4-B accepted; S5 full raster/back-bank/fresh VSYNC/SWAP/DONE and immutable N; monitor NOT_RUN. |
 | HREC-HEX | VERIFIED_ALIGNED (API/getters/health) | S4-A accepted, S5 P10 functional/shadow and shared-SW host/RTL; physical illumination NOT_RUN. |
