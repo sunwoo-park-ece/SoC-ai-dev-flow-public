@@ -643,7 +643,7 @@ Reading `ADC_CTRL` returns only the stored `ENABLE` level; command bits read zer
 | 3 | `HOLD_VALID` | HOLD contains a captured frame |
 | 4 | `NEW_FRAME` | LIVE is newer than HOLD under Section 8.3 |
 | 5 | `MAILBOX_BUSY` | source frame awaiting acknowledgement |
-| 6 | `ASSEMBLY_ACTIVE` | synchronized/captured indication that a source scan is in progress |
+| 6 | *reserved* | read zero |
 | 7 | `ERROR_PENDING` | `ERROR_STATUS != 0` |
 | 31:8 | reserved | read zero |
 
