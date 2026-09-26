@@ -32,13 +32,21 @@
 
 ## Hardware Demos
 
-실제 FPGA 보드 시연 영상, 동작 캡처 및 개발 기록은 프로젝트 소유자의 YouTube 채널에 공개되어 있습니다:
+실제 DE10-Lite FPGA (Intel MAX 10) 보드 상에서 커스텀 RV32I SoC 전체 시스템이 베어메탈로 정상 동작함을 확인한 하드웨어 시연 영상, 보드 사진 및 텔레메트리 로그입니다.
 
-- **YouTube — FPGA / SoC / Embedded Project Demos:** https://www.youtube.com/channel/UC9DlYapKa23KqJkNadjSObQ
+![SoC Health Monitor Live Board Demonstration](docs/assets/images/soc_health_board_demo.jpg)
+
+### 시스템 시연 및 영상 링크
+
+- **YouTube — FPGA / SoC / Embedded Project Channel:** https://www.youtube.com/channel/UC9DlYapKa23KqJkNadjSObQ
+- **실제 보드 SoC Health 실시간 시연 (YouTube Shorts):** https://www.youtube.com/shorts/RxXCySoRTMY
+  - *시연 내용:* 독립형 정본 펌웨어인 [`firmware/apps/soc_health_main.c`](firmware/apps/soc_health_main.c)가 물리 FPGA 상에서 직접 구동되는 모습. 리셋/부팅 시퀀스, 실시간 640×480 @ 60 Hz VGA 헬스 모니터 대시보드 렌더링(에포크 사이클 증가, 하트비트 감시, IP별 PASS/FAIL 상태), 슬라이드 스위치 조작에 따른 사용자 LED 및 6자리 7세그먼트 디스플레이(HEX)의 APB MMIO 수학적 매핑 출력, 아날로그 조이스틱 조작 시 결측(MISS) 없는 ADC 추종, PC UART 포트를 통한 115200 baud 실시간 텔레메트리 스트리밍을 포괄합니다.
+- **과거 FPGA SoC + STM32 RC-Car 데모:** [보드/시스템 시연 영상](https://www.youtube.com/shorts/XYbi3uSHmUU). (참고: `firmware/apps/final_main.c`는 외부 STM32 연동 과거 데모 재현용으로 보존된 것이며, 본 SoC의 단독 정본 통합 펌웨어는 [`firmware/apps/soc_health_main.c`](firmware/apps/soc_health_main.c)입니다.)
 
 시연 영상 및 캡처 사진은 물리적 DE10-Lite FPGA 보드에서의 정상 동작을 확인하는 보조적인 시각적 증거입니다. 모든 기술적 주장과 검증 결과는 저장소 내 공식 엔지니어링 패키지를 통해 추적 가능합니다:
 - **P08B VGA 하드웨어 클리어 및 W1C 상태 통합:** 엔지니어링 사례 분석 [CS-009](docs/engineering/CS-009-p08b-vga-hwclear-w1c.md) 및 공개 증적 [P08B-VGA-EV-01](reports/evidence/vga-hwclear/summary.md) 수록.
 - **정확한 9,600회 HW Clear 검증:** 프레임버퍼를 정확히 9,600워드 클리어한다는 내부 카운트는 방향성 RTL 시뮬레이션 어설션([`tb_p08b_vga.sv`](verification/directed/vga/tb_p08b_vga.sv))으로 검증했으며, 화면에 보이는 클리어/스왑 시퀀스는 별도의 [보드 사진](reports/evidence/vga-hwclear/board/)으로 기록했습니다.
+- **P11 ADC 조이스틱 및 시스템 통합:** 독립적 오라클 검증, CPU 라이프사이클 테스트, 물리 케이던스 측정(167 kHz 연속 샘플링), 실기 보드 텔레메트리 로그를 통해 신뢰성을 증명했습니다.
 
 *시각적 데모는 화면 표시 동작을 보여줄 뿐이며, 내부 버스 프로토콜 정합성, 클럭 도메인 교차(CDC) 신호 무결성, 정적 타이밍 분석(STA) 결과를 증명하지 않습니다. 모든 기술적 계약은 시뮬레이션 어설션, 타이밍 분석 보고서, 검증 증적에 의해서만 규정됩니다.*
 

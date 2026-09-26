@@ -32,16 +32,21 @@ Key baseline subsystems:
 
 ## Hardware Demos
 
-Physical FPGA board demonstrations, execution captures, and development logs are published on the project owner's YouTube channel:
+Physical FPGA board demonstrations, execution captures, and development logs confirm full system-level integration and baremetal bring-up of the custom RV32I SoC on the Terasic DE10-Lite (Intel MAX 10 FPGA).
 
-- **YouTube — FPGA / SoC / Embedded Project Demos:** https://www.youtube.com/channel/UC9DlYapKa23KqJkNadjSObQ
-- **Historical FPGA SoC + STM32 RC-car demo:** [board/system recording](https://www.youtube.com/shorts/XYbi3uSHmUU). `firmware/apps/final_main.c` is **HISTORICAL RC-CAR SYSTEM DEMO FIRMWARE**, retained for provenance/demo reproduction and dependent on that external system; it is not the canonical standalone SoC integration-test firmware.
+![SoC Health Monitor Live Board Demonstration](docs/assets/images/soc_health_board_demo.jpg)
 
-The future standalone `soc_health_main` application is defined by the [SoC health firmware contract and reconciliation tracker](spec/22_soc_health_firmware.md). S1 freezes documentation only; implementation and runtime acceptance remain pending. After Issue #7 completion/review, it replaces the historical demo as the Issue #6 C4-A/C4-B firmware basis; C4 has not resumed. AES-GCM is excluded from its health qualification as `EXCLUDED_PENDING_CLEANUP`.
+### System Demonstrations & Video Links
+
+- **YouTube — FPGA / SoC / Embedded Project Channel:** https://www.youtube.com/channel/UC9DlYapKa23KqJkNadjSObQ
+- **Real-Board SoC Health Demonstration (YouTube Shorts):** https://www.youtube.com/shorts/RxXCySoRTMY
+  - *Demonstration scope:* Live execution of the standalone [`firmware/apps/soc_health_main.c`](firmware/apps/soc_health_main.c) on the physical FPGA. Demonstrates reset/boot sequence, real-time 640×480 @ 60 Hz VGA health dashboard rendering (epoch cycle progression, heartbeat monitoring, subsystem PASS/FAIL metrics), interactive slide switch toggling reflected onto user LEDs and 6-digit 7-segment displays via APB MMIO mapping, ADC analog joystick deflection tracking without missed frames, and continuous PC UART telemetry at 115200 baud.
+- **Historical FPGA SoC + STM32 RC-Car Demo:** [board/system recording](https://www.youtube.com/shorts/XYbi3uSHmUU). Note: `firmware/apps/final_main.c` is retained solely for historical provenance and demo reproduction with the external STM32 subsystem; the canonical standalone integration firmware for the SoC is [`firmware/apps/soc_health_main.c`](firmware/apps/soc_health_main.c).
 
 Demonstration recordings and photographs serve as supporting visual evidence confirming hardware bring-up on the physical DE10-Lite FPGA board. Engineering claims and verification statuses are substantiated by formal in-tree evidence packages:
 - **P08B VGA Hardware Clear & W1C Status Integration:** Documented in [CS-009](docs/engineering/CS-009-p08b-vga-hwclear-w1c.md) with measured execution evidence in [P08B-VGA-EV-01](reports/evidence/vga-hwclear/summary.md).
 - **Exact-Count HW Clear Verification:** The exact 9,600-word framebuffer clear count is verified by directed RTL simulation assertions ([`tb_p08b_vga.sv`](verification/directed/vga/tb_p08b_vga.sv)); the visible clear/swap sequence is documented separately by [board photographs](reports/evidence/vga-hwclear/board/).
+- **P11 ADC Joystick & System Integration:** Verified through independent behavioral oracles, CPU lifecycle tests, physical cadence measurement (167 kHz continuous acquisition rate), and real-board telemetry logging.
 
 *Visual demonstrations illustrate observable screen behavior; they do not prove internal bus protocol compliance, CDC clock-domain crossing safety, or static timing analysis (STA) sign-off. All technical contracts remain governed by simulation assertions, timing reports, and formal verification evidence.*
 
