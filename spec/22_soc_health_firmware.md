@@ -1,6 +1,6 @@
 # SoC Health Firmware Contract and Reconciliation Tracker
 
-> **Status:** S1/S2 contracts preserved; S3 Timer/UART/G-sensor/ADC/joystick/VGA providers implemented, locally host-tested, integrated with real peripheral RTL and built for RV32I. S4-A board I/O providers and HEX raw getters are implemented with host/RTL checks; S4-B hardware dashboard/PC UART observers remain unimplemented; no physical board, timing, or Clean Baseline acceptance.
+> **Status:** S1/S2 contracts preserved; S3 Timer/UART/G-sensor/ADC/joystick/VGA providers implemented, locally host-tested, integrated with real peripheral RTL and built for RV32I. S4-A board I/O providers and HEX raw getters are implemented with host/RTL checks; S4-B shared formatter and real VGA/UART1 TX observers are implemented and locally verified; no physical board, timing, or Clean Baseline acceptance.
 > **Language:** English is canonical; [Korean companion](kor/22_soc_health_firmware.ko.md) mirrors this contract.
 > **Roles:** Role A defines the standalone health firmware. Role B consolidates baseline-cleanup spec/FW reconciliation debt without replacing owning IP specifications.
 > **Source anchor:** `390db6da2dcc8bbfa1c93b444525b0ba1e852056`. Trace IDs: Issue #7 S0 result `5845036298`, S0 acceptance `5845199371`, S1 task `5845199693`; these are internal governance locators, not public runtime evidence.
@@ -13,7 +13,7 @@ Owner-provided demonstration: [FPGA SoC + STM32 RC-car demo](https://www.youtube
 
 The future canonical application is `firmware/apps/soc_health_main.c`. It shall run standalone without the external RC-car system, exercise production peripheral contracts, report progress and failures, and freeze one snapshot for VGA and PC UART observers. It remains a reusable system diagnostic rather than an ADC-only test.
 
-S1 changes documentation only. The application, services, providers, scheduler, and HEX raw getters do not exist as S1 deliverables. S2 added §10.1 infrastructure; S3 adds only the strong/functional providers in §10.2. S3 was accepted before S4-A; S4-A requires owner review before S4-B; Issue #6 C4 remains paused. Owning IP specifications remain authoritative for registers, hardware behavior, and existing acceptance scope. Preserve all existing STOP gates; this document does not reopen P08B, add interrupts/PLIC, redesign ADC/peripheral RTL, change pins, or close global cleanup/STA/board requirements.
+S1 changes documentation only. The application, services, providers, scheduler, and HEX raw getters do not exist as S1 deliverables. S2 added §10.1 infrastructure; S3 adds only the strong/functional providers in §10.2. S3 was accepted before S4-A; S4-A was accepted before S4-B; S4-B requires owner review before S5; Issue #6 C4 remains paused. Owning IP specifications remain authoritative for registers, hardware behavior, and existing acceptance scope. Preserve all existing STOP gates; this document does not reopen P08B, add interrupts/PLIC, redesign ADC/peripheral RTL, change pins, or close global cleanup/STA/board requirements.
 
 ## 2. Health model and failure history
 
@@ -179,7 +179,7 @@ The services layer is application service code, not a hardware driver. The minim
 | S4-B OBSERVERS | VGA and PC UART shared-snapshot rendering, separately gated after S4-A review. |
 | S5 CLOSURE | Host/unit tests, RV32I build/image-size check, relevant existing regressions, clean local checkpoint. |
 
-S1 implemented none of S2–S5. S2 infrastructure, S3 providers and S4-A board I/O are implemented; stop for owner review before S4-B. After S5, stop for review before Issue #6 C4-A/C4-B resumes. No push, vendor execution, baseline release, or global tracker closure is implicitly authorized.
+S1 implemented none of S2–S5. S2 infrastructure, S3 providers and S4-A board I/O and S4-B observers are implemented; stop for owner review before S5. After S5, stop for review before Issue #6 C4-A/C4-B resumes. No push, vendor execution, baseline release, or global tracker closure is implicitly authorized.
 
 ### 10.1 Accepted S2 core ABI, ownership and deterministic signature
 
@@ -191,7 +191,7 @@ Progress and deadline-miss tokens are deduplicated per IP/event stream. After th
 
 Two static snapshot slots hold copied logical records and metadata. Publishing acquires both observer leases; occupied slots are never overwritten. If both are occupied, publication returns null and increments live backlog. Each observer releases exactly its own lease on completion or timeout; the slot can be reused only after both releases. A pointer is valid only for its acquired lease lifetime, and must not be used after release/reinitialization. There is no concurrent/interrupt ownership protocol. Live updates and releases change future-snapshot metadata, never published content. Observer completion tracks placeholder consumption, not physical display or UART delivery.
 
-The two const-input cursors consume the same snapshot pointer, epoch and signature. Each ready cursor emits one character of `EPOCH=xxxxxxxx SIG=xxxxxxxx` per service call. A 64-epoch budget releases a stalled observer and increments only live observer misses; the other observer can finish independently. The application requests publication every 32 software turns and retains an active render until completion/timeout. Full hardware presentation remains S4-B work.
+The two const-input cursors consume the same snapshot pointer, epoch and signature. Each ready cursor emits one character of `EPOCH=xxxxxxxx SIG=xxxxxxxx` per service call. A 64-epoch budget releases a stalled observer and increments only live observer misses; the other observer can finish independently. The application requests publication every 32 software turns and retains an active render until completion/timeout. S4-B adds the real observers in §10.4; the S2 cursors remain only for compatibility/unit tests.
 
 Signature is 32-bit FNV-1a (seed 2166136261, prime 16777619), processing each explicit uint32 word as four little-endian bytes. Target prime multiplication is implemented with shifts/adds; no multiply/divide helper is required. Exact 97-word order:
 
@@ -233,12 +233,52 @@ The signed/copied record detail remains 32 bits: SW stores the captured 10-bit v
 
 Evidence remains GPIO=PHYSICAL_LOOPBACK (automated wiring is **simulated**), SW=INPUT_OBSERVATION, LED/HEX=REGISTER_READBACK. Successful observation/mirror generations never become STRONG_PROGRESS. Actual GPIO jumper continuity, SW electrical behavior, LED illumination/mapping and HEX illumination/digit/polarity remain NOT_RUN board gates.
 
-Run `scripts/wsl/soc_health_board_io_test.sh`, `scripts/wsl/soc_health_board_io_rtl_test.sh` and `scripts/wsl/soc_health_board_io_negative_test.sh` with fresh external RUN_ROOT. Host tests retain all S3 assertions and check the full decoder/raw matrix, canonical getter offsets/masks/shadow, shared generation, GPIO faults/recovery, consumers' bounded retirement and all-active fairness with snapshot immutability during failure. RTL integration executes production C core/providers/drivers against production APB_GPIO/SW/LED/HEX, with a simulated pin jumper and independent external SW-derived LED/physical-segment oracle. It does not execute a RISC-V CPU. Isolated source defects and compile/leaf/guard exits must be rejected with immutable raw logs and actual source hashes. Existing S2/S3/P04/P10 suites remain separate regression gates. S4-B dashboard and real PC UART snapshot output remain unimplemented; S2 non-MMIO observer cursors remain in place. Stop for S4-A owner review.
+Run `scripts/wsl/soc_health_board_io_test.sh`, `scripts/wsl/soc_health_board_io_rtl_test.sh` and `scripts/wsl/soc_health_board_io_negative_test.sh` with fresh external RUN_ROOT. Host tests retain all S3 assertions and check the full decoder/raw matrix, canonical getter offsets/masks/shadow, shared generation, GPIO faults/recovery, consumers' bounded retirement and all-active fairness with snapshot immutability during failure. RTL integration executes production C core/providers/drivers against production APB_GPIO/SW/LED/HEX, with a simulated pin jumper and independent external SW-derived LED/physical-segment oracle. It does not execute a RISC-V CPU. Isolated source defects and compile/leaf/guard exits must be rejected with immutable raw logs and actual source hashes. Existing S2/S3/P04/P10 suites remain separate regression gates. At S4-A, the dashboard/real UART observers remained unimplemented; S4-B adds §10.4. S2 cursors remain a non-MMIO compatibility/test API. S4-A owner review was accepted before S4-B.
 
+
+### 10.4 S4-B shared formatter and real observers
+
+`include/soc_health_observers.h` / `services/soc_health_observers.c` implement one pure `soc_health_format_line(snapshot, line_index, buffer, size)` used by both observers. The return value is the untruncated logical length; nonzero size always writes a terminator within the buffer, size zero writes nothing. There are 19 logical lines, fixed 48-byte buffers, uppercase hexadecimal fields and no printf/allocation/MMIO in the formatter. State encoding is P/W/F/?/X. All values are copied snapshot input; no observer reads live health state for text.
+
+The frozen logical format is (values illustrative):
+
+```text
+SOC HEALTH EP=00001234 SIG=89ABCDEF
+P=000007FF W=00000000 F=00000000
+S=00000004 X=00000800
+
+IP    ST HB       MISS DETAIL
+SYS   P  00001234 0000 RUN
+TMR   P  00000042 0000 READY
+UART  P  00000031 0000 SEQ=00000031
+GPIO  P  00000008 0000 LOOP
+GSEN  P  00000079 0000 SEQ=000001A2
+ADC   P  00000078 0000 SEQ=000001A1
+JOY   P  00000078 0000 MATCH
+VGA   P  00000020 0000 SWAP
+SW    P  00000041 0000 V=155
+LED   P  00000041 0000 V=155
+HEX   P  00000041 0000 M=0 P=155
+AES   X  00000000 0000 PENDING
+
+SYSTEM: PASS
+```
+
+If current failures exist, the footer is `SYSTEM: FAIL F=xxxxxxxx S=xxxxxxxx`. Non-PASS records (except AES PENDING) show `D=xxxxxxxx` instead of an unreliable symbolic detail. MISS uses the low 16 bits; SEQ/HB/masks/EP/SIG/raw detail show all 32 bits (eight hexadecimal digits), per the subsequent User/Chat instruction. SW/LED V is the retained 10-bit captured value; HEX M/P derives from copied captured SW. To make genuine UART/GSEN/ADC SEQ available without live access or ABI expansion, S4-B records the qualified transaction/sample/HOLD sequence in their **successful report detail**. At S4-A these details were baud=434/zero/FRAME_COUNT; the gap was reproduced and reported before the three narrow changes. Tokens, qualification rules, count freshness/provider-local baseline, error codes, core snapshot layout/signature and S4-A semantics are preserved. ADC successful detail now means HOLD seq, not FRAME_COUNT; this diagnostic payload change is tracked below.
+
+VGA uses the existing 640x480 one-bit framebuffer and unchanged 8x8 font renderer. The renderer operates in 32-pixel-aligned words, so x=32 (rather than suggested x=24); y=16+16*logical_line. Table header is y=80, IP rows y=96..272, footer y=304. Blank logical lines give section gaps, and every glyph is inside the visible region. The existing S3 VGA FSM remains the **sole operation owner**. Its PREPARE callback clears the back buffer in at most eight words per visit, then renders at most four glyphs/eight words per visit. Completion of all lines precedes stale VSYNC/DONE acknowledgement, fresh VSYNC, SWAP, fresh associated DONE with no ABORT, qualification and VGA lease release. There is no separate one-word probe transaction in the application. The no-hook one-word path remains solely for the accepted S3 regression harness. No monolithic begin-frame/clear helper, hardware CLEAR command or second operation owner is introduced.
+
+The two real observers acquire the same published N with independent VGA/UART pointers and reader bits. VGA release is called by the sole owner on DONE/abort/readiness loss/deadline; UART release is independent. N contains the earlier VGA state; completion changes live state only, appearing in a future publication. Pointers are cleared on release; no text resumes through a released pointer. The existing two-slot no-overwrite/backlog contract and 97-word signature ABI remain unchanged. The application serializes one active observer pair and accounts publication backlog while it is pending; lease tests also exercise both occupied slots.
+
+UART1 TX uses one bounded readiness attempt/at most one byte per service turn, with the unchanged divisor configured by the existing UART provider. It emits `=== SOC HEALTH SNAPSHOT ===\r\n`, every common logical line with CRLF (including blank lines), then 40 hyphens and CRLF. After the last byte is accepted it waits for TX readiness before releasing, so the final byte drains. There is no ANSI/cursor/clear-screen output: PuTTY retains an append-only diagnostic log. A 262144-software-epoch observer budget releases only UART's lease and records live observer misses on timeout. VGA uses its bounded preparation budget and existing owner deadline across the transaction. UART1 TX never reports UART heartbeat progress; UART0 TX→UART1 RX remains the unchanged automated heartbeat path.
+
+Host checks use literal logical-line fixtures and the accepted unchanged font asset with independent per-pixel raster placement. They assert bounds/determinism/no-MMIO, state/detail/footer, exact PC text, both completion orders, partial work, immutable N, independent timeout/abort release, backlog and all-active fair visits/progress. Real provider/driver/RTL integration checks every accepted framebuffer write's commit/address/data/back bank, the complete independently expected raster before SWAP, presentation bank after fresh DONE, and an independently decoded UART1 TX serial stream with the identical frozen EP/SIG. It simultaneously exercises UART0→UART1 RX and S3 strong peripherals, and is not CPU E2E. Run fresh external RUN_ROOT with `scripts/wsl/soc_health_observer_test.sh`, `soc_health_observer_rtl_test.sh`, and `soc_health_observer_negative_test.sh` (all under `scripts/wsl/`). Targeted isolated defects and successful-target/failed-guard fixtures must propagate nonzero and consistent FAIL artifacts. Build compiles only the new observer service with `-Os` to preserve the existing 16KiB IMEM without duplicating text/font infrastructure.
+
+Physical VGA image quality, UART cable/USB adapter/PuTTY, GPIO jumper, SW/LED/HEX/sensors/ADC, real-time quotas, stack high-water and vendor timing remain NOT_RUN. Stop for S4-B owner review before S5; C4 remains paused and no push is authorized.
 
 ## 11. Acceptance and future falsification map
 
-Future tests shall connect contract → independently derived oracle → stimulus/checker → unique source/run → raw evidence/verdict. All were NOT_RUN at S1 freeze. S2 now has a passing host suite with an independent serialized-signature oracle, per-ID masks, padding/copy/lease tests, token/deadline tests and bounded scheduler/observer tests; six isolated defect mutations are rejected. Compile, target and guard failure fixtures propagate nonzero to the parent and consistent FAIL reports. The actual RV32I skeleton build passes; existing display_smoke before/after memory images are identical. Those hardware/board/review scopes were NOT_RUN in S2. S3 provider host tests and actual peripheral RTL integration now pass, including isolated defect rejection and relevant prior regressions. Physical peripheral execution, board wiring/display, real-time quotas and stack high-water remain NOT_RUN. S3 owner review was accepted before S4-A; S4-A host/RTL checks and targeted rejection are verified under §10.3, with S4-A owner review still required. Run `RUN_ROOT=<external-directory> scripts/wsl/soc_health_host_test.sh`; each run must use fresh output storage. Raw evidence is retained outside the checkout and reported through the stage result, not embedded in this contract.
+Future tests shall connect contract → independently derived oracle → stimulus/checker → unique source/run → raw evidence/verdict. All were NOT_RUN at S1 freeze. S2 now has a passing host suite with an independent serialized-signature oracle, per-ID masks, padding/copy/lease tests, token/deadline tests and bounded scheduler/observer tests; six isolated defect mutations are rejected. Compile, target and guard failure fixtures propagate nonzero to the parent and consistent FAIL reports. The actual RV32I skeleton build passes; existing display_smoke before/after memory images are identical. Those hardware/board/review scopes were NOT_RUN in S2. S3 provider host tests and actual peripheral RTL integration now pass, including isolated defect rejection and relevant prior regressions. Physical peripheral execution, board wiring/display, real-time quotas and stack high-water remain NOT_RUN. S3 owner review was accepted before S4-A; S4-A host/RTL checks and targeted rejection are verified under §10.3, S4-A owner review was accepted; S4-B owner review is still required. Run `RUN_ROOT=<external-directory> scripts/wsl/soc_health_host_test.sh`; each run must use fresh output storage. Raw evidence is retained outside the checkout and reported through the stage result, not embedded in this contract.
 
 | Criterion | Oracle / targeted defect that must be rejected |
 |---|---|
@@ -303,3 +343,11 @@ No new owning spec/FW mismatch was discovered in S3. Existing provider integrati
 ### 12.5 S4-A reconciliation scope
 
 No new owning spec/FW mismatch was discovered. HREC-HEX retains its S0 origin and records the approved getter implementation/host/RTL verification; unrelated historical API narratives and physical acceptance are not closed.
+
+### 12.6 S4-B reconciliation scope
+
+| ID / IP | Source requirement | Observed gap at S4-A | Narrow S4-B disposition | Status / evidence |
+|---|---|---|---|---|
+| HREC-OBS-SEQ / UART, GSEN, ADC observer input | S4-B common-format SEQ and frozen-only text | Actual qualified tokens remained live; copied successful detail held baud=434/0/FRAME_COUNT, so truthful SEQ was unavailable. | Store actual qualified sequence in successful detail only; preserve core ABI, qualification and failure semantics. ADC FRAME_COUNT baseline remains provider-local. | IMPLEMENTED_HOST_RTL_VERIFIED; S4-B finding and real provider→snapshot→formatter assertions; owner review pending. |
+
+No other owning specification or cleanup history is reconciled here. This finding does not reopen peripheral RTL, physical acceptance, C4 or P08B STOP gates.

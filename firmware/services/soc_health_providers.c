@@ -44,6 +44,7 @@ void soc_health_providers_init(soc_health_providers_t *p)
     p->adc_count = p->adc_error = 0u;
     p->adc_center_x = p->adc_center_y = p->adc_deadzone = 0u;
     p->board_context = 0; p->board_service = 0;
+    p->vga_context = 0; p->vga_prepare = 0; p->vga_release = 0;
     p->frame_eligible = 0u;
     p->frame.seq = 0u; p->frame.valid_mask = 0u;
     for (i = 0; i < 6u; i++) p->frame.ch[i] = 0u;
@@ -151,7 +152,7 @@ void soc_health_uart_service(soc_health_core_t *c, soc_health_providers_t *p)
                 fail(c, SOC_IP_UART_LOOP, 0x2003u); uart_resync(p); return;
             }
             (void)soc_health_report(c, SOC_IP_UART_LOOP, SOC_STEP_PROGRESS,
-                                    p->uart_seq, 434u);
+                                    p->uart_seq, p->uart_seq);
             uart_resync(p); return;
         }
     }
@@ -165,7 +166,7 @@ void soc_health_gsensor_service(soc_health_core_t *c, soc_health_providers_t *p)
     if (expired(c, SOC_IP_GSENSOR, &p->gsensor)) arm(c, p, &p->gsensor);
     result = gsensor_read_sample(&sample);
     if (result == GSENSOR_OK) {
-        if (soc_health_report(c, SOC_IP_GSENSOR, SOC_STEP_PROGRESS, sample.seq, 0u))
+        if (soc_health_report(c, SOC_IP_GSENSOR, SOC_STEP_PROGRESS, sample.seq, sample.seq))
             arm(c, p, &p->gsensor);
     } else if (result != GSENSOR_NO_NEW && result != GSENSOR_BUSY)
         fail(c, SOC_IP_GSENSOR, 0x3000u | (uint32_t)result);
@@ -241,7 +242,7 @@ void soc_health_adc_service(soc_health_core_t *c, soc_health_providers_t *p)
     }
     count = adc_get_frame_count(); delta = count - p->adc_count;
     if (delta == 0u || delta >= 0x80000000u) return;
-    if (soc_health_report(c, SOC_IP_ADC, SOC_STEP_PROGRESS, p->frame.seq, count)) {
+    if (soc_health_report(c, SOC_IP_ADC, SOC_STEP_PROGRESS, p->frame.seq, p->frame.seq)) {
         p->adc_count = count; p->frame_eligible = 1u;
         arm(c, p, t);
         soc_health_joy_service(c, p); /* exact captured generation, before next CAPTURE */
@@ -256,12 +257,18 @@ void soc_health_vga_service(soc_health_core_t *c, soc_health_providers_t *p)
     if ((status & VRAM_STATUS_OP_ABORT) != 0u) {
         fail(c, SOC_IP_VGA, 0x60000000u | status); /* preserve before W1C */
         vram_clear_events(VRAM_STATUS_OP_ABORT | VRAM_STATUS_OP_DONE | VRAM_STATUS_VSYNC);
+        if (p->vga_release) p->vga_release(c, p->vga_context, 0);
         t->phase = VGA_READY; arm(c, p, t); return;
     }
-    if (expired(c, SOC_IP_VGA, t)) { t->phase = VGA_READY; return; }
+    if (expired(c, SOC_IP_VGA, t)) {
+        if (p->vga_release) p->vga_release(c, p->vga_context, 0);
+        t->phase = VGA_READY; return;
+    }
     if ((status & VRAM_STATUS_DOMAIN_READY) == 0u) {
         if (t->phase != VGA_READY) {
-            fail(c, SOC_IP_VGA, 0x61000000u | status); t->phase = VGA_READY;
+            fail(c, SOC_IP_VGA, 0x61000000u | status);
+            if (p->vga_release) p->vga_release(c, p->vga_context, 0);
+            t->phase = VGA_READY;
         }
         return;
     }
@@ -271,8 +278,14 @@ void soc_health_vga_service(soc_health_core_t *c, soc_health_providers_t *p)
         break;
     case VGA_PREPARE:
         if ((status & VRAM_STATUS_OP_BUSY) != 0u) break;
-        vram_write_word(0u, 0u); /* one deterministic back-bank word, no clear op */
-        t->phase = VGA_ARM; break;
+        if (p->vga_prepare) {
+            int prepared = p->vga_prepare(c, p->vga_context);
+            if (prepared < 0) { t->phase = VGA_READY; t->deadline.armed = 0u; }
+            else if (prepared) t->phase = VGA_ARM;
+        } else { /* S3-only harness, not a second application operation owner. */
+            vram_write_word(0u, 0u); t->phase = VGA_ARM;
+        }
+        break;
     case VGA_ARM:
         vram_clear_events(VRAM_STATUS_VSYNC | VRAM_STATUS_OP_DONE);
         t->phase = VGA_FRESH; break;
@@ -282,10 +295,14 @@ void soc_health_vga_service(soc_health_core_t *c, soc_health_providers_t *p)
         /* Recheck ABORT before start_operation clears old events internally. */
         status = vram_status();
         if ((status & VRAM_STATUS_OP_ABORT) != 0u) {
-            fail(c, SOC_IP_VGA, 0x60000000u | status); t->phase = VGA_READY; break;
+            fail(c, SOC_IP_VGA, 0x60000000u | status);
+            if (p->vga_release) p->vga_release(c, p->vga_context, 0);
+            t->phase = VGA_READY; break;
         }
         if (vram_start_operation(VRAM_CTRL_SWAP) != VRAM_RESULT_OK) {
-            fail(c, SOC_IP_VGA, 0x62000000u | status); t->phase = VGA_READY; break;
+            fail(c, SOC_IP_VGA, 0x62000000u | status);
+            if (p->vga_release) p->vga_release(c, p->vga_context, 0);
+            t->phase = VGA_READY; break;
         }
         t->phase = VGA_DONE; break;
     case VGA_DONE:
@@ -294,8 +311,11 @@ void soc_health_vga_service(soc_health_core_t *c, soc_health_providers_t *p)
         (void)soc_health_report(c, SOC_IP_VGA, SOC_STEP_PROGRESS,
                                 ++t->generation, status);
         vram_clear_events(VRAM_STATUS_OP_DONE | VRAM_STATUS_VSYNC);
+        if (p->vga_release) p->vga_release(c, p->vga_context, 1);
         t->phase = VGA_READY; arm(c, p, t); break;
-    default: fail(c, SOC_IP_VGA, 0x6001u); t->phase = VGA_READY; break;
+    default: fail(c, SOC_IP_VGA, 0x6001u);
+        if (p->vga_release) p->vga_release(c, p->vga_context, 0);
+        t->phase = VGA_READY; break;
     }
 }
 

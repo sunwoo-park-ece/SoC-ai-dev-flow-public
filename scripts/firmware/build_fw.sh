@@ -94,9 +94,11 @@ while IFS= read -r src; do
 done < <(find "${DRIVER_DIR}" "${PROTOCOL_DIR}" -maxdepth 1 -name '*.c' | sort)
 
 if [[ "${FW_NAME}" == "soc_health_main" ]]; then
-  for service in soc_health soc_health_probes soc_health_render soc_health_providers soc_health_board_io; do
+  for service in soc_health soc_health_probes soc_health_render soc_health_providers soc_health_board_io soc_health_observers; do
     obj="${OUT_DIR}/service_${service}.o"
-    "${CC}" "${CFLAGS[@]}" -c "${ROOT_DIR}/firmware/services/${service}.c" -o "${obj}"
+    service_cflags=()
+    if [[ "${service}" == "soc_health_observers" ]]; then service_cflags=(-Os); fi
+    "${CC}" "${CFLAGS[@]}" "${service_cflags[@]}" -c "${ROOT_DIR}/firmware/services/${service}.c" -o "${obj}"
     objects+=("${obj}")
   done
 fi

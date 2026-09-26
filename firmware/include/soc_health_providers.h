@@ -21,6 +21,9 @@ typedef struct {
     uint16_t adc_center_x, adc_center_y, adc_deadzone;
     adc_frame_t frame;
     uint8_t frame_eligible;
+    void *vga_context;
+    int (*vga_prepare)(soc_health_core_t *, void *);
+    void (*vga_release)(soc_health_core_t *, void *, int);
     void *board_context;
     void (*board_service)(soc_health_core_t *, void *, soc_ip_id_t);
 } soc_health_providers_t;
