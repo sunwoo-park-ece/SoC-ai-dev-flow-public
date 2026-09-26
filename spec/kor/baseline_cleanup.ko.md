@@ -143,7 +143,7 @@ Phase F — regression / Quartus / board / report
 | `APB-002` | High | BC | `[27:20]` ignored -> alias. | `0x4000_0000..0x400F_FFFF`만 canonical decode. | `01_memory_map`, `04_ahb_fabric`, `05_apb_subsystem` | alias negative | VERIFIED |
 | `APB-003` | High | BC | SETUP에서 new PWDATA stable 미보장. | SETUP→ACCESS address/control/data stable. | `05_apb_subsystem` | APB assertion | VERIFIED |
 | `APB-004` | High | BC | reserved/invalid silent zero/ready. | 승인된 A2 전체 offset 검증, side-effect gate, default `PSLVERR`, bridge ERROR 구현. | `05_apb_subsystem`, `20_board_io_architecture` | reserved/offset tests | VERIFIED |
-| `APB-005` | Medium | BC | peripheral register mirror; P06B Timer, P07 UART 및 P10-HEX Display sub-scope 종결. | touched block은 canonical offset만 decode. | peripheral specs | Timer, 두 UART, HEX Display: full slot-offset decode/mirror 제거; HEX PADDR[15:0] exact decode 및 bridge 억제/2사이클 ERROR 검증; 나머지 peripheral test 필요 | OPEN |
+| `APB-005` | Medium | BC | peripheral register mirror; Timer, UART, HEX Display 및 ADC slot-5 sub-scope 종결. | touched block은 canonical offset만 decode. | peripheral specs | Timer, 두 UART, HEX, ADC slot-5 정규 v2 로컬 오프셋 디코드/예약 오프셋 PSLVERR/에일리어스 억제 VERIFIED (C1/C3/C3.5); 나머지 peripheral test 필요 | IN_PROGRESS |
 | `APB-006` | Medium | AXI | PSTRB 없음. | cleanup은 aligned32 유지. | `05_apb_subsystem`, `19_firmware_contract` | partial-write dependency 없음 | DEFERRED |
 
 Phase 4A-3A 시점에는 slot 8/9와 후속 ISA/trap 근거가 남아 `APB-001`과 `TRAP-003`이 `IN_PROGRESS`였다. 이후 3B/3B3R이 `TRAP-003`을, P04 공개 검증·사용자 post-fit 검토가 `APB-001`을 종결하여 현재 둘 다 `VERIFIED`다. 전체 baseline cleanup 종료를 뜻하지 않는다.
@@ -156,7 +156,7 @@ Phase 4A-3A 시점에는 slot 8/9와 후속 ISA/trap 근거가 남아 `APB-001`�
 | `RST-002` | High | BC | 과거 generated-domain release/PLL-ready gap은 baseline VGA, ADC project logic, PCLK-only G-sensor에서 해결됨. | VGA `locked` qualification, pclk_25/adc_sys_clk local release sync, vendor-managed ADC/Qsys reset, G-sensor 내부 SPI clock 부재를 보존. | P05 lock/reset + fitted PLL/reset/clock inventory | VERIFIED |
 | `CDC-001` | High | BC | 활성 VGA ownership crossing의 정적 CDC closure가 확립되지 않음. | frame-safe CDC/ownership handshake. | static CDC sign-off NOT_RUN / unresolved | OPEN |
 | `CDC-002` | Blocker | BC | 과거 spi_clk->PCLK multi-bit CDC는 A6에서 제거됨; P09B가 LIVE/HOLD 발행으로 torn sample을 해결함; 독립 CDC/negative/물리 closure 잔여. | LIVE/HOLD를 통한 PCLK 소프트웨어 XYZ snapshot + VALID/SEQ 보존; 잔여 closure evidence 완료. | first-sample validity, APB read/refresh 및 atomic XYZ 시험; async reset-negative/timing 잔여 | IN_PROGRESS |
-| `CDC-003` | Blocker | BC | ADC response direct CDC. | coherent XY publication. | torn-sample | OPEN |
+| `CDC-003` | Blocker | BC | 과거 ADC direct CDC를 안정된 bundled-data req/ack 스캔 프레임 메일박스(`adc_frame_mailbox_cdc`)로 대체. | 완전한 프레임 페이로드의 ACK 유지, 단일 에지 PCLK LIVE 발행, torn-frame 방지. | C2 비동기 클록/지터 메일박스 회귀 검증, torn-frame/페이로드 assertion, 뮤테이션 검출 PASS; C4-B/C4-C 2.81M 연속 프레임 무결함 실기 텔레메트리 | VERIFIED |
 | `CDC-004` | Medium | BC | P05가 external async-input policy audit을 완료하고 reset/AUX 동작을 수정했으며 승인된 synchronizer를 보존함. | UART RX/AUX, G-sensor INT, reset button, SW, GPIO 구조와 level/pulse 제한을 보존. | P05 directed regression + fitted 36-chain/minimum-2-register review | VERIFIED |
 | `STA-001` | High | BC | generated clock/uncertainty constraint 부족. | 남은 VGA/ADC generated clock·관계·uncertainty, A6 active SPI PLL 제거, TimeQuest/CDC warning 검토. | TimeQuest clock/CDC | IN_PROGRESS |
 | `STA-002` | High | BC | 외부 board I/O timing/electrical 및 ADC/VGA physical placement 영향 미종결; 내부 양의 slack만으로 signoff 불가. | 모든 top 외부 port를 sync/source-sync/async/static/analog로 분류; peer/board 자료가 있는 경우에만 I/O delay, 나머지는 N/A 기록; IO standard/voltage/drive/load/unconstrained port, ADXL345 SPI timing, ADC/VGA warning과 VGA 동작 중 ADC 측정, 잔여 critical warning risk 명시 처분. 임의 SDC 금지. | TimeQuest I/O/QSF, peer timing, ADC/VGA board 측정 | BLOCKED |
@@ -494,10 +494,14 @@ Stage 1 당시 제안된 G-sensor 계약은 생산 RTL·펌웨어·테스트벤�
 
 이를 통해 `HEX-001`, `HEX-002`, `HEX-003`이 `VERIFIED`로 종결됨. 외부 I/O 타이밍/전기적 서명(`STA-002`) 및 ADC/VGA proximity/CDC 범위는 미종결 상태를 유지함.
 
-## P11 ADC Spec Freeze Integration Note
+## P11-ADC 구현 및 통합 노트 (P11-ADC Implementation and Integration Note)
 
-P11A preflight와 Owner/Chat 승인으로 ADC target spec이 동결됐다. 구현/검증 전이므로 `ADC-001..006`, `CDC-003`, `FW-009`, `APB-005` ADC sub-scope는 모두 **IN_PROGRESS**로 관리한다.
+MAX 10 ADC 및 조이스틱 서브시스템 클린업 범위는 RTL, 펌웨어, 디렉티드 시뮬레이션, 정형 CDC 스위프, 타이밍 분석 및 물리 FPGA 보드 수락(Issue #6) 전반에 걸쳐 **VERIFIED**로 검증 완료됨:
 
-동결된 목표는 sole ADC Acquisition Engine, fixed CH1/CH2 baseline + 6-channel structural capacity, real ENABLE level request/ack, stable req/ack frame mailbox, LIVE + CAPTURE-only HOLD, exact v2 MMIO/CH3..CH6 reserved address, combinational HW `Joystick_Policy`, independent FW golden policy이다.
+1. **RTL 구현:** `adc_acquisition_engine.v` 단독 프로젝트 로컬 명령 소유권(고정 베이스라인 스캔 CH1/CH2, 실제 `ENABLE` 레벨 요청/응답 핸드셰이크); `adc_frame_mailbox_cdc.v`를 통한 안정된 bundled-data req/ack 메일박스 CDC(단일 에지 PCLK LIVE 코히런트 프레임 발행); `APB_ADC_Controller.v` 정밀 v2 APB 로컬 디코드(정규 v2 오프셋 `0x00..0x64` 및 정의된 예약 갭, 미매핑/예약 오프셋 `PSLVERR` 반환, `+0x100` 에일리어스 부재, 레거시 미러 제거); `Joystick_Policy.v` 무상태 조합 조이스틱 정책 로직.
+2. **펌웨어 계약:** `firmware/drivers/adc.c` 및 `firmware/drivers/joystick_policy.c`는 동결된 P11 v2 계약 구현: CAPTURE 전용 HOLD 시맨틱스(`adc_capture_sample()`), RELEASE 명령 제거, 독립 펌웨어 조이스틱 정책 평가(`joystick_policy_eval()`), 하드웨어 상태와 펌웨어 정책 간 100.0% 일치 확인.
+3. **검증:** C1 독립 APB 컨트롤러 회귀 및 브리지 결함 억제(2사이클 ERROR); C2 비동기 클록/지터 CDC 메일박스 회귀 및 뮤테이션 검출; C3 드라이버 및 독립 골든 모델; C3.5 RV32I CPU E2E 라이프사이클 및 버스 결함 통합; C4-A Quartus Prime 19.1 클린 핏(66% LE, 오류 0).
+4. **물리 수락 및 케이던스:** C4-B DE10-Lite FPGA 실기 보드 스모크 및 6,800만 사이클 무결함 텔레메트리; C4-C 물리 샘플링 케이던스 특성화($167.22\text{ kframes/s}$, 299 CPU 사이클/프레임, 2,810,880 프레임 동안 0 시퀀스 오류) 및 물리 조이스틱 방향/극성 매핑(§3.4); C4-D 타이밍 회귀 근본 원인 분석 보고서(153 노드 `HREADY` 루프가 임계 경로 여유를 차지함을 입증, ADC 직접 영향은 0).
+5. **문서 및 추적성:** P11 정규 규격서([`spec/15_adc_joystick.md`](../15_adc_joystick.md), [`spec/19_firmware_contract.md`](../19_firmware_contract.md), [`spec/22_soc_health_firmware.md`](../22_soc_health_firmware.md), [`spec/timing_constraints.md`](../timing_constraints.md)) 및 공개 증적 보고서([`reports/evidence/P11_ADC_C4D_TIMING_REGRESSION_ROOT_CAUSE_REPORT.md`](../../reports/evidence/P11_ADC_C4D_TIMING_REGRESSION_ROOT_CAUSE_REPORT.md), [`reports/evidence/P11_ADC_FINAL_DOCUMENTATION_RECONCILIATION.md`](../../reports/evidence/P11_ADC_FINAL_DOCUMENTATION_RECONCILIATION.md)) 완벽 동기화.
 
-P11 spec freeze는 `STA-001`/`STA-002` global closure 또는 어떤 ADC 항목의 VERIFIED를 의미하지 않는다.
+이를 통해 `ADC-001..006`, `CDC-003`, `FW-009`, 그리고 `APB-005`의 ADC slot-5 하위 범위가 `VERIFIED`로 종결됨. 외부 I/O 타이밍/전기적 서명(`STA-002`), 베이스라인 타이밍 여유 최적화 및 전체 SoC 물리 클로저는 미종결 상태를 유지함.
