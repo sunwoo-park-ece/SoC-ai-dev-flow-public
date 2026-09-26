@@ -10,11 +10,14 @@ static inline uint32_t current_enable_ctrl(void)
 
 adc_status_t adc_init(void)
 {
-    uint32_t name0 = mmio_read32(ADC_BASE + ADC_NAME0);
-    uint32_t name1 = mmio_read32(ADC_BASE + ADC_NAME1);
+    uint32_t name0   = mmio_read32(ADC_BASE + ADC_NAME0);
+    uint32_t name1   = mmio_read32(ADC_BASE + ADC_NAME1);
+    uint32_t version = mmio_read32(ADC_BASE + ADC_VERSION);
 
-    /* Verify ADC v2 peripheral identification: "ADC_" and "_v2\0" */
-    if (name0 != 0x5F434441u || name1 != 0x0032765Fu) {
+    /* Verify ADC v2 canonical peripheral identification: "apb-", "adc ", v2.0 */
+    if (name0 != ADC_EXPECTED_NAME0 ||
+        name1 != ADC_EXPECTED_NAME1 ||
+        version != ADC_EXPECTED_VERSION) {
         return ADC_ERROR;
     }
 

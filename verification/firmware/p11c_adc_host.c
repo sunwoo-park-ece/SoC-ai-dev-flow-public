@@ -29,9 +29,9 @@ static void reset_mock(void)
     write_history_count = 0;
 
     /* Set default peripheral ID values matching RTL APB_ADC_Controller */
-    mock_regs[ADC_NAME0 / 4]   = 0x5F434441u; // "ADC_"
-    mock_regs[ADC_NAME1 / 4]   = 0x0032765Fu; // "_v2\0"
-    mock_regs[ADC_VERSION / 4] = 0x00020000u; // v2.0
+    mock_regs[ADC_NAME0 / 4]   = ADC_EXPECTED_NAME0;   // 0x6170622D: "apb-"
+    mock_regs[ADC_NAME1 / 4]   = ADC_EXPECTED_NAME1;   // 0x61646320: "adc "
+    mock_regs[ADC_VERSION / 4] = ADC_EXPECTED_VERSION; // 0x00020000: v2.0
 
     /* Default reset values for calibration */
     mock_regs[ADC_JOY_CENTER_X / 4] = 2048u;
@@ -174,11 +174,25 @@ static void test_adc_driver(void)
     printf("--- Running ADC Driver Tests ---\n");
     reset_mock();
 
-    // 1. adc_init identity check
+    // 1. adc_init identity check: verify NAME0, NAME1, VERSION checks
     assert(adc_init() == ADC_OK);
+
+    // Test NAME0 mismatch
     mock_regs[ADC_NAME0 / 4] = 0xDEADBEEFu;
     assert(adc_init() == ADC_ERROR);
-    mock_regs[ADC_NAME0 / 4] = 0x5F434441u; // restore
+    mock_regs[ADC_NAME0 / 4] = ADC_EXPECTED_NAME0; // restore
+
+    // Test NAME1 mismatch
+    mock_regs[ADC_NAME1 / 4] = 0xDEADBEEFu;
+    assert(adc_init() == ADC_ERROR);
+    mock_regs[ADC_NAME1 / 4] = ADC_EXPECTED_NAME1; // restore
+
+    // Test VERSION mismatch
+    mock_regs[ADC_VERSION / 4] = 0x00010000u;
+    assert(adc_init() == ADC_ERROR);
+    mock_regs[ADC_VERSION / 4] = ADC_EXPECTED_VERSION; // restore
+
+    assert(adc_init() == ADC_OK);
 
     // 2. adc_enable with bounded acknowledgement
     reset_mock();

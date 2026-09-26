@@ -86,6 +86,11 @@
 #define ADC_FRAME_COUNT      0x60u
 #define ADC_ERROR_STATUS     0x64u
 
+/* Canonical ADC Peripheral Identity Expected Values */
+#define ADC_NAME0_EXPECTED   0x6170622Du  /* "apb-" */
+#define ADC_NAME1_EXPECTED   0x61646320u  /* "adc " */
+#define ADC_VERSION_EXPECTED 0x00020000u  /* v2.0   */
+
 /* ADC_CTRL bitfields */
 #define ADC_CTRL_ENABLE       (1u << 0)
 #define ADC_CTRL_CAPTURE      (1u << 1)

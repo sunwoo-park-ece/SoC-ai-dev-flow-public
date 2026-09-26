@@ -108,9 +108,22 @@ grep -q '^\[DONE\] firmware built:' "$out/run_fw_build.log"
 cat "$out/run_fw_build.log"
 echo "PASS build final_main"
 
-# 10. Check no v1 register usage in active firmware
-echo "--- Check: active firmware v1 register exclusion ---"
+# 10. Check no v1 register usage and legacy symbol exclusion in active firmware
+echo "--- Check: active firmware v1 register and legacy symbol exclusion ---"
+# Disassembly check: zero store instructions to legacy v1 offsets
 ! grep -E "sw.*400500(14|18|24|28|2c|30|34)" "$out/fw_build/fw/final_main/final_main.dis"
-echo "PASS zero v1 register accesses in active firmware"
+
+# Source-level check: zero legacy v1 symbol usages in active production firmware
+legacy_symbols="JOY_X_CHANNEL|JOY_Y_CHANNEL|JOY_X_RAW|JOY_Y_RAW|JOY_SAMPLE_COUNT|JOY_DIR_STATUS|JOY_CTRL_CLEAR_FLAGS|JOY_CTRL_CLEAR_COUNT"
+if grep -En "(${legacy_symbols})" \
+    "$root/firmware/apps/final_main.c" \
+    "$root/firmware/drivers/adc.c" \
+    "$root/firmware/drivers/joystick_policy.c" \
+    "$root/firmware/include/adc.h" \
+    "$root/firmware/include/joystick_policy.h"; then
+    echo "FAIL: found legacy v1 symbols in active production firmware" >&2
+    exit 1
+fi
+echo "PASS zero v1 register accesses and zero legacy symbols in active firmware"
 
 echo "SUMMARY: PASS P11C-C3 Regression Suite"

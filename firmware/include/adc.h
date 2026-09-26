@@ -25,11 +25,19 @@ typedef enum {
     ADC_INVALID_PARAM = 4
 } adc_status_t;
 
+/* Canonical ADC Peripheral Identity Expected Values */
+#define ADC_EXPECTED_NAME0   ADC_NAME0_EXPECTED   /* 0x6170622Du: "apb-" */
+#define ADC_EXPECTED_NAME1   ADC_NAME1_EXPECTED   /* 0x61646320u: "adc " */
+#define ADC_EXPECTED_VERSION ADC_VERSION_EXPECTED /* 0x00020000u: v2.0   */
+
 /**
  * Initializes the ADC peripheral driver:
- *   - Verifies peripheral identity registers (NAME0="ADC_", NAME1="_v2\0").
+ *   - Verifies canonical peripheral identity registers:
+ *       NAME0   = 0x6170622D ("apb-")
+ *       NAME1   = 0x61646320 ("adc ")
+ *       VERSION = 0x00020000 (v2.0)
  *   - Reads initial enable state from hardware.
- * Returns ADC_OK on success, ADC_ERROR if peripheral ID check fails.
+ * Returns ADC_OK on success, ADC_ERROR if peripheral identity check fails.
  */
 adc_status_t adc_init(void);
 
