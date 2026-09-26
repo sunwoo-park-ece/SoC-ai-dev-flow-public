@@ -89,3 +89,16 @@ The P05C fitted reset/clock checkpoint is **PASS within current internal constra
 ## 21. Future Target-SoC Timing Re-Closure
 
 PLIC, AXI, DMA, SDRAM or a higher frequency target requires a new architecture/CDC/constraint assessment, source and binding freeze, open regressions, vendor fits, path and external-I/O analysis, and independent review. Current 3B3 baseline WNS/Fmax shall not be inherited by that expanded design. Potential earlier decode, registered EX/MEM control, reduced MEM re-decode, shallower forwarding or lower exception fanout are **investigation ideas only**, not prescribed edits or timing exceptions.
+
+## 22. P11-ADC C4-D Timing Regression Investigation Traceability
+
+The 50 MHz Fmax regression between the historical baseline (53.93 MHz, +1.458 ns slack) and the C4-B implementation (50.35 MHz, +0.140 ns slack) was investigated under milestone P11C-C4-D. The comprehensive root-cause analysis is documented in:
+- [`../reports/evidence/P11_ADC_C4D_TIMING_REGRESSION_ROOT_CAUSE_REPORT.md`](../reports/evidence/P11_ADC_C4D_TIMING_REGRESSION_ROOT_CAUSE_REPORT.md)
+
+Traceability summary:
+1. **Fmax regression was investigated**: The primary timing limiter is an architectural 153-node combinational loop on `HREADY` (TimeQuest Warning 332081/332125, +4.064 ns loop penalty) and an unpipelined cross-subsystem cascade (`u_bridge|addr_reg` to `U_VRAM` block RAMs). The direct timing impact of the P11 ADC subsystem is zero (+18.238 ns slack on its 10 MHz domain).
+2. **Evidence report path**: `reports/evidence/P11_ADC_C4D_TIMING_REGRESSION_ROOT_CAUSE_REPORT.md`.
+3. **No timing optimization was performed in P11 C4-D**: Synthesis RTL, SDC constraints, QSF assignments, placement seeds, and clock trees were kept strictly unmodified.
+4. **P11 functional/physical acceptance remains unchanged**: Positive setup slack (+0.140 ns WNS, 0.000 TNS, +0.082 ns hold WNS), physical 167 kHz continuous ADC hardware sampling cadence, and 100% testbench/telemetry PASS remain fully valid and signed off.
+5. **Future timing closure is deferred until baseline cleanup completion if required**: Candidate architectural improvements (breaking the `HREADY` loop, qualifying VRAM write enables with `HSEL_VRAM`, or pipelining APB bridge ready generation) are deferred to post-baseline cleanup activities.
+

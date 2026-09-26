@@ -89,3 +89,16 @@ P05C fitted reset/clock checkpoint는 **현재 내부 constraint 범위에서 PA
 ## 21. 향후 target-SoC 타이밍 재검토
 
 PLIC, AXI, DMA, SDRAM 또는 주파수 상향은 구조/CDC/제약 재평가, source/binding freeze, open regression, 새 vendor fit, critical path·외부 I/O 분석과 독립 검토를 요구한다. 현재 3B3 WNS/Fmax를 확장 설계에 승계할 수 없다. decode 조기화, EX/MEM 제어 등록, MEM 재디코드 축소, forwarding 경로 단축, exception fanout 완화 등은 **향후 조사 후보**일 뿐 승인된 RTL 변경이나 예외가 아니다.
+
+## 22. P11-ADC C4-D 타이밍 Regression 원인 분석 추적성
+
+과거 베이스라인(53.93 MHz, +1.458 ns 여유) 대비 C4-B 구현(50.35 MHz, +0.140 ns 여유) 사이의 50 MHz Fmax regression은 P11C-C4-D 마일스톤 하에서 원인 분석이 완료되었다. 상세 근거 보고서는 다음 위치에 기록되어 있다:
+- [`../reports/evidence/P11_ADC_C4D_TIMING_REGRESSION_ROOT_CAUSE_REPORT.md`](../reports/evidence/P11_ADC_C4D_TIMING_REGRESSION_ROOT_CAUSE_REPORT.md)
+
+추적성 요약:
+1. **Fmax regression 원인 조사 완료**: 주 타이밍 limiter는 `HREADY` 상의 153-노드 조합 논리 루프(TimeQuest Warning 332081/332125, +4.064 ns 루프 패널티)와 `u_bridge|addr_reg`에서 `U_VRAM` 블록 RAM에 이르는 비파이프라인 서브시스템 횡단 캐스케이드로 확인되었다. P11 ADC 서브시스템 자체의 직접 타이밍 영향은 0이다(10 MHz 도메인 여유 +18.238 ns).
+2. **증거 보고서 경로**: `reports/evidence/P11_ADC_C4D_TIMING_REGRESSION_ROOT_CAUSE_REPORT.md`.
+3. **P11 C4-D에서 타이밍 최적화 미수행**: 합성 RTL, SDC 제약, QSF 설정, 배치 시드, 클록 트리는 일체 수정하지 않았다.
+4. **P11 기능 및 물리 수용 유지**: 양의 셋업 마진(+0.140 ns WNS, 0.000 TNS, +0.082 ns hold WNS), 167 kHz 물리 ADC 샘플링 케이던스, 100% 테스트벤치/텔레메트리 PASS는 온전히 유효하다.
+5. **향후 타이밍 closure는 베이스라인 정리 완료 후로 유예**: `HREADY` 루프 제거, VRAM write enable 분리, APB 브리지 ready 파이프라인 등의 구조 개선은 향후 베이스라인 정리 작업으로 유예된다.
+
