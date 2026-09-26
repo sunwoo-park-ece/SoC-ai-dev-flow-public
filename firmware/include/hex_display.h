@@ -20,5 +20,8 @@ void hex_display_write_monitor(uint8_t mode, uint8_t state, uint8_t retry_count,
                                uint8_t err, uint8_t rx_seq, uint8_t tx_seq);
 uint32_t hex_display_read_value(void);
 uint32_t hex_display_read_ctrl(void);
+/* Side-effect-free canonical RAW bank reads; only 21 functional bits. */
+uint32_t hex_display_read_raw_low(void);
+uint32_t hex_display_read_raw_high(void);
 
 #endif

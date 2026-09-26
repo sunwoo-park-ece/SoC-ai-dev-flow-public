@@ -76,3 +76,13 @@ uint32_t hex_display_read_ctrl(void)
 {
     return mmio_read32(HEX_DISPLAY_BASE + HEX_CTRL) & HEX_CTRL_MASK;
 }
+
+uint32_t hex_display_read_raw_low(void)
+{
+    return mmio_read32(HEX_DISPLAY_BASE + HEX_RAW_LOW) & 0x001fffffu;
+}
+
+uint32_t hex_display_read_raw_high(void)
+{
+    return mmio_read32(HEX_DISPLAY_BASE + HEX_RAW_HIGH) & 0x001fffffu;
+}

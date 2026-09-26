@@ -1,15 +1,20 @@
 #include "soc_health.h"
 #include "soc_health_providers.h"
+#include "soc_health_board_io.h"
 
 static soc_health_core_t health;
 static soc_health_providers_t probes;
 static soc_health_render_t render;
+static soc_health_board_io_t board;
 
 int main(void)
 {
     uint32_t last_publication = 0u;
     soc_health_init(&health);
     soc_health_providers_init(&probes);
+    soc_health_board_io_init(&board);
+    probes.board_context = &board;
+    probes.board_service = soc_health_board_io_service;
     soc_health_render_init(&render);
     for (;;) {
         soc_health_epoch_begin(&health);

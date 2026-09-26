@@ -21,6 +21,8 @@ typedef struct {
     uint16_t adc_center_x, adc_center_y, adc_deadzone;
     adc_frame_t frame;
     uint8_t frame_eligible;
+    void *board_context;
+    void (*board_service)(soc_health_core_t *, void *, soc_ip_id_t);
 } soc_health_providers_t;
 
 void soc_health_providers_init(soc_health_providers_t *providers);

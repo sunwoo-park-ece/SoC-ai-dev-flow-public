@@ -43,6 +43,7 @@ void soc_health_providers_init(soc_health_providers_t *p)
     for (i = 0; i < 12u; i++) p->uart_frame[i] = 0u;
     p->adc_count = p->adc_error = 0u;
     p->adc_center_x = p->adc_center_y = p->adc_deadzone = 0u;
+    p->board_context = 0; p->board_service = 0;
     p->frame_eligible = 0u;
     p->frame.seq = 0u; p->frame.valid_mask = 0u;
     for (i = 0; i < 6u; i++) p->frame.ch[i] = 0u;
@@ -318,7 +319,8 @@ soc_ip_id_t soc_health_providers_service(soc_health_core_t *c, soc_health_provid
     case SOC_IP_JOY_POLICY: soc_health_joy_service(c, p); break;
     case SOC_IP_VGA: soc_health_vga_service(c, p); break;
     default:
-        (void)soc_health_report(c, id, SOC_STEP_PENDING, 0u, SOC_HEALTH_NOT_IMPLEMENTED);
+        if (p->board_service) p->board_service(c, p->board_context, id);
+        else (void)soc_health_report(c, id, SOC_STEP_PENDING, 0u, SOC_HEALTH_NOT_IMPLEMENTED);
         break;
     }
     return id;
