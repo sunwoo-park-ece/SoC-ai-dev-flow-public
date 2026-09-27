@@ -8,15 +8,36 @@
 - Keep English canonical specifications and Korean companions synchronized for substantive contract changes.
 - Do not commit, tag, push, publish, or claim closure on active feature work (P12-VGA-CDC-AES) without explicit owner approval and raw evidence.
 
-## Mandatory anti-cosmetic implementation and verification rules
+## Progressive task and policy routing
 
-**All implementation, DV, evidence, and review agents (Codex, Antigravity/Claude/Gemini, and successors) MUST read and follow [`docs/governance/anti_cosmetic_verification_policy.md`](docs/governance/anti_cosmetic_verification_policy.md) in full before starting an authorized task.** Read the task's pinned revision and source identities too. This policy adds evidence/quality requirements only; it does not expand authorized file scope, lift an existing STOP gate, or approve a commit, push, release, or Issue closure. If the task and policy conflict, STOP and request a scoped decision rather than silently overriding either.
+Read the target worktree's pinned active task / Issue revision and Execution Profile,
+then the owning spec and relevant tracker rows. Confirm branch, source identity and
+dirty state before edits. Task profiles route selected gates; they do not override
+spec contracts, Gate 0 STOP gates, repository boundaries or owner authorization.
 
-Minimum enforceable checks:
+Always-on anti-cosmetic core (all agents):
 
-1. For every acceptance criterion, map approved contract -> independent oracle -> triggering stimulus -> assertion/checker -> unique run/source identity -> raw evidence -> verdict. Recording or printing a field is not checking it.
-2. Prove a newly added or materially changed checker rejects a targeted counterexample as well as accepting a valid case. Do not mutate approved Production source or historical evidence; use isolated fixtures when authorized.
-3. Avoid circular expected values, manually seeded 'independent' ledgers, aggregate count/PASS-string substitutes, optimistic status constants, suppressed failures, and unsupported verification claims.
-4. Trace real failure propagation from leaf test through runner/guard/parent to final CLI exit and every final report. A failed guard with a successful target must never leave exit 0 or contradictory PASS evidence.
-5. Compute manifests and hashes from actual files, keep immutable target logs separate from guard logs, and cross-check final JSON/Markdown/exits/source identity. Preserve each failed attempt and honestly mark `FAIL`, `NOT_RUN`, or `EVIDENCE_INSUFFICIENT`.
-6. Before reporting completion, identify a concrete plausible defect that could still pass and show how the checker rejects it or report the gap. Self-reported PASS never replaces independent review and owner approval.
+- Recorded != checked; a printed field is not an assertion.
+- DUT output != automatically independent oracle; derive expectations from contract
+  and independent stimulus/observations.
+- PASS string / exit 0 alone != proof; connect claims to actual source and raw evidence.
+- Do not suppress, hide or overwrite failures; preserve failure propagation.
+- Claim only actually executed work and the evidence level it supports.
+- Self-reported PASS != independent review or owner acceptance.
+
+Read [`docs/governance/anti_cosmetic_verification_policy.md`](docs/governance/anti_cosmetic_verification_policy.md)
+**in full before work** when any condition applies:
+
+- `verification.depth: DEEP` or `deep_verification_policy: true`;
+- new or materially changed checker, runner or evidence guard;
+- independent DV task;
+- requirement promotion to VERIFIED;
+- evidence or closure review;
+- explicit task request.
+
+The full policy remains unchanged and binding when triggered: contract -> independent
+oracle -> stimulus -> checker -> unique source/run identity -> raw evidence -> verdict;
+valid-case and targeted counterexample tests; end-to-end failure propagation;
+actual file hashes and mutually consistent final reports. Read pinned revisions too.
+These requirements do not expand scope or lift a STOP/publication gate. On a conflict,
+STOP and request a scoped decision. Unrelated soft findings are recorded for follow-up.
