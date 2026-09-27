@@ -28,7 +28,7 @@ Full vendor tool compilation (synthesis, place-and-route, bitstream assembly) an
 
 When requested, agents generate exact, copy-pasteable CLI commands for the User to execute. Every vendor execution script or CLI snippet must enforce the following contract:
 
-1. **Unique Run ID:** Incorporate task, feature, date, and sequence identifier (e.g., `p12_vga_cdc_20261001_01`).
+1. **Unique Run ID:** Incorporate task, feature, date, and sequence identifier (e.g., `<task>_<YYYYMMDD>_<seq>`).
 2. **Out-of-Tree Run Root:** Store all intermediate files, project databases, and bitstreams strictly outside repositories under `<workspace>/runs/quartus/<feature>/<run-id>/` (or `<workspace>/runs/vivado/...`). Scripts must enforce an explicit workspace variable and fail fast if unset; fallback to the repository or current working directory is strictly prohibited.
 3. **Pipeline Fail-Safe:** Enforce `set -o pipefail` in bash/zsh snippets (or shell-appropriate pipeline failure propagation) to prevent pipe masking.
 4. **Explicit Exit Code Capture:** True tool exit codes must be captured and written to `exit_code.txt`.
@@ -41,7 +41,7 @@ When requested, agents generate exact, copy-pasteable CLI commands for the User 
 set -o pipefail
 
 # Fail fast if WORKSPACE is not explicitly set; never fall back to repository root
-: "${WORKSPACE:?ERROR: WORKSPACE environment variable must be set (e.g. export WORKSPACE=/home/swp/soc)}"
+: "${WORKSPACE:?ERROR: WORKSPACE must point to the canonical workspace root (e.g. export WORKSPACE=/path/to/soc-workspace)}"
 
 RUN_ID="<feature>_$(date +%Y%m%d_%H%M%S)"
 RUN_ROOT="${WORKSPACE}/runs/quartus/<feature>/${RUN_ID}"

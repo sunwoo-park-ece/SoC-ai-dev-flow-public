@@ -28,7 +28,7 @@
 
 요청이 있을 때 에이전트는 사용자가 복사하여 즉시 실행할 수 있는 정밀한 CLI 명령을 생성합니다. 모든 벤더 실행 스크립트나 CLI 스니펫은 다음 규약을 준수해야 합니다:
 
-1. **고유 실행 식별자 (Unique Run ID):** 태스크, 기능, 날짜, 순번을 포함 (예: `p12_vga_cdc_20261001_01`).
+1. **고유 실행 식별자 (Unique Run ID):** 태스크, 기능, 날짜, 순번을 포함 (예: `<task>_<YYYYMMDD>_<seq>`).
 2. **저장소 외부 실행 디렉터리 (Out-of-Tree Run Root):** 모든 중간 파일, 프로젝트 DB, 비트스트림을 Git 저장소 외부인 `<workspace>/runs/quartus/<feature>/<run-id>/` (또는 `<workspace>/runs/vivado/...`)에 격리 저장. 스크립트는 명시적인 워크스페이스 변수를 강제하고 미지정 시 즉시 실패(fail-fast)해야 하며, 저장소나 현재 작업 디렉터리로의 폴백은 엄격히 금지됩니다.
 3. **파이프 실패 보호 (`set -o pipefail`):** bash/zsh 스니펫에서 `set -o pipefail`을 적용(또는 셸에 적합한 파이프라인 실패 전파 기법 사용)하여 파이프라인 명령 중간의 실패가 은폐되지 않도록 강제.
 4. **종료 코드 명시적 기록:** 도구의 실제 종료 코드를 `exit_code.txt`에 기록.
@@ -41,7 +41,7 @@
 set -o pipefail
 
 # WORKSPACE 환경 변수 미지정 시 즉시 중단 (저장소 루트로의 폴백 금지)
-: "${WORKSPACE:?ERROR: WORKSPACE 환경 변수가 반드시 명시되어야 합니다 (예: export WORKSPACE=/home/swp/soc)}"
+: "${WORKSPACE:?ERROR: WORKSPACE 환경 변수가 정규 워크스페이스 루트를 가리켜야 합니다 (예: export WORKSPACE=/path/to/soc-workspace)}"
 
 RUN_ID="<feature>_$(date +%Y%m%d_%H%M%S)"
 RUN_ROOT="${WORKSPACE}/runs/quartus/<feature>/${RUN_ID}"
@@ -120,6 +120,6 @@ exit "$rc"
 
 ## 6. 저장소 격리 및 라이선스 방화벽
 
-- **로컬 전용 보관:** 벤더 프로젝트 데이터베이스(`db/`, `incremental_db/`), 생성된 IP 코어, 비트스트림 파일(`.sof`, `.pof`, `.bit`), 원시 넷리스트는 반드시 로컬 전용 저장소(`/home/swp/soc/vendor-projects-private/` 및 `runs/`)에만 보관해야 합니다.
+- **로컬 전용 보관:** 벤더 프로젝트 데이터베이스(`db/`, `incremental_db/`), 생성된 IP 코어, 비트스트림 파일(`.sof`, `.pof`, `.bit`), 원시 넷리스트는 반드시 로컬 전용 저장소(`vendor-projects-private/` 및 `runs/`)에만 보관해야 합니다.
 - **GitHub 업로드 절대 금지:** 벤더 독점 파일, 라이선스 제한 IP 바이너리, 컴파일 결과물을 퍼블릭 또는 비공개 GitHub 저장소에 커밋하는 행위는 엄격히 금지됩니다.
 - **공개 저장소 자산:** 퍼블릭 저장소에는 이식 가능한 SDC 제약 파일, 오픈 Tcl 빌드 스크립트, 공개 핀 매핑, 그리고 로컬에서 IP를 재생성할 수 있는 `ip_manifest.yml` 매니페스트만 보관합니다.
