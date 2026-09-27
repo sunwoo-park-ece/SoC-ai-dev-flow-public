@@ -12,4 +12,4 @@ Authority order:
 
 Korean specification files are synchronized human-readable companions. Vendor projects, generated IP, raw run trees, private task prompts, and local migration reports are not source-of-truth content.
 
-At this snapshot, P08B remains stopped at Gate 0. A passing incompatibility detector proves that the unsafe trap-policy combination was reproduced; it is not a release or safety pass.
+P10-HEX and P11-ADC cleanups are VERIFIED and merged into main. The current active cleanup milestone is P12-VGA-CDC-AES, addressing remaining VGA clock domain crossing (CDC) and AES peripheral closure.
