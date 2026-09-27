@@ -29,18 +29,19 @@
 요청이 있을 때 에이전트는 사용자가 복사하여 즉시 실행할 수 있는 정밀한 CLI 명령을 생성합니다. 모든 벤더 실행 스크립트나 CLI 스니펫은 다음 규약을 준수해야 합니다:
 
 1. **고유 실행 식별자 (Unique Run ID):** 태스크, 기능, 날짜, 순번을 포함 (예: `p12_vga_cdc_20261001_01`).
-2. **저장소 외부 실행 디렉터리 (Out-of-Tree Run Root):** 모든 중간 파일, 프로젝트 DB, 비트스트림을 Git 저장소 외부인 `/home/swp/soc/runs/quartus/<feature>/<run-id>/` (또는 `runs/vivado/...`)에 격리 저장.
-3. **파이프 실패 보호 (`set -o pipefail`):** 파이프라인 명령 중간의 실패가 은폐되지 않도록 강제.
+2. **저장소 외부 실행 디렉터리 (Out-of-Tree Run Root):** 모든 중간 파일, 프로젝트 DB, 비트스트림을 Git 저장소 외부인 `<workspace>/runs/quartus/<feature>/<run-id>/` (또는 `<workspace>/runs/vivado/...`)에 격리 저장.
+3. **파이프 실패 보호 (`set -o pipefail`):** bash/zsh 스니펫에서 `set -o pipefail`을 적용(또는 셸에 적합한 파이프라인 실패 전파 기법 사용)하여 파이프라인 명령 중간의 실패가 은폐되지 않도록 강제.
 4. **종료 코드 명시적 기록:** 도구의 실제 종료 코드를 `exit_code.txt`에 기록.
 5. **표준 출력/에러 동시 로깅:** `tee`를 사용하여 콘솔 출력과 로그 파일(`wrapper.log` 등)을 동시 기록.
 
 ### 표준 CLI 래퍼 스니펫 템플릿
 
 ```bash
+# 파이프라인 실패 전파 강제 (bash/zsh)
 set -o pipefail
 
 RUN_ID="<feature>_$(date +%Y%m%d_%H%M%S)"
-RUN_ROOT="/home/swp/soc/runs/quartus/<feature>/${RUN_ID}"
+RUN_ROOT="${WORKSPACE:-.}/runs/quartus/<feature>/${RUN_ID}"
 mkdir -p "$RUN_ROOT"
 
 echo "=== Starting Vendor Build [${RUN_ID}] ==="
@@ -93,7 +94,7 @@ exit "$rc"
 ```
 
 1. **내부 슬랙 vs 외부 I/O 타이밍:** 내부 코어의 슬랙이 양수(TNS=0)라 하더라도, 외부 주변장치 핀(VGA DAC, SDRAM, ADC, GPIO 등)이 실물 인터페이스 규격의 셋업/홀드/스큐 조건을 만족함을 증명하지 않습니다.
-2. **CDC 검증 독립성:** 벤더 합성 도구는 비동기 클록 교차의 올바름을 자동으로 보장하지 않습니다. 비동기 도메인 교차는 정적 CDC 분석과 구조적 동기화기(Synchronizer) 검증이 뒷받침되어야 합니다.
+2. **CDC 검증 독립성:** 벤더 합성 도구는 비동기 클록 교차의 올바름을 자동으로 보장하지 않습니다. 비동기 도메인 교차는 단순한 일괄 false-path 지정 대신, 아키텍처에 적합한 구조적 검증(다단 동기화기 또는 핸드셰이크 프로토콜 등)과 분석적으로 정당화된 타이밍 제약(적절한 경우 false path 또는 max delay)이 뒷받침되어야 합니다.
 3. **한계점 명시:** I/O 타이밍이나 CDC가 완전히 마감되지 않았다면, 보고서에 반드시 `내부 코어 타이밍 만족 | 외부 I/O 타이밍 미검증` 형태로 한계를 명시해야 합니다.
 
 ---

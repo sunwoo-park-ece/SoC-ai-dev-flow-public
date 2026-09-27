@@ -48,6 +48,14 @@ reports/evidence/
 - **영구적 명명:** 일시적인 단계 번호(`phase4a`)가 아닌 대상 기능명(`bus-access-fault`)을 디렉터리 이름으로 사용합니다.
 - **색인 목록:** `reports/evidence/README.md`에 검증 소스 커밋 SHA, 요구사항 ID, 판정 결과를 요약 표로 인덱싱합니다.
 
+### 상태 정의 및 판정 시맨틱
+- **종료 코드 != 시맨틱 판정 (Exit Code != Semantic Verdict):** 도구의 프로세스 종료 코드가 시맨틱 판정을 자동으로 결정하지 않습니다. 예를 들어, 기지의 부정 테스트(Negative Test)나 버그를 재현하는 경우 도구가 0이 아닌 종료 코드를 반환하더라도 `PASS_INCOMPATIBILITY_REPRODUCED`로 기록됩니다. 반대로 기대 단언문이 실행되지 않고 우회된 채 exit 0을 반환한 경우는 `PASS`가 될 수 없습니다.
+- **상태 분류 체계:**
+  - `APPROVED`: 변경 불가능한 공개 커밋 SHA를 대상으로 독립 검토 및 승인이 완료된 증거 패키지.
+  - `PENDING_REVIEW`: 작성이 완료되어 독립 검토를 대기 중인 증거 패키지.
+  - `PENDING_PUBLIC_COMMIT`: 로컬 작업 파일이나 기능 브랜치에서 검증이 완료되었으나 아직 퍼블릭 문서/소스 커밋 SHA가 형성되지 않은 개발 단계에서 사용. 공개 증거 패키지는 SHA 누락 상태로 `APPROVED`로 최종화되어서는 안 되며, 반드시 `PENDING_PUBLIC_COMMIT`으로 표기 후 공개 직전에 확정 SHA로 갱신해야 합니다.
+  - `REJECTED` / `BLOCKED`: 검증이 실패했거나 전제 게이트를 통과하지 못한 상태.
+
 ---
 
 ## 3. 증거 문서 규격: `summary.md`
@@ -62,8 +70,8 @@ reports/evidence/
 - Requirements: `<요구사항 ID>`
 - Criteria: `<인수 기준 ID>`
 - Result: `PASS | CONDITIONAL_PASS | FAIL | STOP`
-- Review Status: `APPROVED | PENDING_REVIEW | REJECTED`
-- Verified Source Revision: `<40자리 소스 커밋 SHA>`
+- Review Status: `APPROVED | PENDING_REVIEW | PENDING_PUBLIC_COMMIT | REJECTED`
+- Verified Source Revision: `<40자리 소스 커밋 SHA | PENDING_PUBLIC_COMMIT>`
 - Evidence Date: `<YYYY-MM-DD>`
 
 ## 2. Scope
@@ -76,12 +84,13 @@ reports/evidence/
 - Testbench: `verification/.../tb_*.sv`
 - Runner: `scripts/wsl/<runner>.sh`
 - Tool: `<도구 명칭 및 버전>`
+- Oracle / Reference: `<골든 모델, ISA 명세, 또는 프로토콜 체커>`
 - Assumptions: `<클록/리셋/프로토콜 가정>`
 
 ## 5. Acceptance Results
-| 기준 ID | 검증 내용 | 결과 |
-|---|---|---|
-| `<기준 ID>` | <설명> | PASS |
+| 기준 ID | 검증 내용 | Oracle / Reference | 결과 |
+|---|---|---|---|
+| `<기준 ID>` | <설명> | <명세 조항 / 골든 오라클> | PASS |
 
 ## 6. Reproduction
 ```bash
@@ -90,7 +99,7 @@ RUN_ROOT=/tmp/soc-runs bash scripts/wsl/<runner>.sh
 공개 재현 명령은 로컬 전용 경로에 의존하지 않아야 합니다.
 
 ## 7. Source Identity
-- 해시 매니페스트: `source_hashes.sha256`
+- 해시 매니페스트: `source_hashes.sha256` (또는 `source_hashes.json`)
 - 결과 JSON: `result.json`
 
 ## 8. Limitations / Not Proven
@@ -114,8 +123,9 @@ RUN_ROOT=/tmp/soc-runs bash scripts/wsl/<runner>.sh
 ### JSON 작성 규칙
 - 엄격한 표준 JSON 규격 준수 (주석이나 후행 쉼표 금지).
 - 저장소 내부 기준 상대 경로만 사용.
-- 실행되지 않은 항목은 반드시 `NOT_RUN`, `NOT_APPLICABLE`, `BLOCKED`로 표기 (절대 거짓 `PASS` 금지).
-- 0번 종료 코드(exit 0)가 곧바로 `PASS`를 의미하지 않음.
+- 실행되지 않은 항목은 반드시 `NOT_RUN`, `NOT_APPLICABLE`, `PENDING`, `BLOCKED`로 표기 (절대 거짓 `PASS` 금지).
+- 0번 종료 코드(exit 0)가 곧바로 `PASS`를 의미하지 않음 (예: 비호환성 재현 검증은 `PASS_INCOMPATIBILITY_REPRODUCED`).
+- 퍼블릭 소스 커밋이 아직 생성되지 않은 경우 `"commit": "PENDING_PUBLIC_COMMIT"`으로 표기하고 배포 전 갱신.
 
 ### 구조 예시
 
@@ -174,9 +184,11 @@ RUN_ROOT=/tmp/soc-runs bash scripts/wsl/<runner>.sh
 
 ---
 
-## 5. 소스 무결성 해시 매니페스트: `source_hashes.sha256`
+## 5. 소스 해시 매니페스트: `source_hashes.sha256` / `source_hashes.json`
 
-검증에 사용된 정확한 파일들의 SHA-256 체크섬을 기록합니다:
+증거 패키지는 표준 SHA-256 해시를 사용하여 모든 입력 파일의 정확한 무결성을 실증해야 합니다.
+
+### 표준 `sha256sum` 형식 (`source_hashes.sha256`)
 
 ```text
 eb261e6346f699ddce5c6f53f28df68d50e587840a7e6bf5ce0152a834d3c87e  rtl/core/v/top/RV32I46F_5SP_MMIO.v
@@ -184,9 +196,31 @@ eb261e6346f699ddce5c6f53f28df68d50e587840a7e6bf5ce0152a834d3c87e  rtl/core/v/top
 3ad86035bf3fdb3ca639dafa045b88dd9ba70034d9bbce26a63cd93627268d68  scripts/wsl/bus_cpu_apb_test.sh
 ```
 
-- 파일 경로는 퍼블릭 저장소 루트 기준 상대 경로여야 합니다.
-- 검증 대상 RTL, 펌웨어, 테스트벤치, 러너 스크립트를 포함합니다.
-- 비공개 벤더 IP나 대용량 바이너리 결과물은 제외합니다.
+### JSON 형식 규격 (`source_hashes.json`)
+
+머신 판독 가능 해시 형식을 사용할 때:
+
+```json
+{
+  "schema_version": "1.0",
+  "files": [
+    {
+      "path": "rtl/core/v/top/RV32I46F_5SP_MMIO.v",
+      "sha256": "eb261e6346f699ddce5c6f53f28df68d50e587840a7e6bf5ce0152a834d3c87e"
+    },
+    {
+      "path": "verification/directed/bus/tb_cpu_access_fault.sv",
+      "sha256": "908a241f8022a7eee2ab7f15c1f86057ff5bcc18270f7d3805247d17376ada4a"
+    }
+  ]
+}
+```
+
+### 4대 해시 거버넌스 수칙
+1. **내용 무결성 vs 커밋 SHA:** SHA-256 해시는 물리적 파일의 정확한 내용 일치 여부를 증명하며, Git 커밋 SHA를 대체하지 않습니다.
+2. **무효화 및 재계산:** 검증 대상 소스, 테스트벤치, 러너, 모델 파일이 수정되거나 재생성되면 기존 해시는 즉시 무효화되며 반드시 재계산되어야 합니다.
+3. **벤더 IP 제외:** 벤더 독점 바이너리, 암호화 넷리스트, 도구 DB 파일은 퍼블릭 해시 매니페스트에 절대 기록하지 않으며, `ip_manifest.yml` 또는 바인딩 명칭으로만 참조합니다.
+4. **저장소 상대 경로:** 경로는 반드시 퍼블릭 저장소 루트 기준 상대 경로여야 합니다. 절대 머신 경로를 포함해서는 안 되며, 검증된 RTL, 펌웨어, 테스트벤치, 러너를 포함하고 일시적 산출물은 제외합니다.
 
 ---
 

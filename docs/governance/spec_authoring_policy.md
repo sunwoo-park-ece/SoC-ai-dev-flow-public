@@ -29,7 +29,7 @@
 
 ## 2. Standard Specification Skeleton
 
-Every canonical specification under `spec/` must follow this standard 8-part structure:
+The standard 8-part structure below is the **default and recommended standard** for canonical subsystem specifications under `spec/`. Small or focused specifications may adopt a proportional subset, provided Status, Contract, Criteria, and Traceability are never omitted:
 
 ```markdown
 # <Feature / Subsystem Name> Specification
@@ -100,7 +100,7 @@ The following excerpt demonstrates proper decoupling in a canonical specificatio
 Upon a terminal AHB ERROR response:
 - Load access fault generates exception `mcause=5`.
 - Store access fault generates exception `mcause=7`.
-- `mepc` records the exact address of the faulting instruction.
+- `mepc` records the exact PC of the faulting instruction.
 - Failed loads perform no register writeback.
 - Failed stores produce no memory or peripheral side effects.
 - Faulting instructions do not retire successfully.

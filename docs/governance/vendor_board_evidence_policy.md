@@ -29,18 +29,19 @@ Full vendor tool compilation (synthesis, place-and-route, bitstream assembly) an
 When requested, agents generate exact, copy-pasteable CLI commands for the User to execute. Every vendor execution script or CLI snippet must enforce the following contract:
 
 1. **Unique Run ID:** Incorporate task, feature, date, and sequence identifier (e.g., `p12_vga_cdc_20261001_01`).
-2. **Out-of-Tree Run Root:** Store all intermediate files, project databases, and bitstreams strictly outside repositories under `/home/swp/soc/runs/quartus/<feature>/<run-id>/` (or `runs/vivado/...`).
-3. **Pipeline Fail-Safe:** Enforce `set -o pipefail` in bash snippets to prevent pipe masking.
+2. **Out-of-Tree Run Root:** Store all intermediate files, project databases, and bitstreams strictly outside repositories under `<workspace>/runs/quartus/<feature>/<run-id>/` (or `<workspace>/runs/vivado/...`).
+3. **Pipeline Fail-Safe:** Enforce `set -o pipefail` in bash/zsh snippets (or shell-appropriate pipeline failure propagation) to prevent pipe masking.
 4. **Explicit Exit Code Capture:** True tool exit codes must be captured and written to `exit_code.txt`.
 5. **Simultaneous Logging:** Tee stdout and stderr to a dedicated log file (`wrapper.log` or `quartus_compile.log`).
 
 ### Standard CLI Wrapper Snippet Template
 
 ```bash
+# Enforce pipeline failure propagation (bash/zsh)
 set -o pipefail
 
 RUN_ID="<feature>_$(date +%Y%m%d_%H%M%S)"
-RUN_ROOT="/home/swp/soc/runs/quartus/<feature>/${RUN_ID}"
+RUN_ROOT="${WORKSPACE:-.}/runs/quartus/<feature>/${RUN_ID}"
 mkdir -p "$RUN_ROOT"
 
 echo "=== Starting Vendor Build [${RUN_ID}] ==="
@@ -93,7 +94,7 @@ Simulation PASS          !=  Physical Board Signoff
 ```
 
 1. **Internal Slack vs I/O Timing:** A zero-TNS internal core result does not prove that external peripheral pins (e.g., VGA DAC, SDRAM, ADC, GPIO) satisfy setup, hold, and skew constraints at physical board interfaces.
-2. **CDC Verification:** Vendor synthesis tools do not automatically prove clock-domain crossing correctness. Asynchronous domain crossings require dedicated SDC false-path / max-delay constraints backed by structural synchronizer verification.
+2. **CDC Verification:** Vendor synthesis tools do not automatically prove clock-domain crossing correctness. Asynchronous domain crossings require architecture-appropriate structural verification (such as multi-stage synchronizers or handshake protocols) and analytically justified timing constraints (e.g., false path or max delay where appropriate), rather than an unjustified blanket false-path assignment.
 3. **Disclose Limitations:** If I/O timing or CDC has not been closed, reports must explicitly state: `INTERNAL_TIMING_MET | IO_TIMING_UNPROVEN`.
 
 ---

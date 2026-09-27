@@ -48,6 +48,14 @@ reports/evidence/
 - **Stable Naming:** Use feature names (`bus-access-fault`), not transient project phase numbers (`phase4a_step3`).
 - **Index Catalog:** `reports/evidence/README.md` must index every package with its verified source SHA, requirement IDs, and verdict.
 
+### Status Definitions and Verdict Semantics
+- **Exit Code != Semantic Verdict:** Tool exit code does not automatically determine semantic verdict. For instance, reproducing a known negative test or bug returns non-zero from the tool, yet represents `PASS_INCOMPATIBILITY_REPRODUCED`. Conversely, a tool exiting 0 when assertions were bypassed does NOT constitute a `PASS`.
+- **Status Classification:**
+  - `APPROVED`: Evidence package reviewed and accepted against an immutable public commit SHA.
+  - `PENDING_REVIEW`: Completed evidence package awaiting independent review.
+  - `PENDING_PUBLIC_COMMIT`: Used during development when verification is complete against local working files or a feature branch, but the public documentation/source commit SHA has not yet been formed. Public evidence packages must not be finalized as `APPROVED` with a missing or uncommitted SHA; they must be marked `PENDING_PUBLIC_COMMIT` and updated prior to publication.
+  - `REJECTED` / `BLOCKED`: Verification failed or prerequisite gate unavailable.
+
 ---
 
 ## 3. Evidence Specification: `summary.md`
@@ -62,8 +70,8 @@ reports/evidence/
 - Requirements: `<REQ-001>`, `<REQ-002>`
 - Criteria: `<PREFIX>-AC-01..NN`
 - Result: `PASS | CONDITIONAL_PASS | FAIL | STOP`
-- Review Status: `APPROVED | PENDING_REVIEW | REJECTED`
-- Verified Source Revision: `<40-character Git commit SHA>`
+- Review Status: `APPROVED | PENDING_REVIEW | PENDING_PUBLIC_COMMIT | REJECTED`
+- Verified Source Revision: `<40-character Git commit SHA | PENDING_PUBLIC_COMMIT>`
 - Evidence Date: `<YYYY-MM-DD>`
 
 ## 2. Scope
@@ -76,12 +84,13 @@ Explicit statement of what this package substantiates (and nothing more).
 - Testbench: `verification/.../tb_*.sv`
 - Runner: `scripts/wsl/<runner>.sh`
 - Simulator / Tool: `<Tool name and version>`
+- Oracle / Reference: `<Golden model, ISA specification, or protocol checker>`
 - Clock / Reset / Protocol Assumptions: `<Assumptions>`
 
 ## 5. Acceptance Results
-| Criterion ID | Check Description | Result |
-|---|---|---|
-| `<PREFIX>-AC-01` | <Description> | PASS |
+| Criterion ID | Check Description | Oracle / Reference | Result |
+|---|---|---|---|
+| `<PREFIX>-AC-01` | <Description> | <Spec clause / golden oracle> | PASS |
 
 ## 6. Reproduction
 ```bash
@@ -90,7 +99,7 @@ RUN_ROOT=/tmp/soc-runs bash scripts/wsl/<runner>.sh
 Public reproduction commands must be self-contained and free of machine-local paths.
 
 ## 7. Source Identity
-- Hash Manifest: `source_hashes.sha256`
+- Hash Manifest: `source_hashes.sha256` (or `source_hashes.json`)
 - Result JSON: `result.json`
 
 ## 8. Limitations / Not Proven
@@ -114,8 +123,9 @@ Explicit enumeration of what was NOT proven (e.g., board signoff, CDC closure, f
 ### JSON Schema Requirements
 - Valid JSON (no comments or trailing commas).
 - Relative paths within the repository only.
-- Unexecuted items must be explicitly marked `NOT_RUN`, `NOT_APPLICABLE`, or `BLOCKED`. Never use `PASS` for unexecuted checks.
-- Exit code 0 alone does not dictate a `PASS` verdict.
+- Unexecuted items must be explicitly marked `NOT_RUN`, `NOT_APPLICABLE`, `PENDING`, or `BLOCKED`. Never use `PASS` for unexecuted checks.
+- Exit code 0 alone does not dictate a `PASS` verdict. For example, reproducing an expected incompatibility is recorded as `PASS_INCOMPATIBILITY_REPRODUCED`.
+- If the public source commit has not yet been formed, record `"commit": "PENDING_PUBLIC_COMMIT"` and update it prior to publication.
 
 ### Structure Example
 
@@ -174,9 +184,11 @@ An evidence file cannot record its own future commit SHA. Therefore:
 
 ---
 
-## 5. Source Hash Manifest: `source_hashes.sha256`
+## 5. Source Hash Manifest: `source_hashes.sha256` / `source_hashes.json`
 
-Standard `sha256sum` format tracking the exact files involved in the verification:
+Evidence packages must corroborate the exact integrity of all input files using standard SHA-256 hashes.
+
+### Standard `sha256sum` Format (`source_hashes.sha256`)
 
 ```text
 eb261e6346f699ddce5c6f53f28df68d50e587840a7e6bf5ce0152a834d3c87e  rtl/core/v/top/RV32I46F_5SP_MMIO.v
@@ -184,9 +196,31 @@ eb261e6346f699ddce5c6f53f28df68d50e587840a7e6bf5ce0152a834d3c87e  rtl/core/v/top
 3ad86035bf3fdb3ca639dafa045b88dd9ba70034d9bbce26a63cd93627268d68  scripts/wsl/bus_cpu_apb_test.sh
 ```
 
-- Paths must be relative to the public repository root.
-- Include verified RTL, firmware, testbenches, runners, and models.
-- Exclude vendor-proprietary binaries and raw run outputs.
+### JSON Format Specification (`source_hashes.json`)
+
+When machine-readable hashing is used:
+
+```json
+{
+  "schema_version": "1.0",
+  "files": [
+    {
+      "path": "rtl/core/v/top/RV32I46F_5SP_MMIO.v",
+      "sha256": "eb261e6346f699ddce5c6f53f28df68d50e587840a7e6bf5ce0152a834d3c87e"
+    },
+    {
+      "path": "verification/directed/bus/tb_cpu_access_fault.sv",
+      "sha256": "908a241f8022a7eee2ab7f15c1f86057ff5bcc18270f7d3805247d17376ada4a"
+    }
+  ]
+}
+```
+
+### Four Hash Governance Rules
+1. **Content vs Commit:** SHA-256 hashes record exact physical file content to corroborate integrity; they do not replace or substitute for Git commit SHAs.
+2. **Invalidation and Regeneration:** If any verified source, testbench, runner, or model file is edited or modified after hash calculation, the hash manifest is invalidated and must be regenerated immediately.
+3. **Vendor IP Exclusion:** Vendor-proprietary binaries, encrypted netlists, and tool databases must NOT be hashed into public manifests; reference them via `ip_manifest.yml` or binding names instead.
+4. **Repository-Relative Paths:** Paths must be strictly relative to the public repository root. Never embed absolute host paths. Include verified RTL, firmware, testbenches, runners, and models; exclude transient outputs.
 
 ---
 

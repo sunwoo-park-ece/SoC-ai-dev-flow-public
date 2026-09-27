@@ -29,7 +29,7 @@
 
 ## 2. 표준 명세서 기본 골격
 
-`spec/` 하위의 모든 정규 명세서는 다음 표준 8개 섹션 구조를 따라야 합니다:
+아래의 표준 8개 섹션 구조는 `spec/` 하위의 정규 서브시스템 명세서를 위한 **기본 권장 표준(Default & Recommended Standard)**입니다. 소규모 또는 특정 목적에 집중된 명세서의 경우 비례적으로 축소된 서브셋을 채택할 수 있으나, Status, Contract, Criteria, Traceability는 절대 생략되어서는 안 됩니다:
 
 ```markdown
 # <기능 / 서브시스템 명칭> Specification
