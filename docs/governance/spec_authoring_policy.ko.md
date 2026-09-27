@@ -29,7 +29,17 @@
 
 ## 2. 표준 명세서 기본 골격
 
-아래의 표준 8개 섹션 구조는 `spec/` 하위의 정규 서브시스템 명세서를 위한 **기본 권장 표준(Default & Recommended Standard)**입니다. 소규모 또는 특정 목적에 집중된 명세서의 경우 비례적으로 축소된 서브셋을 채택할 수 있으나, Status, Contract, Criteria, Traceability는 절대 생략되어서는 안 됩니다:
+아래의 표준 8개 섹션 구조는 `spec/` 하위의 정규 서브시스템 명세서를 위한 **기본 권장 표준(Default & Recommended Standard)**입니다. 소규모 또는 특정 목적에 집중된 명세서의 경우 비례적으로 섹션 제목을 조정할 수 있으나, 시맨틱 손실 없이 다음 8대 핵심 영역의 독립적인 소유권을 반드시 온전히 보존해야 합니다:
+- **Status / Scope (상태 및 범위)**
+- **Current Active Contract (현재 활성 계약)**
+- **Interface / Timing (인터페이스 및 타이밍, 해당 시)**
+- **Invariants / Error Behavior (불변식 및 에러 동작)**
+- **Acceptance Criteria (인수 기준)**
+- **Current Requirement Status (현재 요구사항 상태)**
+- **Approved Target / Deferred Work (승인된 향후 목표 및 유예 작업)**
+- **Traceability (추적성)**
+
+어떠한 경우에도 제목 변경을 이유로 이들 고유한 규범적 역할이 누락되거나 모호하게 혼재되어서는 안 됩니다:
 
 ```markdown
 # <기능 / 서브시스템 명칭> Specification

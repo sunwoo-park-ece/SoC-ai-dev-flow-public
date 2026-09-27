@@ -29,7 +29,17 @@
 
 ## 2. Standard Specification Skeleton
 
-The standard 8-part structure below is the **default and recommended standard** for canonical subsystem specifications under `spec/`. Small or focused specifications may adopt a proportional subset, provided Status, Contract, Criteria, and Traceability are never omitted:
+The standard 8-part structure below is the **default and recommended standard** for canonical subsystem specifications under `spec/`. Small or focused specifications may adapt headings proportionally, but must strictly preserve the distinct semantic ownership of all core dimensions without semantic loss:
+- **Status / Scope**
+- **Current Active Contract**
+- **Interface / Timing** (where applicable)
+- **Invariants / Error Behavior**
+- **Acceptance Criteria**
+- **Current Requirement Status**
+- **Approved Target / Deferred Work**
+- **Traceability**
+
+Under no circumstances may adapted headings eliminate or conflate these distinct normative roles:
 
 ```markdown
 # <Feature / Subsystem Name> Specification

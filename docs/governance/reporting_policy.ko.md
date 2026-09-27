@@ -49,7 +49,7 @@ reports/evidence/
 - **색인 목록:** `reports/evidence/README.md`에 검증 소스 커밋 SHA, 요구사항 ID, 판정 결과를 요약 표로 인덱싱합니다.
 
 ### 상태 정의 및 판정 시맨틱
-- **종료 코드 != 시맨틱 판정 (Exit Code != Semantic Verdict):** 도구의 프로세스 종료 코드가 시맨틱 판정을 자동으로 결정하지 않습니다. 예를 들어, 기지의 부정 테스트(Negative Test)나 버그를 재현하는 경우 도구가 0이 아닌 종료 코드를 반환하더라도 `PASS_INCOMPATIBILITY_REPRODUCED`로 기록됩니다. 반대로 기대 단언문이 실행되지 않고 우회된 채 exit 0을 반환한 경우는 `PASS`가 될 수 없습니다.
+- **종료 코드 != 시맨틱 판정 (Exit Code != Semantic Verdict):** 프로세스 종료 코드는 도구 및 테스트 러너의 시맨틱에 따라 0일 수도 있고 0이 아닐 수도 있으며, 시맨틱 엔지니어링 판정을 자동으로 결정하지 않습니다. 시맨틱 판정은 명세 계약에 따라 독립적으로 평가됩니다. 예를 들어 기지의 부정 테스트(Negative Case)나 아키텍처 비호환성을 재현하는 경우 원시 테스트벤치가 0이 아닌 종료 코드를 반환하거나(또는 전용 체커가 0을 반환하더라도), 유효한 엔지니어링 판정인 `PASS_INCOMPATIBILITY_REPRODUCED`로 기록될 수 있습니다. 반대로 기대 단언문이 실행되지 않고 우회·마스킹된 채 exit 0을 반환한 경우는 `PASS`가 될 수 없습니다.
 - **상태 분류 체계:**
   - `APPROVED`: 변경 불가능한 공개 커밋 SHA를 대상으로 독립 검토 및 승인이 완료된 증거 패키지.
   - `PENDING_REVIEW`: 작성이 완료되어 독립 검토를 대기 중인 증거 패키지.
@@ -124,7 +124,7 @@ RUN_ROOT=/tmp/soc-runs bash scripts/wsl/<runner>.sh
 - 엄격한 표준 JSON 규격 준수 (주석이나 후행 쉼표 금지).
 - 저장소 내부 기준 상대 경로만 사용.
 - 실행되지 않은 항목은 반드시 `NOT_RUN`, `NOT_APPLICABLE`, `PENDING`, `BLOCKED`로 표기 (절대 거짓 `PASS` 금지).
-- 0번 종료 코드(exit 0)가 곧바로 `PASS`를 의미하지 않음 (예: 비호환성 재현 검증은 `PASS_INCOMPATIBILITY_REPRODUCED`).
+- 프로세스 종료 코드(0 또는 0이 아님)가 시맨틱 판정을 결정하지 않으며, 결과는 인수 기준에 따라 독립적으로 평가되어야 함 (예: 원시 도구 종료 코드와 무관하게 비호환성 재현 검증은 `PASS_INCOMPATIBILITY_REPRODUCED`로 기록).
 - 퍼블릭 소스 커밋이 아직 생성되지 않은 경우 `"commit": "PENDING_PUBLIC_COMMIT"`으로 표기하고 배포 전 갱신.
 
 ### 구조 예시

@@ -49,7 +49,7 @@ reports/evidence/
 - **Index Catalog:** `reports/evidence/README.md` must index every package with its verified source SHA, requirement IDs, and verdict.
 
 ### Status Definitions and Verdict Semantics
-- **Exit Code != Semantic Verdict:** Tool exit code does not automatically determine semantic verdict. For instance, reproducing a known negative test or bug returns non-zero from the tool, yet represents `PASS_INCOMPATIBILITY_REPRODUCED`. Conversely, a tool exiting 0 when assertions were bypassed does NOT constitute a `PASS`.
+- **Exit Code != Semantic Verdict:** A process exit code may be zero or non-zero depending on tool and test-runner semantics, and does not automatically determine the semantic engineering verdict. Semantic engineering verdicts are evaluated independently against specification contracts. For example, reproducing a known negative case or architectural incompatibility may result in a non-zero exit code from a raw testbench or zero from a dedicated checker, yet represents the valid engineering verdict `PASS_INCOMPATIBILITY_REPRODUCED`. Conversely, a tool exiting with code 0 when assertions were bypassed, masked, or unexecuted does NOT constitute a `PASS`.
 - **Status Classification:**
   - `APPROVED`: Evidence package reviewed and accepted against an immutable public commit SHA.
   - `PENDING_REVIEW`: Completed evidence package awaiting independent review.
@@ -124,7 +124,7 @@ Explicit enumeration of what was NOT proven (e.g., board signoff, CDC closure, f
 - Valid JSON (no comments or trailing commas).
 - Relative paths within the repository only.
 - Unexecuted items must be explicitly marked `NOT_RUN`, `NOT_APPLICABLE`, `PENDING`, or `BLOCKED`. Never use `PASS` for unexecuted checks.
-- Exit code 0 alone does not dictate a `PASS` verdict. For example, reproducing an expected incompatibility is recorded as `PASS_INCOMPATIBILITY_REPRODUCED`.
+- A process exit code (zero or non-zero) does not dictate the semantic verdict; semantic results must be evaluated independently against acceptance criteria (e.g., reproducing an expected incompatibility is recorded as `PASS_INCOMPATIBILITY_REPRODUCED` regardless of raw tool exit code).
 - If the public source commit has not yet been formed, record `"commit": "PENDING_PUBLIC_COMMIT"` and update it prior to publication.
 
 ### Structure Example

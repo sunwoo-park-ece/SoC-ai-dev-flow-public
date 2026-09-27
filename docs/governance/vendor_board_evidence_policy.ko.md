@@ -29,7 +29,7 @@
 요청이 있을 때 에이전트는 사용자가 복사하여 즉시 실행할 수 있는 정밀한 CLI 명령을 생성합니다. 모든 벤더 실행 스크립트나 CLI 스니펫은 다음 규약을 준수해야 합니다:
 
 1. **고유 실행 식별자 (Unique Run ID):** 태스크, 기능, 날짜, 순번을 포함 (예: `p12_vga_cdc_20261001_01`).
-2. **저장소 외부 실행 디렉터리 (Out-of-Tree Run Root):** 모든 중간 파일, 프로젝트 DB, 비트스트림을 Git 저장소 외부인 `<workspace>/runs/quartus/<feature>/<run-id>/` (또는 `<workspace>/runs/vivado/...`)에 격리 저장.
+2. **저장소 외부 실행 디렉터리 (Out-of-Tree Run Root):** 모든 중간 파일, 프로젝트 DB, 비트스트림을 Git 저장소 외부인 `<workspace>/runs/quartus/<feature>/<run-id>/` (또는 `<workspace>/runs/vivado/...`)에 격리 저장. 스크립트는 명시적인 워크스페이스 변수를 강제하고 미지정 시 즉시 실패(fail-fast)해야 하며, 저장소나 현재 작업 디렉터리로의 폴백은 엄격히 금지됩니다.
 3. **파이프 실패 보호 (`set -o pipefail`):** bash/zsh 스니펫에서 `set -o pipefail`을 적용(또는 셸에 적합한 파이프라인 실패 전파 기법 사용)하여 파이프라인 명령 중간의 실패가 은폐되지 않도록 강제.
 4. **종료 코드 명시적 기록:** 도구의 실제 종료 코드를 `exit_code.txt`에 기록.
 5. **표준 출력/에러 동시 로깅:** `tee`를 사용하여 콘솔 출력과 로그 파일(`wrapper.log` 등)을 동시 기록.
@@ -40,8 +40,11 @@
 # 파이프라인 실패 전파 강제 (bash/zsh)
 set -o pipefail
 
+# WORKSPACE 환경 변수 미지정 시 즉시 중단 (저장소 루트로의 폴백 금지)
+: "${WORKSPACE:?ERROR: WORKSPACE 환경 변수가 반드시 명시되어야 합니다 (예: export WORKSPACE=/home/swp/soc)}"
+
 RUN_ID="<feature>_$(date +%Y%m%d_%H%M%S)"
-RUN_ROOT="${WORKSPACE:-.}/runs/quartus/<feature>/${RUN_ID}"
+RUN_ROOT="${WORKSPACE}/runs/quartus/<feature>/${RUN_ID}"
 mkdir -p "$RUN_ROOT"
 
 echo "=== Starting Vendor Build [${RUN_ID}] ==="
