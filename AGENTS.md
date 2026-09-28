@@ -47,6 +47,25 @@ Reading a policy does not:
 - activate a deferred gate;
 - grant commit/merge/push/tag/publication/release authority.
 
+#### Re-evaluate routing when task outputs or scope change
+
+Policy routing is evaluated at entry **and again before any newly added work**.
+
+Re-evaluate the applicable policy set when the task later adds or changes:
+
+- normative specification edits;
+- checker / runner / verification depth;
+- engineering report or evidence authoring;
+- evidence promotion / VERIFIED or closure work;
+- vendor / STA / board / characterization work;
+- publication / release actions.
+
+In particular, converting a transient console/chat result into a persistent engineering report or evidence artifact triggers `docs/governance/reporting_policy.md` before that artifact is authored.
+
+If a newly triggered policy requires work outside the approved task scope, do not continue under the old authorization. STOP and request an updated task/Execution Profile or explicit scoped approval.
+
+Reading an additional policy never grants commit, merge, push, tag, release, Issue closure, or other owner-controlled actions.
+
 ### Always-On Anti-Cosmetic Core
 
 For all agents and all engineering tasks:
