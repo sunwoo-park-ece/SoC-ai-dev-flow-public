@@ -1,8 +1,8 @@
 # Baseline SoC Reset / Clock 명세
 
-> **상태:** DRAFT — 현재 활성 FPGA baseline으로부터 복원된 문서이며 Developer + ChatGPT Chat의 최종 검토 대상이다.
+> **상태:** 현재 baseline reset/clock 계약. `RST-001`, `RST-002`는 accepted prerequisite이고 VGA ownership CDC `CDC-001`은 OPEN이며 상세 normative semantics는 `../08_vga.md`가 소유한다.
 >
-> **정본 언어:** 영어. 이 문서와 `reset_clock.md`가 충돌할 경우 영어 문서가 authoritative source이다.
+> **정본 언어:** 영어. 영문 `../06_reset_clock.md`가 정본이다.
 >
 > **상위 명세:** `soc_architecture.md`, `ahb_fabric.md`, `apb_subsystem.md`.
 
@@ -50,10 +50,12 @@ DE10-Lite 50 MHz board clock: clk
 KEY[0] (active-low)
       |
       v
-2-FF synchronization
+system_reset_controller
+  asynchronous assertion /
+  2-FF HCLK release synchronization
       |
       v
-~20 ms release qualification
+~20 ms HCLK release qualification
       |
       v
 HRESETn / PRESETn
@@ -69,7 +71,7 @@ HRESETn / PRESETn
 | APB | `PCLK` | 50 MHz | `HCLK` | APB peripherals | HCLK와 동일, AHB/APB 경계 자체는 CDC 아님 |
 | VGA pixel | `pclk_25` | 25 MHz | `vga_pll`, 50 MHz / 2 | VGA timing, VRAM read port | Generated clock domain |
 | G-sensor controller | `PCLK` | 50 MHz | AHB-APB bridge | ADXL345/SPI control 및 XYZ register | APB와 동일 domain; registered 외부 SCLK는 내부 clock domain 아님 |
-| ADC/Qsys | `adc_sys_clk` | vendor/Qsys-managed | `adc_qsys` from board `clk` | ADC command sequencer / ADC subsystem | Generated vendor-managed domain, exact rate는 software contract가 아님 |
+| ADC/Qsys | `adc_sys_clk` | 25 MHz | board `clk`에서 생성한 `adc_qsys`; 별도 10 MHz ADC hard-IP input | P11 ADC acquisition engine / vendor ADC subsystem | Generated domain; configured total ADC rate는 1 MSPS이며 effective project frame cadence는 별도 |
 
 현재 AHB와 APB는 서로 다른 clock을 사용하지 않는다. `PCLK`와 `HCLK`는 동일한 50 MHz source이다.
 
@@ -138,19 +140,33 @@ PLL은 50 MHz reference를 divide-by-2 하여 25 MHz를 생성한다.
 
 ### 6.1 VGA PLL Reset / Lock Behavior
 
-현재 VGA PLL wrapper는 `locked` 출력을 사용하지 않으며 PLL asynchronous reset도 사용하지 않는다.
+VGA PLL은 `CLOCK_50`에서 free-running으로 동작하며 이 계약은 새로운 PLL reset 입력이나 sequence를 요구하지 않는다. 현재 interface는 `vga_pll_locked`를 노출한다. Pixel-domain reset request는 다음 conjunction이다.
 
-따라서 baseline은 PLL lock 상태를 확인한 뒤 VGA logic reset을 푸는 구조가 아니다.
+```text
+HRESETn & vga_pll_locked
+```
 
-이 동작은 현재 구현 특성이지, 향후 권장 reset/clock policy는 아니다.
+release는 `pclk_25` clock의 `reset_release_sync`를 통해서만 이루어진다. 따라서 system reset 또는 PLL lock loss는 VGA pixel reset을 assert하고, release는 system reset release + PLL lock high + destination-domain synchronous release를 요구한다. 이 P05 architecture는 **accepted prerequisite**(`RST-002`)이며 보존해야 한다.
+
+PLL lock qualification 자체가 VGA ownership CDC closure를 의미하지 않는다. HCLK↔pixel request/commit/ACK/ownership protocol은 `CDC-001`로 계속 추적하며 normative transaction semantics는 `../08_vga.md`에서 정의한다.
+
 
 ## 7. G-Sensor SPI Clock
 
 `APB_GSENSOR_MB`와 `spi_ee_config`는 50 MHz `PCLK`만 사용한다. Controller는 12/13-PCLK half-period의 registered 외부 mode-3 SCLK를 구동한다. 과거 2-output `spi_pll`은 현행 G-sensor instance나 Quartus binding에 없다. G-sensor controller는 공통 `PRESETn`에 직접 연결되며, 과거 로컬 `reset_delay`는 P09B에서 비활성이다.
 
-## 8. ADC / Qsys Clock Domain
+## 8. ADC / Qsys Clock and Reset Domain — P11 Target (In-progress)
 
-현재 top은 `adc_qsys`를 다음과 같이 연결한다.
+P11A에서 확인한 generated instance clock은 다음과 같다.
+
+```text
+board clk                     = 50 MHz
+adc_sys_clk                   = 25 MHz
+ADC hard-IP input clock       = 10 MHz
+configured ADC total rate     = 1 MSPS
+```
+
+`adc_qsys`는 vendor-managed subsystem이며 다음 연결을 유지한다.
 
 ```text
 clk_clk                      <- board clk
@@ -158,9 +174,13 @@ clock_bridge_sys_out_clk_clk -> adc_sys_clk
 reset_reset_n                <- HRESETn
 ```
 
-top-level의 작은 channel sequencer는 `adc_sys_clk`에서 동작하며 ADC command interface가 ready일 때 channel 1과 2를 번갈아 선택한다.
+Generated Qsys implementation은 내부 PLL-lock/reset-controller infrastructure를 사용한다. 현재 generated interface는 PLL `locked`를 project-local top RTL로 export하지 않으며 generated HDL을 hand-edit해서 만들면 안 된다.
 
-현재 `adc_sys_clk`의 정확한 frequency는 vendor/Qsys-managed implementation detail로 취급한다. 추후 ADC specification과 timing review에서 명시적으로 확정하기 전까지 software-visible behavior가 특정 `adc_sys_clk` rate에 의존해서는 안 된다.
+Project-owned P11 acquisition logic은 `adc_sys_clk`에서 동작하며 qualified `HRESETn`으로부터 `reset_release_sync(adc_sys_clk)`가 생성한 project-local `adc_reset_n`을 사용한다. Primitive의 reset assertion은 비동기이고 deassertion은 `adc_sys_clk`에 동기된다.
+
+HCLK/PCLK는 추가 local release synchronizer가 필요 없다. `HRESETn`은 이미 HCLK에서 qualify/release되며 `PCLK=HCLK`다.
+
+P11 command/response cadence, vendor lock-loss recovery, exact accepted-command-to-response timing의 verification은 **(In-progress)**이며 25/10 MHz clock이나 configured 1 MSPS rate만으로 추론하면 안 된다.
 
 ## 9. External Reset Source
 
@@ -182,8 +202,8 @@ RESETN_BTN = KEY[0]
 
 현재 reset-conditioning path는 두 단계다.
 
-1. external button level을 HCLK으로 2-FF synchronization
-2. 약 20 ms 동안 high가 유지된 뒤 system reset release
+1. external button low의 asynchronous assertion / button level의 HCLK 2-FF release synchronization
+2. 약 20 ms 동안 high가 유지된 뒤 HCLK에서 system reset release
 
 ## 10. Reset Synchronization / Release Qualification
 
@@ -219,13 +239,11 @@ HRESETn = PRESETN_SYS
 
 따라서 button release부터 실제 system release까지는 약 20 ms + synchronizer/clock alignment latency가 필요하다.
 
-### 10.3 Assertion Semantics Quirk
+### 10.3 System Reset Assertion Contract
 
-Source comment는 reset low가 즉시 적용되는 것처럼 표현하지만, `PRESETN_SYS` 자체는 `posedge HCLK` block에서만 갱신된다.
+`KEY[0]` low는 `system_reset_controller`를 통해 distributed `HRESETn`을 비동기적으로 assert하며 HCLK edge를 기다리지 않는다. Reset release는 HCLK에서 synchronize/qualify되고 기존 1,000,000-cycle(50 MHz에서 약 20 ms) high-level release qualification 및 synchronizer/edge-alignment latency 이후에만 이루어진다.
 
-즉 external button은 input synchronizer를 asynchronous하게 clear하지만 실제 distributed `HRESETn`은 이후 HCLK edge에서 low가 된다.
-
-이 차이는 verification에서 그대로 고려해야 하며 baseline cleanup 시 intended reset semantics를 명확히 선택해야 한다.
+이는 accepted P05 `RST-001` / `RST-002` semantics를 보존한다. 과거 next-HCLK-edge assertion 설명은 대체되었으며 현재 계약이 아니다.
 
 ## 11. System Reset Distribution
 
@@ -294,22 +312,32 @@ read port  : pclk_25
 
 CPU write domain과 VGA read domain 사이의 framebuffer data crossing은 vendor dual-port memory primitive가 구조적으로 처리한다.
 
-### 13.3 Front-Buffer Select: HCLK -> pclk25 — Cleanup Required
+### 13.3 VGA Ownership Protocol: HCLK <-> pclk25 — `CDC-001` OPEN
 
-`front_buffer_idx`는 HCLK domain에서 software SWAP request에 의해 변경된다.
+현재 VGA ownership interface는 과거의 direct HCLK `front_buffer_idx` selector가 아니다. Logical protocol은 다음과 같다.
 
-동일 signal이 pclk25 쪽에서 직접:
+```text
+HCLK                                  pclk_25
+accepted SWAP-bearing operation
+  -> swap-request epoch 1회 publish
+        -- synchronized event ------> pending swap
+                                      |
+                                      +-- (799,524)->(0,0)에서만
+                                      |   front ownership commit
+                                      v
+        <------ post-commit ACK ------+
+synchronized ACK consume
+  -> HCLK ownership view update
+```
 
-- 어느 VRAM에 VGA read address를 연결할지
-- 어느 VRAM output을 `vga_rdata`로 선택할지
+pixel-domain display owner와 HCLK writable-owner view는 pixel commit 이후 ACK synchronization 전까지 일시적으로 다를 수 있다. 이 구간에는 one-outstanding-operation rule이 framebuffer write를 차단한다. clear-only는 pixel ownership request가 필요 없고, combined SWAP+CLEAR는 swap commit/ACK를 먼저 수행한 뒤 결과 new back bank를 clear한다.
 
-를 제어한다.
+logical swap request는 event semantics다. request를 encode/qualify하는 구체적인 internal bit는 implementation detail이며 normative multi-bit payload contract를 만들지 않는다. 해당 signal의 stability와 synchronizer topology는 이후 structural/static CDC review 대상이다.
 
-현재 explicit synchronizer나 pclk25 handshake가 없다.
+Reset 또는 PLL lock loss는 새 ownership epoch를 시작한다. Recovery는 ownership과 request/ACK observation state를 rebase하고 stale pre-recovery event를 억제하며 새 pixel epoch 확립 전까지 `DOMAIN_READY=0`을 유지하고 이후 next valid transaction의 progress를 보장해야 한다. Full system reset은 VGA status를 clear하며, system reset이 유지된 상태의 PLL lock loss는 `../08_vga.md`에 정의한 software-visible `OP_ABORT` semantics를 따른다.
 
-따라서 현재 board 동작과 별개로 CDC-safe buffer ownership transfer는 formally established 상태가 아니다.
+이 section은 **behavioral architecture**를 freeze할 뿐이다. `CDC-001`은 independent async/reset behavioral verification과 별도 structural CDC review가 accepted되기 전까지 OPEN이다. Positive STA는 이 protocol correctness 증명이 아니다.
 
-Cleanup 시 frame boundary에서 commit되는 handshake/toggle 구조 등으로 수정해야 한다.
 
 ### 13.4 G-Sensor Sample Data: 단일 PCLK 도메인 및 코히어런트 스냅샷
 
@@ -317,31 +345,44 @@ Cleanup 시 frame boundary에서 commit되는 handshake/toggle 구조 등으로 
 
 따라서 SPI controller와 CPU 인터페이스 사이에 활성 내부 CDC 위험은 존재하지 않는다. `CDC-002`가 `IN_PROGRESS`를 유지하는 것은 보수적인 엔지니어링 종결 기준(완전한 리셋-negative 커버리지 및 물리 검증 등)에 따른 것이며, RTL에 활성 비안전 클록 크로싱이 남아있기 때문이 아니다.
 
-### 13.5 ADC Response: adc_sys_clk -> PCLK — Cleanup Required
+### 13.5 ADC Scan Frame: adc_sys_clk -> PCLK — P11 Target (In-progress)
 
-Qsys ADC response signal:
+과거 Qsys response를 PCLK로 직접 sampling하는 구조는 P11 target contract가 아니다.
+
+완성된 ADC scan frame은 stable bundled-data request/acknowledge toggle mailbox를 통해 crossing해야 한다.
 
 ```text
-adc_response_valid
-adc_response_channel
-adc_response_data
-adc_response_startofpacket
-adc_response_endofpacket
+adc_sys_clk source:
+  complete frame -> stable payload -> REQ toggle -> hold until ACK
+
+PCLK destination:
+  synchronize REQ -> atomically capture whole frame into LIVE -> return ACK
 ```
 
-이 PCLK-domain `APB_ADC_Joystick_Controller`로 직접 연결된다.
+Source는 ACK까지 complete-frame payload를 stable하게 유지하고 mailbox busy 동안 payload를 overwrite하거나 다음 completed frame을 publish하면 안 된다. Acquisition engine은 ACK까지 frame boundary에서 pause할 수 있다. 따라서 P11 baseline은 maximum-throughput stream이 아니라 coherent/lossless-at-publication latest-state channel이다.
 
-현재 PCLK `always` block이 이 신호들을 일반 register처럼 sampling하며, user RTL에는 explicit synchronizer/async FIFO가 없다.
+Handshake round trip 동안 여러 frame을 누적해야 하거나, acquisition이 pause할 수 없거나, 모든 high-rate frame을 보존해야 하거나, acquisition 지속 중 destination stall이 길어질 수 있거나, future DMA/SDRAM streaming이 도입되면 async FIFO가 필요하다.
 
-Qsys exported response가 실제로 PCLK synchronous라고 보장된다는 사실이 현재 project spec에서 입증되지 않았으므로 unresolved CDC boundary로 관리해야 한다.
+P11 이후 live Qsys response bus field를 APB에 직접 노출하면 안 된다. P11 frame CDC implementation/verification과 vendor lock-loss/protocol verification은 **(In-progress)**이며 이 target 설명은 완료나 closure 선언이 아니다.
 
-### 13.6 Generated Domain Reset Release
+### 13.6 Reset Release Into Generated Domains
 
-`HRESETn`은 HCLK에 맞춰 생성되지만 `pclk_25`, `adc_sys_clk`, local generated clock으로 동작하는 logic에도 직접 사용된다.
+Reset architecture는 **central reset policy**와 **destination-domain release synchronization**을 구분한다.
 
-여러 generated-domain register는 async reset assertion을 사용하지만 destination clock별 synchronized deassertion path가 명시적으로 존재하지 않는다.
+```text
+KEY[0] -> system_reset_controller -> HRESETn
+  +-> HCLK/PCLK logic directly
+  +-> (HRESETn & vga_pll_locked)
+  |      -> reset_release_sync(pclk_25) -> vga_reset_n
+  +-> reset_release_sync(adc_sys_clk)
+  |      -> adc_reset_n for project-owned ADC logic
+  +-> adc_qsys reset port
+         -> vendor-managed internal reset/lock behavior
+```
 
-따라서 현재 baseline은 아직 formal한 **asynchronous assert / synchronous deassert per-domain reset architecture**를 갖춘 상태가 아니다.
+HCLK/PCLK는 이미 HCLK에서 release-qualified이며 `PCLK=HCLK`이므로 불필요한 두 번째 synchronizer를 추가하지 않는다. 독립적으로 생성된 모든 project-owned domain은 destination clock에 맞춰 reset을 deassert해야 한다. VGA PLL은 `CLOCK_50`에서 free-running이며 새로운 PLL reset requirement를 추가하지 않는다.
+
+ADC/Qsys 내부 reset/PLL-lock behavior는 문서화된 vendor boundary이고 project-local acquisition logic은 `adc_reset_n`을 사용한다. Full generated-domain closure 주장 전에 P11 verification은 partial assembly/mailbox activity 중 reset과 가능한 vendor lock/reset recovery를 exercise해야 한다.
 
 ## 14. Future Clock-Domain Design Rule
 
@@ -390,52 +431,20 @@ create_clock -name {clk} -period {20.0} [get_ports {clk}]
 6. 각 domain의 reset recovery/removal review
 7. Quartus CDC/timing warning을 board PASS만으로 무시하지 않고 triage
 
-## 17. Baseline Cleanup Targets Before Major Feature Integration
+## 17. VGA CDC 관련 Current Cleanup Coordination
 
-이 항목들은 나중에 project-wide `baseline_cleanup.md`로 통합한다.
+Project-wide status owner는 `../baseline_cleanup.md`이며 이 명세는 전체 cleanup checklist를 중복하지 않는다. VGA CDC/reset boundary의 현재 상태는 다음과 같다.
 
-### 17.1 Reset Architecture
+| Item | Current status | Contract role |
+|---|---|---|
+| `RST-001` | VERIFIED | accepted system-reset prerequisite. async assertion / qualified HCLK release behavior 보존 |
+| `RST-002` | VERIFIED | accepted generated-domain reset/PLL-lock prerequisite. `vga_pll_locked` qualification과 pclk_25 synchronized release 보존 |
+| `CDC-001` | OPEN | Section 6/13 및 `../08_vga.md`의 VGA request/commit/ACK/ownership/recovery protocol을 freeze하고 later gate에서 증명 |
+| `VER-003` | OPEN | 이후 independent async-clock/reset behavioral verification. 이번 SPEC stage에서는 수행하지 않음 |
+| `STA-001` | IN_PROGRESS | 별도 timing/exception/recovery-removal review. timing PASS에서 CDC correctness를 추론하지 않음 |
 
-1. **System reset assertion semantics 명확화/수정**
-   - comment와 실제 `HRESETn` assertion timing 차이를 제거하거나 명확히 문서화
-   - async assert/sync deassert architecture 여부를 확정
+과거 broad cleanup target list는 historical coordination material이며 current status와 required outcome은 `../baseline_cleanup.md`가 소유한다.
 
-2. **Generated domain별 reset synchronizer 추가**
-   - 최소 VGA, ADC, G-sensor domain audit
-   - destination clock 기준 deassertion 안전성 확보
-
-3. **PLL lock handling 검토**
-   - VGA/ADC domain의 PLL lock-qualified reset release를 검토한다. 승인된 A6 cleanup에서는 active SPI PLL domain을 제거한다.
-
-### 17.2 CDC Architecture
-
-4. **VGA front-buffer ownership transfer 동기화**
-   - `front_buffer_idx` 직접 crossing 제거
-   - frame-safe handshake/synchronization scheme 적용
-
-5. **G-sensor multi-bit sample transfer atomic화**
-   - spi_clk sample을 PCLK에서 직접 읽는 구조 제거
-
-6. **ADC response crossing audit/fix**
-   - Qsys clock contract 확인
-   - 필요 시 CDC bridge/FIFO/handshake 추가
-
-7. **Asynchronous external input audit**
-   - UART RX, LoRa AUX, G-sensor interrupt, button/switch 등 input synchronization policy 확정
-
-### 17.3 Timing Constraints
-
-8. **Generated-clock constraint 완성**
-   - VGA, SPI, ADC clock이 TimeQuest에 정확히 표현되도록 정리
-
-9. **Clock uncertainty 추가/derive**
-   - `332168/332169` warning 해결
-
-10. **CDC cleanup 후 asynchronous relationship 정의**
-    - unsafe path를 false-path constraint로 숨기지 않음
-
-11. **Repeatable clock/reset/CDC review report 추가**
-    - clock inventory, unconstrained path, CDC assumption, reset-domain review를 build evidence에 포함
 
 ## 18. Baseline Clock / Reset Invariants
 
@@ -447,10 +456,10 @@ create_clock -name {clk} -period {20.0} [get_ports {clk}]
 4. G-sensor 내부 state는 50 MHz PCLK에서만 동작하고 registered 외부 2 MHz-class SPI clock을 구동하며, 내부 SPI generated-clock domain은 없다.
 5. ADC/Qsys는 fitted 25 MHz `adc_sys_clk`와 10 MHz hard-IP clock을 생성하며, 이는 software-visible timing contract가 아닌 vendor-managed implementation clock이다.
 6. `KEY[0]`가 active-low board reset source이다.
-7. System reset release는 synchronization 이후 약 20 ms qualification을 거친다.
+7. `KEY[0]` low는 `system_reset_controller`를 통해 system reset을 비동기 assert하며 release는 HCLK synchronization 및 약 20 ms qualification을 거친다.
 8. G-sensor 초기화는 공통 PRESETn을 직접 사용하며, 과거 약 20.97 ms 로컬 리셋 지연은 P09B에서 비활성이다.
 9. VGA VSync에는 explicit multi-flop HCLK synchronizer가 있다.
-10. VGA buffer ownership과 ADC response CDC는 미해결이다. G-sensor 내부 SPI-to-PCLK crossing은 제거되었고 cross-read XYZ/VALID/SEQ 코히어런시는 P09B LIVE/HOLD 스냅샷으로 해결되었으며, 잔여 검증/전기적 종결이 진행 중이다.
+10. VGA ownership은 위 request/commit/ACK architecture를 사용하지만 `CDC-001`은 이후 independent behavioral/structural CDC acceptance 전까지 OPEN이다. 과거 direct-selector architecture는 current가 아니다. 과거 direct ADC response crossing은 frozen P11 scan-frame mailbox target architecture로 대체되며 그 implementation/verification은 **(In-progress)**다. G-sensor 내부 SPI-to-PCLK crossing은 제거되었고 cross-read XYZ/VALID/SEQ 코히어런시는 P09B LIVE/HOLD 스냅샷으로 해결되었다.
 11. P05C checkpoint에서 의도한 내부 clock은 모두 표현·제약되었지만 최종 P14 stability/exception 검토와 별도 STA-002 외부 I/O closure는 미완료다.
 12. 향후 feature는 현재 CDC/timing gap을 보존해야 하는 architectural requirement로 취급해서는 안 된다.
 
@@ -465,19 +474,23 @@ create_clock -name {clk} -period {20.0} [get_ports {clk}]
 - `adc_joystick.md` — ADC interface
 - future `baseline_cleanup.md` — consolidated cleanup checklist
 
-## Phase 4A-2 승인된 clock/external-I/O 목표 (현행 RTL 아님)
+## Appendix A. Historical / Milestone Notes
+
+아래 내용은 milestone history와 accepted prerequisite provenance를 보존한다. 과거 target 문장이 Section 1–19와 충돌하면 Section 1–19의 current active contract가 우선한다.
+
+### A.1 Phase 4A-2 승인된 clock/external-I/O 목표 — Historical Status
 
 A1 GPIO_IO[15:0] 외부 입력은 PCLK 2FF sync, reset 시 DIR=input/Hi-Z다. A6 G-sensor SPI는 50 MHz PCLK만 FSM state clock으로 사용하고 clock-enable tick 및 registered 외부 SCLK를 사용한다. 기존 dual-phase `spi_pll`은 cleanup 경로에서 비활성이나 현재 RTL/비공개 역사 IP는 변경하지 않는다. 비동기 `GSENSOR_INT`는 PCLK 동기화가 필요하며, P09B는 LIVE/HOLD 스냅샷을 통해 소프트웨어 가시 VALID/SEQ 및 원자적 접근을 해결한다; `GS-001`/`CDC-002`는 잔여 공학 종결 증거를 위해 IN_PROGRESS를 유지한다. STA-001은 내부/generated clock·CDC clock 구조, STA-002는 외부 포트 분류·근거 있는 delay 또는 N/A·전압/standard/drive/load·unconstrained port·ADXL345 peer timing·ADC/VGA 배치 warning 및 VGA 동작 중 ADC 측정을 담당한다. 비동기/정적/아날로그 pin에 임의의 synchronous delay를 만들지 않는다.
 
-## Phase 4A-P05A 승인 Reset Policy — 구현 목표
+### A.2 Phase 4A-P05A 승인 Reset Policy — Historical Target
 
 User/Chat은 project reset policy로 필요한 곳의 asynchronous assertion과 각 project-owned destination clock domain의 synchronous deassertion을 승인했다. 구현은 `KEY[0]`의 약 20 ms release qualification을 보존하고 cold start를 deterministic하게 만들며, destination clock이 정지하면 clock이 재개될 때까지 해당 domain을 reset에 유지한다. 단순한 스타일 통일만을 위한 reset logic은 추가하지 않는다.
 
 VGA는 Option A를 승인했다. Private `vga_pll`은 generated HDL을 직접 수정하지 않고 vendor flow로 재생성해 `locked`를 노출한다. System reset active 또는 lock low일 때 pixel reset을 assert하고, system reset release 및 lock high 이후 `pclk_25` domain synchronizer를 통해서만 deassert하며, lock loss에는 pixel reset을 다시 assert한다. Public model/interface와 private binding evidence는 재생성된 IP와 일치시켜야 한다.
 
-ADC/Qsys 내부 reset controller는 문서화된 vendor-managed exception으로 유지한다. Qsys 밖의 project-owned ADC sequencer는 local `adc_sys_clk` synchronized reset release를 사용하고 local release 전에는 command-valid를 inactive로 유지한다. PCLK-only G-sensor reset/clock 구조는 변경하지 않는다. 이는 승인된 P05B target이며 현재 RTL이 이미 구현했다는 의미는 아니다. 구현과 검증은 아직 남아 있다.
+ADC/Qsys 내부 reset controller는 문서화된 vendor-managed exception으로 유지한다. Qsys 밖의 project-owned ADC sequencer는 local `adc_sys_clk` synchronized reset release를 사용하고 local release 전에는 command-valid를 inactive로 유지한다. PCLK-only G-sensor reset/clock 구조는 변경하지 않는다. 과거 P05A 시점에는 승인된 P05B target으로 implementation/verification이 pending이었다. Accepted P05 prerequisite 결과는 A.3에 기록한다.
 
-## Phase 4A-P05B Reset / Clock Infrastructure — 현재 구현
+### A.3 Phase 4A-P05B Reset / Clock Infrastructure — Accepted Prerequisite History
 
 P05B는 승인된 policy를 현재 public candidate에 구현했다. `system_reset_controller`는 `KEY[0]` low를 asynchronous assertion으로 전달하고, 기존 1,000,000-cycle qualification 후 HCLK edge에서만 reset을 해제한다. Reset/synchronizer/counter state에는 Quartus가 지원하는 명시적 LOW power-up condition이 있으므로 configuration 완료 시 버튼이 이미 해제되어 있어도 반드시 reset 상태에서 시작한다. Production 값은 50 MHz에서 약 20 ms이며, test는 sequencing rule을 바꾸지 않고 parameter 값만 줄인다.
 
@@ -487,27 +500,26 @@ Project-owned ADC command sequencer는 이제 `adc_sys_clk` local synchronized r
 
 P05C fitted evidence는 system reset controller, VGA/ADC local reset synchronizer와 VGA `locked` interface가 fit에 유지되고, 의도한 내부 clock이 모두 constrained이며, G-sensor 내부 generated clock이 없고, setup/hold/recovery/removal이 양수이고 TNS가 0임을 확인했다. 따라서 `RST-001`, `RST-002`, `CDC-004`는 VERIFIED다. `STA-001`은 최종 P14 multicorner/stability/exception 검토를 위해 IN_PROGRESS를 유지한다. ADC response CDC(`CDC-003`), VGA buffer-ownership CDC(`CDC-001`), 외부 I/O/electrical closure(`STA-002`)는 별도다.
 
-## P09B G-Sensor Clock / Reset 통합 노트
+### A.4 P09B G-Sensor Clock / Reset 통합 노트
 
 통합된 P09B 구현은 registered mode-3 외부 SCLK와 함께 단일 50 MHz PCLK 도메인에서 완전히 동작한다. `spi_ee_config.iRSTN`을 `PRESETn`에 직접 연결하여 활성 로컬 `reset_delay` 인스턴스 없이 시스템 리셋 검증을 공유한다. LIVE/HOLD bank, IRQ 동기화/이력, pending scheduler 상태 및 30 ms watchdog도 모두 동일한 `PRESETn`을 공유한다.
 
 Reset assertion은 비동기적이며 진행 중인 SPI 트랜잭션이나 APB 전송을 중단한다. Reset release는 시스템 리셋 검증(~20 ms)을 통해 PCLK에 동기화된다. Reset은 LIVE 및 HOLD bank, SEQ, VALID 및 pending scheduler 상태를 모두 클리어한다. 외부 ADXL345 보드 타이밍 및 전기적 특성 분석은 `STA-002` / `SPI-002`에서 계속 추적된다.
 
-## P11 ADC Reset / CDC Freeze Note
+### A.5 P11 ADC Reset / CDC Freeze Note
 
-현재 확인된 ADC clock은 `adc_sys_clk=25 MHz`, ADC hard-IP input `10 MHz`, configured total sample rate `1 MSPS`이다.
+P11 ADC target은 P05 reset architecture를 대체하지 않고 보존한다. `system_reset_controller`는 external reset conditioning과 약 20 ms HCLK release qualification을 계속 소유하고 `reset_release_sync`는 reusable destination-domain primitive다.
 
-Reset ownership은 중앙 policy와 destination-domain release를 분리한다.
+현재 확인된 `adc_sys_clk=25 MHz`, ADC hard-IP input `10 MHz`, configured total ADC rate `1 MSPS`는 Section 3/8의 clock fact이며 P11 frame cadence나 CDC closure 증명이 아니다.
 
-```text
-KEY[0] -> system_reset_controller -> HRESETn
-  +-> HCLK/PCLK: 이미 HCLK 기준 release, 추가 sync 불필요
-  +-> reset_release_sync(adc_sys_clk) -> adc_reset_n
-  +-> adc_qsys reset port -> vendor-managed reset/PLL-lock logic
-```
+P11은 `adc_sys_clk` deassertion을 하나의 multi-clock `system_reset_controller`에 합치지 않는다. Central policy는 centralized, destination synchronizer는 distributed로 유지한다. Project-local ADC logic은 `adc_reset_n`을 사용하고 Qsys internal reset/PLL-lock behavior는 vendor-managed로 유지한다. PLL `locked`를 project top에 새로 export하거나 generated HDL을 hand-edit하지 않는다.
 
-Project-local ADC engine은 `adc_reset_n`을 사용한다. Qsys PLL `locked`는 현재 project top으로 export되지 않으며 generated HDL을 hand edit하지 않는다.
+P11 target은 historical direct response sampling 대신 stable bundled-data req/ack mailbox로 complete frame을 `adc_sys_clk -> PCLK`에 전달한다. Source는 ACK까지 payload를 stable하게 유지하고 busy 동안 overwrite/다음 completed frame publication을 하지 않으며 destination은 request를 synchronize해 frame 전체를 atomically capture한다.
 
-ADC frame은 historical direct response crossing 대신 stable bundled-data req/ack mailbox로 `adc_sys_clk -> PCLK` 이동한다. Source는 ACK까지 payload를 고정하고 mailbox busy 동안 다음 frame publication을 진행하지 않는다. Async FIFO는 future streaming/DMA, producer non-stall, multi-frame buffering 요구가 생길 때만 필요하다.
+P11 status:
 
-P11 frame CDC와 vendor lock-loss/protocol 검증은 **(In-progress)**다.
+- global HCLK/PCLK reset policy: P05 범위에서 이미 implemented/verified;
+- project-local ADC reset synchronizer: 기존 infrastructure 보존;
+- ADC response/frame CDC replacement: **(In-progress)**;
+- Qsys lock-loss/vendor protocol behavior under P11: **(In-progress)**;
+- external ADC/VGA electrical/placement closure: 별도 `STA-002` 범위.

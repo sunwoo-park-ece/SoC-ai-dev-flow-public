@@ -1,8 +1,8 @@
 # Baseline SoC Reset and Clock Specification
 
-> **Status:** DRAFT — reconstructed from the active FPGA baseline and subject to Developer + ChatGPT Chat final review.
+> **Status:** Current baseline reset/clock contract. `RST-001` and `RST-002` are accepted prerequisites; VGA ownership CDC `CDC-001` remains OPEN and is governed in detail by `08_vga.md`.
 >
-> **Canonical language:** English. If this file and `reset_clock.ko.md` conflict, this file is authoritative.
+> **Canonical language:** English. If this file and `kor/06_reset_clock.ko.md` conflict, this file is authoritative.
 >
 > **Parent specifications:** `soc_architecture.md`, `ahb_fabric.md`, `apb_subsystem.md`.
 
@@ -50,10 +50,12 @@ DE10-Lite 50 MHz board clock: clk
 KEY[0] (active-low)
       |
       v
-2-FF synchronization
+system_reset_controller
+  asynchronous assertion /
+  2-FF HCLK release synchronization
       |
       v
-~20 ms release qualification
+~20 ms HCLK release qualification
       |
       v
 HRESETn / PRESETn
@@ -136,11 +138,16 @@ The AHB-side VRAM write/control logic remains in the 50 MHz HCLK domain.
 
 ### 6.1 VGA PLL Reset / Lock Behavior
 
-The current VGA PLL wrapper does not expose or use a PLL `locked` indication, and its PLL asynchronous reset input is not used by the generated wrapper.
+The VGA PLL remains free-running from `CLOCK_50`; this contract does not require a new PLL reset input or sequence. Its active interface exposes `vga_pll_locked`. Pixel-domain reset request is the conjunction:
 
-Therefore the baseline does not explicitly gate VGA logic on PLL lock.
+```text
+HRESETn & vga_pll_locked
+```
 
-This behavior is an implementation property, not a preferred future reset/clock policy.
+and release occurs only through the `pclk_25`-clocked `reset_release_sync` primitive. System reset or PLL lock loss therefore asserts the VGA pixel reset; release requires system reset released, PLL lock high, and destination-domain synchronous release. This P05 architecture is an **accepted prerequisite** (`RST-002`) and shall be preserved.
+
+PLL lock qualification is not itself VGA ownership CDC closure. The HCLK↔pixel request/commit/ACK/ownership protocol remains tracked by `CDC-001`; its normative transaction semantics are defined in `08_vga.md`.
+
 
 ## 7. G-Sensor SPI Clocks
 
@@ -230,13 +237,11 @@ HRESETn = PRESETN_SYS
 
 The total button-release-to-system-release delay is therefore approximately 20 ms plus synchronizer/edge alignment latency.
 
-### 10.3 Assertion Semantics Quirk
+### 10.3 System Reset Assertion Contract
 
-The source comment describes reset-low behavior as immediate, but `PRESETN_SYS` itself is updated only in a `posedge HCLK` block.
+`KEY[0]` low causes asynchronous assertion of distributed `HRESETn` through `system_reset_controller`; assertion does not wait for an HCLK edge. Reset release is synchronized and qualified in HCLK and occurs only after the existing 1,000,000-cycle (approximately 20 ms at 50 MHz) high-level release qualification, plus synchronizer/edge-alignment latency.
 
-Therefore the external button asynchronously clears the two input synchronizer stages, but the actual distributed `HRESETn` becomes low on a subsequent HCLK edge rather than through a direct asynchronous combinational path.
-
-This distinction shall be preserved in verification and reviewed during baseline cleanup.
+This preserves the accepted P05 `RST-001` / `RST-002` semantics. The historical next-HCLK-edge assertion description is superseded and is not the current contract.
 
 ## 11. System Reset Distribution
 
@@ -309,20 +314,32 @@ The vendor dual-port memory primitive is used as the structural boundary between
 
 The memory primitive, rather than ordinary RTL register sampling, carries framebuffer data between the two domains.
 
-### 13.3 Front-Buffer Select: HCLK -> pclk25 — Cleanup Required
+### 13.3 VGA Ownership Protocol: HCLK <-> pclk25 — `CDC-001` OPEN
 
-`front_buffer_idx` is written in the HCLK domain when software requests a buffer swap.
+The active VGA ownership interface is no longer the historical direct HCLK `front_buffer_idx` selector. The logical protocol is:
 
-The same signal directly controls:
+```text
+HCLK                                  pclk_25
+accepted SWAP-bearing operation
+  -> publish one swap-request epoch
+        -- synchronized event ------> pending swap
+                                      |
+                                      +-- commit front ownership only
+                                      |   at (799,524)->(0,0)
+                                      v
+        <------ post-commit ACK ------+
+consume synchronized ACK
+  -> update HCLK ownership view
+```
 
-- which VRAM receives the pclk25 read address,
-- which VRAM output is selected as `vga_rdata`.
+The pixel-domain display owner and the HCLK writable-owner view may differ transiently after pixel commit and before ACK synchronization. During that interval the one-outstanding-operation rule keeps framebuffer writes blocked. Clear-only does not require a pixel ownership request; combined SWAP+CLEAR performs swap commit/ACK first and clears the resulting new back bank afterward.
 
-There is no explicit synchronizer or pclk25-domain handshake for this control bit in the active RTL.
+The logical swap request has event semantics. Any concrete internal bit used to encode/qualify the request is an implementation detail and does not create a normative multi-bit payload contract. Its stability and synchronizer topology remain subject to later structural/static CDC review.
 
-Therefore current operation depends on software timing and physical implementation behavior; CDC-safe buffer ownership transfer is **not formally established**.
+Reset or PLL lock loss starts a new ownership epoch. Recovery must rebase ownership and request/ACK observation state, suppress stale pre-recovery events, keep `DOMAIN_READY=0` until the new pixel epoch is established, and allow the next valid transaction to make progress. Full system reset clears VGA status state; PLL lock loss with system reset released uses the software-visible `OP_ABORT` behavior defined in `08_vga.md`.
 
-A future cleanup shall move buffer-swap commit into a defined pclk25/HCLK handshake or otherwise synchronize the ownership state at a safe frame boundary.
+This section freezes the **behavioral architecture** only. `CDC-001` remains OPEN until independent async/reset behavioral verification and separate structural CDC review are accepted. Positive STA does not prove this protocol correct.
+
 
 ### 13.4 G-Sensor Sample Data: Single PCLK Domain and Coherent Snapshot
 
@@ -341,30 +358,31 @@ adc_sys_clk source:
   complete frame -> stable payload -> REQ toggle -> hold until ACK
 
 PCLK destination:
-  synchronize REQ -> capture whole payload into LIVE -> return ACK
+  synchronize REQ -> atomically capture whole frame into LIVE -> return ACK
 ```
 
-The source shall not overwrite the payload or publish another completed frame while the mailbox is busy. The acquisition engine may pause at the frame boundary until acknowledgement. This makes the P11 baseline a coherent/lossless-at-publication latest-state channel rather than a maximum-throughput stream.
+The source shall hold the complete frame payload stable until ACK and shall not overwrite the payload or publish another completed frame while the mailbox is busy. The acquisition engine may pause at the frame boundary until acknowledgement. This makes the P11 baseline a coherent/lossless-at-publication latest-state channel rather than a maximum-throughput stream.
 
 An asynchronous FIFO is required instead if multiple frames must accumulate per handshake round trip, acquisition cannot pause, every high-rate frame must be retained, destination stalls can be long while acquisition continues, or a future DMA/SDRAM streaming path is introduced.
 
-No live Qsys response bus field may be exposed directly through APB after P11.
+No live Qsys response bus field may be exposed directly through APB after P11. P11 frame CDC implementation/verification and vendor lock-loss/protocol verification remain **(In-progress)**; this target description is not an implementation-completion or closure claim.
 
 ### 13.6 Reset Release Into Generated Domains
 
 The reset architecture distinguishes **central reset policy** from **destination-domain release synchronization**.
 
 ```text
-KEY[0]
-  -> system_reset_controller
-  -> HRESETn (HCLK-qualified)
-       +-> HCLK/PCLK logic directly
-       +-> reset_release_sync(pclk_25) -> VGA pixel reset path
-       +-> reset_release_sync(adc_sys_clk) -> adc_reset_n
-       +-> adc_qsys vendor reset port (vendor-managed internal release/lock logic)
+KEY[0] -> system_reset_controller -> HRESETn
+  +-> HCLK/PCLK logic directly
+  +-> (HRESETn & vga_pll_locked)
+  |      -> reset_release_sync(pclk_25) -> vga_reset_n
+  +-> reset_release_sync(adc_sys_clk)
+  |      -> adc_reset_n for project-owned ADC logic
+  +-> adc_qsys reset port
+         -> vendor-managed internal reset/lock behavior
 ```
 
-HCLK/PCLK is already release-qualified in HCLK and therefore shall not receive an unnecessary second synchronizer. Every independently generated project-owned domain shall deassert reset relative to its own destination clock.
+HCLK/PCLK is already release-qualified in HCLK and `PCLK=HCLK`, so it shall not receive an unnecessary second synchronizer. Every independently generated project-owned domain shall deassert reset relative to its own destination clock. The VGA PLL remains free-running from `CLOCK_50`; no new PLL reset requirement is introduced.
 
 For ADC, Qsys internal reset/PLL-lock behavior is a documented vendor boundary, while project-local acquisition logic uses `adc_reset_n`. P11 verification shall exercise reset during partial assembly/mailbox activity and vendor lock/reset recovery where feasible before claiming full generated-domain closure.
 
@@ -415,52 +433,20 @@ Before a future clock/reset architecture is considered frozen:
 6. reset recovery/removal behavior shall be reviewed for each active clock domain,
 7. Quartus CDC/timing warnings shall be triaged rather than accepted solely because the board demo works.
 
-## 17. Baseline Cleanup Targets Before Major Feature Integration
+## 17. Current Cleanup Coordination Relevant to VGA CDC
 
-The following items are recorded for the later consolidated baseline-cleanup pass.
+The project-wide status owner is `baseline_cleanup.md`; this specification does not duplicate the full cleanup checklist. For the VGA CDC/reset boundary:
 
-### 17.1 Reset Architecture
+| Item | Current status | Contract role |
+|---|---|---|
+| `RST-001` | VERIFIED | Accepted system-reset prerequisite; preserve asynchronous assertion / qualified HCLK release behavior. |
+| `RST-002` | VERIFIED | Accepted generated-domain reset/PLL-lock prerequisite; preserve `vga_pll_locked` qualification and pclk_25 synchronized release. |
+| `CDC-001` | OPEN | Freeze and later prove the VGA request/commit/ACK/ownership/recovery protocol defined in Sections 6 and 13 and in `08_vga.md`. |
+| `VER-003` | OPEN | Later independent asynchronous-clock/reset behavioral verification; not performed by this specification stage. |
+| `STA-001` | IN_PROGRESS | Separate timing/exception/recovery-removal review; no CDC correctness claim follows from timing PASS. |
 
-1. **Clarify/fix system reset assertion semantics**
-   - The source comment implies immediate assertion, while distributed `HRESETn` is updated on HCLK.
-   - Select and document the intended asynchronous-assert/synchronous-deassert architecture.
+Older broad cleanup target lists are historical coordination material; current status and required outcome are owned by `baseline_cleanup.md`.
 
-2. **Provide destination-domain reset synchronizers**
-   - At minimum audit VGA, ADC, and G-sensor generated clock domains.
-   - Ensure reset deassertion is safe relative to each destination clock.
-
-3. **Review PLL lock handling**
-   - Determine whether VGA/ADC domains require explicit PLL-lock-qualified reset release; frozen A6 removes the active SPI PLL domain in the cleanup target.
-
-### 17.2 CDC Architecture
-
-4. **Synchronize VGA front-buffer ownership transfer**
-   - Replace the direct HCLK `front_buffer_idx` use in pclk25 logic with a defined frame-safe CDC handshake/synchronization scheme.
-
-5. **Make G-sensor multi-bit sample transfer atomic**
-   - Replace direct spi_clk-domain sample reads from PCLK with a CDC-safe snapshot/handshake.
-
-6. **Audit/fix ADC response crossing**
-   - Establish the actual Qsys clock contract and add a CDC bridge/FIFO/handshake if the response interface is asynchronous to PCLK.
-
-7. **Audit asynchronous external inputs**
-   - UART RX, LoRa AUX, G-sensor interrupt inputs, buttons/switches, and other asynchronous board inputs shall have explicit synchronization policy where required.
-
-### 17.3 Timing Constraints
-
-8. **Complete generated-clock constraints**
-   - Ensure VGA, SPI, and ADC generated clocks are represented correctly in TimeQuest.
-
-9. **Add/derive clock uncertainty**
-   - Resolve the existing `332168/332169` warnings.
-
-10. **Define asynchronous clock relationships only after CDC cleanup**
-    - Avoid hiding unsafe crossings with false-path constraints.
-
-11. **Add a repeatable clock/reset/CDC review report**
-    - Future Quartus build evidence should include clock inventory, unconstrained paths, CDC assumptions, and reset-domain review.
-
-These cleanup items shall later be consolidated into the project-wide `baseline_cleanup.md` before PLIC/AXI implementation starts.
 
 ## 18. Baseline Clock / Reset Invariants
 
@@ -472,10 +458,10 @@ The following are current baseline invariants:
 4. The G-sensor block keeps all internal state in the 50 MHz PCLK domain and drives a registered external 2 MHz-class SPI clock; it has no internal SPI generated-clock domain.
 5. ADC/Qsys generates the fitted 25 MHz `adc_sys_clk` and a 10 MHz hard-IP clock; these remain vendor-managed implementation clocks rather than software-visible timing contracts.
 6. `KEY[0]` is the active-low board reset source.
-7. System reset release is qualified for approximately 20 ms after synchronization.
+7. `KEY[0]` low asynchronously asserts system reset through `system_reset_controller`; release is HCLK-synchronized and qualified for approximately 20 ms.
 8. G-sensor initialization uses shared PRESETn directly; the historical ~20.97 ms local reset delay is inactive in P09B.
 9. VGA VSync uses an explicit multi-flop crossing into HCLK.
-10. VGA buffer ownership static CDC closure remains separate. The historical direct ADC response crossing is superseded by the frozen P11 scan-frame mailbox architecture, but its implementation and P11 CDC verification remain `(In-progress)`. G-sensor internal SPI-to-PCLK crossing is removed and cross-read XYZ/VALID/SEQ coherency is resolved by P09B LIVE/HOLD snapshot; residual verification/electrical closure remains in progress.
+10. VGA ownership uses the request/commit/ACK architecture defined above, but `CDC-001` remains OPEN until later independent behavioral and structural CDC acceptance. The historical direct-selector architecture is not current. The historical direct ADC response crossing is superseded by the frozen P11 scan-frame mailbox target architecture; its implementation/verification remains **(In-progress)**; G-sensor internal SPI-to-PCLK crossing is removed and cross-read XYZ/VALID/SEQ coherency is resolved by P09B LIVE/HOLD snapshot.
 11. The intended internal clocks are represented and constrained at the P05C checkpoint; final P14 stability/exception review and separate STA-002 external-I/O closure remain incomplete.
 12. No new feature may treat an existing CDC/timing gap as an architectural requirement to preserve.
 
@@ -492,21 +478,25 @@ This document shall be read with:
 - `adc_joystick.md` — ADC interface behavior
 - future `baseline_cleanup.md` — consolidated cleanup execution checklist
 
-## Phase 4A-2 Approved Clock and External-I/O Target — Implementation Status
+## Appendix A. Historical / Milestone Notes
+
+The notes below preserve milestone history and accepted prerequisite provenance. Where a historical target statement conflicts with Sections 1–19, the current active contract in Sections 1–19 governs.
+
+### A.1 Phase 4A-2 Approved Clock and External-I/O Target — Historical Status
 
 A1 external `GPIO_IO[15:0]` inputs use two PCLK synchronizer flops; DIR reset is input/Hi-Z. Phase 4A-GSENSOR implemented A6: 50 MHz PCLK is the only active G-sensor state/register clock, registered external SCLK is an output rather than an internal clock, and `GSENSOR_INT[1]` enters a two-flop PCLK synchronizer. The historical private `spi_pll` artifact remains stored but has no active instance or binding. The `gsensor_pclk_01` user-run fit lists only the system `clk` and ADC/VGA generated clocks; 50 MHz setup/hold is positive in both slow corners. Remaining ADC/VGA clock/reset work stays under STA-001/RST-002. P09B resolves software-visible VALID/SEQ and cross-APB-read atomicity via LIVE/HOLD snapshot; `GS-001`/`CDC-002` remain IN_PROGRESS for residual engineering closure evidence.
 
 Approved STA-002 separately owns board-facing I/O timing/electrical closure: port classification, evidence-based delays or documented N/A, I/O voltage/standard/drive/load, unconstrained ports, G-sensor SPI peer timing, ADC/VGA placement warning and ADC measurement with VGA activity. No arbitrary input/output delays shall be invented for asynchronous/static/analog ports. Detailed Phase 4A-GSENSOR timing evidence remains in the private local evidence archive.
 
-## Phase 4A-P05A Approved Reset Policy — Implementation Target
+### A.2 Phase 4A-P05A Approved Reset Policy — Historical Target
 
 User/Chat approved the project reset policy as asynchronous assertion where appropriate plus synchronous deassertion in every project-owned destination clock domain. The implementation shall preserve the approximately 20 ms `KEY[0]` release qualification, make cold start deterministic, keep a stopped destination domain in reset until its clock resumes, and avoid reset logic added only for stylistic uniformity.
 
 For VGA, Option A is approved: regenerate the private `vga_pll` through the vendor flow to expose `locked`—never hand-edit generated HDL—assert pixel reset when system reset is active or lock is low, deassert through a `pclk_25`-domain synchronizer only after system reset is released and lock is high, and reassert pixel reset on lock loss. The public model/interface and private binding evidence must remain synchronized with the regenerated IP.
 
-ADC/Qsys internal reset controllers remain a documented vendor-managed exception. Project-owned ADC sequencing outside Qsys shall use a local `adc_sys_clk` synchronized reset release and shall keep command-valid inactive until that local release. The PCLK-only G-sensor reset/clock structure remains unchanged. These are approved P05B targets, not claims about the current RTL; implementation and verification are still pending.
+ADC/Qsys internal reset controllers remain a documented vendor-managed exception. Project-owned ADC sequencing outside Qsys shall use a local `adc_sys_clk` synchronized reset release and shall keep command-valid inactive until that local release. The PCLK-only G-sensor reset/clock structure remains unchanged. At the historical P05A stage these were approved P05B targets with implementation and verification pending; the accepted P05 prerequisite outcome is recorded in A.3.
 
-## Phase 4A-P05B Reset / Clock Infrastructure — Current Implementation
+### A.3 Phase 4A-P05B Reset / Clock Infrastructure — Accepted Prerequisite History
 
 P05B implements the approved policy in the current public candidate. `system_reset_controller` gives `KEY[0]` an asynchronous assertion path and an HCLK-only release after the existing 1,000,000-cycle qualification. Its reset/synchronizer/counter state has explicit Quartus-supported LOW power-up conditions, so configuration with the button already released still begins in reset. The production value remains approximately 20 ms at 50 MHz; tests reduce only the parameter value, not the sequencing rule.
 
@@ -516,11 +506,13 @@ The project-owned ADC command sequencer now receives an `adc_sys_clk`-local sync
 
 P05C fitted evidence confirms that the system reset controller, VGA/ADC local reset synchronizers, and VGA `locked` interface survive fit; all intended internal clocks are constrained; no G-sensor internal generated clock appears; and setup/hold/recovery/removal are positive with TNS 0. `RST-001`, `RST-002`, and `CDC-004` are therefore VERIFIED. `STA-001` remains IN_PROGRESS for final P14 multicorner/stability and exception review. ADC response CDC (`CDC-003`), VGA buffer-ownership CDC (`CDC-001`), and external I/O/electrical closure (`STA-002`) remain separate.
 
-## P11 ADC Reset / CDC Freeze Note
+### A.4 P11 ADC Reset / CDC Freeze Note
 
 The P11 ADC target preserves the P05 reset architecture rather than replacing it. `system_reset_controller` remains the owner of external reset conditioning and the approximately 20 ms HCLK release qualification; `reset_release_sync` remains the reusable destination-domain primitive.
 
-P11 therefore does **not** fold `adc_sys_clk` deassertion into one multi-clock `system_reset_controller`. Central policy remains centralized; destination synchronizers remain distributed.
+P11 therefore does **not** fold `adc_sys_clk` deassertion into one multi-clock `system_reset_controller`. Central policy remains centralized; destination synchronizers remain distributed. Project-local ADC logic uses `adc_reset_n`; Qsys internal reset/PLL-lock behavior remains vendor-managed. Do not invent a project-top PLL `locked` export or hand-edit generated HDL.
+
+The established `adc_sys_clk=25 MHz`, ADC hard-IP input `10 MHz`, and configured total ADC rate `1 MSPS` are the clock facts in Sections 3 and 8, not evidence of P11 frame cadence or CDC closure. The P11 target replaces historical direct response sampling with a stable bundled-data req/ack mailbox for complete frames from `adc_sys_clk` to PCLK: source holds payload stable until ACK, does not overwrite/publish the next completed frame while busy, and destination synchronizes the request and atomically captures the whole frame.
 
 P11 status:
 
@@ -530,7 +522,7 @@ P11 status:
 - Qsys lock-loss/vendor protocol behavior under P11: **(In-progress)**;
 - external ADC/VGA electrical/placement closure: separate `STA-002` scope.
 
-## P09B G-Sensor Clock and Reset Integration Note
+### A.5 P09B G-Sensor Clock and Reset Integration Note
 
 The integrated P09B implementation operates entirely in the single 50 MHz PCLK domain with registered mode-3 external SCLK. It connects `spi_ee_config.iRSTN` directly to `PRESETn`, sharing the system reset qualification without an active local `reset_delay` instance. LIVE/HOLD banks, IRQ synchronization/history, pending scheduler state, and the 30 ms watchdog all share this same `PRESETn`.
 
