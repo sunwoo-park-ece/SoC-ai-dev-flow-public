@@ -24,6 +24,7 @@ module AHB_VRAM_DUAL_BUFFER (
     wire pclk_25;
     wire vga_pll_locked;
     wire vga_reset_n;
+    wire h_epoch_valid;
 
     vga_pll U_PLL (
         .inclk0 (CLOCK_50),
@@ -35,6 +36,14 @@ module AHB_VRAM_DUAL_BUFFER (
         .clk           (pclk_25),
         .async_reset_n (HRESETn & vga_pll_locked),
         .reset_n       (vga_reset_n)
+    );
+
+    // Capture even a lock-low pulse between HCLK edges. Release takes two
+    // HCLK edges; raw lock remains a separate immediate physical-write gate.
+    reset_release_sync u_h_epoch_sync (
+        .clk           (HCLK),
+        .async_reset_n (HRESETn & vga_pll_locked),
+        .reset_n       (h_epoch_valid)
     );
 
     wire [9:0] h_cnt;
@@ -83,7 +92,6 @@ module AHB_VRAM_DUAL_BUFFER (
     reg display_armed_p;
 
     reg request_toggle_h;
-    reg request_swap_h;
 
     wire frame_wrap_p = (h_cnt == 10'd799) && (v_cnt == 10'd524);
 
@@ -104,10 +112,8 @@ module AHB_VRAM_DUAL_BUFFER (
 
             if ((req_sync_p != req_seen_p) && !pending_swap_p) begin
                 req_seen_p <= req_sync_p;
-                if (request_swap_h)
-                    pending_swap_p <= 1'b1;
-                else
-                    ack_toggle_p <= req_sync_p;
+                // Every request event represents an accepted swap.
+                pending_swap_p <= 1'b1;
             end
 
             if (pending_swap_p && frame_wrap_p) begin
@@ -126,7 +132,6 @@ module AHB_VRAM_DUAL_BUFFER (
     reg pll_lock_h2;
     reg pixel_ready_h1;
     reg pixel_ready_h2;
-    reg recovery_saw_low;
     reg domain_ready;
     reg ack_meta_h;
     reg ack_sync_h;
@@ -152,7 +157,7 @@ module AHB_VRAM_DUAL_BUFFER (
     wire clear_we;
     wire clear_busy;
     wire clear_done;
-    wire clear_abort = !domain_ready || !vga_pll_locked;
+    wire clear_abort = !h_epoch_valid || !domain_ready || !vga_pll_locked;
     wire reject_in_progress;
 
     HW_Cleaner u_cleaner (
@@ -185,7 +190,7 @@ module AHB_VRAM_DUAL_BUFFER (
     wire address_needs_ready = address_is_fb || address_is_control;
     wire address_rejected = !address_supported ||
                             (address_needs_ready &&
-                             (!domain_ready || operation_busy));
+                             (!h_epoch_valid || !domain_ready || operation_busy));
 
     reg data_valid;
     reg data_write;
@@ -204,7 +209,7 @@ module AHB_VRAM_DUAL_BUFFER (
     wire data_needs_ready = data_is_fb || data_is_control;
     wire data_commit_blocked = data_valid && !data_rejected && data_write &&
                                data_needs_ready &&
-                               (!vga_pll_locked || !domain_ready ||
+                               (!vga_pll_locked || !h_epoch_valid || !domain_ready ||
                                 operation_busy);
     wire effective_data_rejected = data_rejected || data_commit_blocked;
 
@@ -258,22 +263,35 @@ module AHB_VRAM_DUAL_BUFFER (
         end
     end
 
+    // Discard old ready/ACK observations and the outgoing request as soon as
+    // the pixel epoch is invalidated. A new ready must traverse both flops
+    // after HCLK epoch release; it cannot reuse a pre-loss synchronized level.
+    always @(posedge HCLK or negedge h_epoch_valid) begin
+        if (!h_epoch_valid) begin
+            pixel_ready_h1   <= 1'b0;
+            pixel_ready_h2   <= 1'b0;
+            ack_meta_h       <= 1'b0;
+            ack_sync_h       <= 1'b0;
+            request_toggle_h <= 1'b0;
+        end else begin
+            pixel_ready_h1 <= pixel_ready_p;
+            pixel_ready_h2 <= pixel_ready_h1;
+            ack_meta_h     <= ack_toggle_p;
+            ack_sync_h     <= ack_meta_h;
+            if (accepted_control_write && HWDATA[0])
+                request_toggle_h <= ~request_toggle_h;
+        end
+    end
+
     always @(posedge HCLK or negedge HRESETn) begin
         if (!HRESETn) begin
             pll_lock_h1            <= 1'b0;
             pll_lock_h2            <= 1'b0;
-            pixel_ready_h1         <= 1'b0;
-            pixel_ready_h2         <= 1'b0;
-            recovery_saw_low       <= 1'b1;
             domain_ready           <= 1'b0;
-            ack_meta_h             <= 1'b0;
-            ack_sync_h             <= 1'b0;
             ack_seen_h             <= 1'b0;
             vsync_h1               <= 1'b0;
             vsync_h2               <= 1'b0;
             vsync_h3               <= 1'b0;
-            request_toggle_h       <= 1'b0;
-            request_swap_h         <= 1'b0;
             operation_busy         <= 1'b0;
             operation_swap         <= 1'b0;
             operation_clear        <= 1'b0;
@@ -286,10 +304,6 @@ module AHB_VRAM_DUAL_BUFFER (
         end else begin
             pll_lock_h1    <= vga_pll_locked;
             pll_lock_h2    <= pll_lock_h1;
-            pixel_ready_h1 <= pixel_ready_p;
-            pixel_ready_h2 <= pixel_ready_h1;
-            ack_meta_h     <= ack_toggle_p;
-            ack_sync_h     <= ack_meta_h;
             vsync_h1       <= vga_vsync_sig;
             vsync_h2       <= vsync_h1;
             vsync_h3       <= vsync_h2;
@@ -304,61 +318,54 @@ module AHB_VRAM_DUAL_BUFFER (
             if (vsync_event)
                 vsync_sticky <= 1'b1;
 
-            if (!pll_lock_h2) begin
-                domain_ready     <= 1'b0;
-                recovery_saw_low <= 1'b1;
-                request_toggle_h <= 1'b0;
-                request_swap_h   <= 1'b0;
-                front_bank_h     <= 1'b0;
-                ack_seen_h       <= ack_sync_h;
-                if (operation_busy) begin
-                    operation_busy         <= 1'b0;
+            // Invalidation and recovery are mutually exclusive with normal
+            // progress, so stale ACK/clear_done cannot override an abort.
+            if (!h_epoch_valid || !pll_lock_h2) begin
+                domain_ready      <= 1'b0;
+                front_bank_h      <= 1'b0;
+                ack_seen_h        <= 1'b0;
+                operation_busy    <= 1'b0;
+                operation_swap    <= 1'b0;
+                operation_clear   <= 1'b0;
+                clear_target_bank <= 1'b1;
+                if (operation_busy)
                     operation_abort_sticky <= 1'b1;
-                end
-            end else if (recovery_saw_low) begin
-                if (!pixel_ready_h2) begin
-                    recovery_saw_low <= 1'b0;
-                end
-            end else if (!domain_ready && pixel_ready_h2) begin
-                domain_ready     <= 1'b1;
-                front_bank_h     <= 1'b0;
-                ack_seen_h       <= ack_sync_h;
-                request_toggle_h <= 1'b0;
-                request_swap_h   <= 1'b0;
-            end
-
-            if (accepted_control_write && (HWDATA[1:0] != 2'b00)) begin
-                operation_busy  <= 1'b1;
-                operation_swap  <= HWDATA[0];
-                operation_clear <= HWDATA[1];
-                request_swap_h  <= HWDATA[0];
-
-                if (HWDATA[0]) begin
-                    request_toggle_h <= ~request_toggle_h;
-                end else begin
-                    clear_target_bank <= ~front_bank_h;
-                    clear_start <= 1'b1;
-                end
-            end
-
-            if (operation_busy && operation_swap && swap_ack_event) begin
+            end else if (!domain_ready) begin
+                front_bank_h <= 1'b0;
                 ack_seen_h   <= ack_sync_h;
-                front_bank_h <= ~front_bank_h;
-                if (operation_clear) begin
-                    clear_target_bank <= front_bank_h;
-                    clear_start <= 1'b1;
-                    operation_swap <= 1'b0;
-                end else begin
+                if (pixel_ready_h2)
+                    domain_ready <= 1'b1;
+            end else begin
+                if (accepted_control_write && (HWDATA[1:0] != 2'b00)) begin
+                    operation_busy  <= 1'b1;
+                    operation_swap  <= HWDATA[0];
+                    operation_clear <= HWDATA[1];
+
+                    if (!HWDATA[0]) begin
+                        clear_target_bank <= ~front_bank_h;
+                        clear_start <= 1'b1;
+                    end
+                end
+
+                if (operation_busy && operation_swap && swap_ack_event) begin
+                    ack_seen_h   <= ack_sync_h;
+                    front_bank_h <= ~front_bank_h;
+                    if (operation_clear) begin
+                        clear_target_bank <= front_bank_h;
+                        clear_start <= 1'b1;
+                        operation_swap <= 1'b0;
+                    end else begin
+                        operation_busy <= 1'b0;
+                        operation_swap <= 1'b0;
+                        operation_done_sticky <= 1'b1;
+                    end
+                end
+
+                if (operation_busy && operation_clear && clear_done) begin
                     operation_busy <= 1'b0;
-                    operation_swap <= 1'b0;
+                    operation_clear <= 1'b0;
                     operation_done_sticky <= 1'b1;
                 end
-            end
-
-            if (operation_busy && operation_clear && clear_done) begin
-                operation_busy <= 1'b0;
-                operation_clear <= 1'b0;
-                operation_done_sticky <= 1'b1;
             end
         end
     end
@@ -372,7 +379,7 @@ module AHB_VRAM_DUAL_BUFFER (
     wire write_target_bank = use_clear ? clear_target_bank : cpu_target_bank;
     wire [13:0] write_addr = use_clear ? clear_addr : data_word_addr;
     wire [31:0] write_data = use_clear ? 32'h0000_0000 : HWDATA;
-    wire physical_write = vga_pll_locked && domain_ready &&
+    wire physical_write = vga_pll_locked && h_epoch_valid && domain_ready &&
                           (clear_we || accepted_fb_write);
     wire vram0_we = physical_write && (write_target_bank == 1'b0);
     wire vram1_we = physical_write && (write_target_bank == 1'b1);
