@@ -117,6 +117,16 @@ These requirements do not expand scope or lift a STOP/publication gate.
 On conflict, STOP and request a scoped decision.
 Unrelated soft findings are recorded for follow-up.
 
+### Independent DV Mutation Proposal Check
+
+For `INDEPENDENT_DV` / DEEP DV with negative controls, **reading** the full policy is necessary but is not the final compliance check. Before proposing or implementing a mutation method, apply `docs/governance/anti_cosmetic_verification_policy.md` Section 3.1 to every proposed fault and report any contradiction between forbidden techniques and the selected stimulus/injection method.
+
+- Classify the target as approved Production DUT, isolated test-only mutant, or checker/observation-input self-test; name the injection mechanism and isolation boundary.
+- Never infer that forcing internal Production DUT state is permitted solely because its RTL file bytes remain unchanged. Natural clock/reset/bus stimulus is separate from hierarchical state override.
+- In preflight, include a per-mutant design matrix with expected checker failure ID, injection-reach proof plan, passing control, and claim boundary; label designs with unspecified isolation `CONDITIONAL` or `BLOCK`, not unconditional policy-compliant PASS.
+- At implementation, confirm actual fixture/source identity and guard exits; mutant kill requires the intended semantic checker rejection, not compilation failure or a generic nonzero exit.
+- This is a **review/proposal discipline**, not an additional autonomous approval gate. The exact Issue revision, allowed paths, STOP rules and owner decision remain controlling; do not widen work or modify production artifacts to implement a test idea.
+
 ### Spec Authoring Routing
 
 When `docs/governance/spec_authoring_policy.md` is triggered:
@@ -206,4 +216,3 @@ RESULT ready for User/Chat review.
 Do not self-accept.
 Do not automatically execute the next lifecycle gate.
 ```
-
