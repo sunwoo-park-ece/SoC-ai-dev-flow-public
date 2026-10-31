@@ -82,6 +82,66 @@ Cleanup closes only when:
 10. target text is promoted to active behavior only after implementation evidence exists,
 11. source commit, firmware build, IMEM/DMEM images, SOF, timing, and board evidence are linked.
 
+### 3.1 Proposed limited-assurance disposition
+
+> **PROPOSED / NOT_ACCEPTED — normative amendment draft only.** The eleven active exit conditions above and §2 taxonomy remain binding until a separately approved amendment is adopted. No current BC row changes status.
+
+Proposed additional exit rule: an expressly enumerated **supplemental physical assurance claim**, separable from all mandatory functional requirements and their essential device assumptions, may have a separate `LIMITED_ASSURANCE_ACCEPTED` disposition only under the process in the [assurance limitation register](physical_assurance_limitations.md#exception-process). This records an approved limit on the claim; it is neither `VERIFIED` nor a BC requirement status.
+
+Eligibility requires all of the following:
+
+1. Source-bound functional requirements, including their essential capture/recovery premises, are independently met and accepted; all other applicable mandatory evidence remains valid.
+2. Each claim has an exact limitation ID, scope, risk/impact, restrictions, source/IP/board binding as applicable, responsible owner, acceptance authority, rationale, re-entry triggers and explicit expiry or review date.
+3. Owner approval is recorded for that exact claim and binding; no pending, expired, revoked or materially changed record qualifies.
+4. Applicable BC, STA, board, ADC, C09 and release gates remain satisfied on their own terms. An exception cannot substitute for a missing required oracle, device premise or acceptance case.
+5. The release decision separately identifies the limited claim and permitted use, without physical safety certification or any implicit Git/publication authorization.
+
+No existing `BC High/Blocker` becomes VERIFIED, DEFERRED, OPT or closed by this disposition. §3(1) still requires those rows VERIFIED; §3(2) retains its existing Medium acceptance rule. Thus the proposal can limit only additional physical assurance claims after mandatory requirements are met. It cannot enable current cleanup closure while `CDC-001`/`VER-003` remain OPEN or `STA-002` is BLOCKED.
+
+**Current ineligibility:** R1/R2 are essential to the current AC09 reset-epoch argument. Their missing evidence cannot be relabeled as a separable supplemental claim. Using this route to release with those premises unresolved would contradict the frozen contract and §3; no such exception is proposed. Any broader gate or operating-contract change needs a separate precise Owner decision and synchronized release-authority review.
+
+
+### 3.2 P12_BOUNDED_CHECKPOINT
+
+> **DEFINITION_ACCEPTED_BOUNDED — internal milestone definition only.** The four states and six acceptance criteria in this subsection are adopted. Candidate assessment and checkpoint acceptance require separate decisions; this definition does not accept a candidate or create a candidate approval record.
+
+`P12_BOUNDED_CHECKPOINT` is an internal engineering snapshot for explicitly bounded development analysis. It is separate from Clean Baseline v1, the §3 exit gate and BC row status. **It does not require all BC High/Blocker VERIFIED**, but every unresolved obligation must remain visible. It is not a production/board-safety baseline, code freeze, Git branch, publication or release.
+
+#### Checkpoint lifecycle
+
+| State | Entry and decision boundary |
+|---|---|
+| `CHECKPOINT_NOT_ASSESSED` | A candidate has not been assessed against the checkpoint criteria; drafting the criteria is not an assessment. |
+| `CHECKPOINT_READY_FOR_OWNER_REVIEW` | A specific snapshot satisfies AC-01 through AC-05 below and has the complete AC-06 decision packet; Owner acceptance is still pending. |
+| `CHECKPOINT_ACCEPTED` | Only a separate explicit Owner decision, under an adopted checkpoint definition, accepts that exact source/evidence/use snapshot after all six criteria. No other gate is accepted by implication. |
+| `CHECKPOINT_BLOCKED` | A required checkpoint criterion cannot be met, including the blocking conditions below. Missing evidence that is material to intended checkpoint use is not a PASS. |
+
+These states are orthogonal to `baseline_cleanup IN_PROGRESS`, BC VERIFIED status and `clean_baseline_v1 NOT_RELEASED`. RESULT, REVIEWED, ACCEPTED, INTEGRATED, PUBLISHED and RELEASED remain separate lifecycle decisions. Material source/evidence/use changes invalidate reliance on an earlier checkpoint decision until separately reassessed and approved; no new snapshot inherits acceptance.
+
+#### Checkpoint acceptance criteria
+
+The IDs below apply only to this internal milestone, not to frozen VGA acceptance cases. No criterion is marked satisfied by this definition.
+
+| ID | Required auditable condition |
+|---|---|
+| `P12-BCP-AC-01` | Bind the exact RTL, FW, constraints and IP configuration to repository/worktree HEAD, index, dirty membership and actual working-content hashes, with source/evidence correspondence. Bind bitstream/image/board identity if relevant to the proposed use; otherwise explicitly state not applicable because the use makes no hardware/image qualification claim. Missing relevant identity blocks assessment. |
+| `P12-BCP-AC-02` | Map each bounded functional DV, STA and primitive/model receipt to its actual source/run/model identity, original claim, limits and review status. Explain source differences and whether reuse is valid; do not inherit PASS across an unassessed change. Existing conditional analysis remains conditional; simulation, STA and physical evidence are not interchangeable. |
+| `P12-BCP-AC-03` | Enumerate every applicable OPEN/BLOCKED obligation and row status/severity/gate, including AC09, CDC-001, VER-003, STA-001 and STA-002. Preserve frozen AC05/06/08/09 and reset obligations, mandatory Clean Baseline/vendor/board gates and any additional blockers. A register or checkpoint must not erase required cases. |
+| `P12-BCP-AC-04` | Reference the existing canonical C08-PHYS-001 record in the [limitation register](physical_assurance_limitations.md#c08-phys-001), enumerate all applicable physical limits, operating assumptions and nonclaims, and retain R1 capture/R2 re-entry as unproved essential AC09 premises. Missing limits must be recorded before review; no new limitation ID or accepted physical exception is implied. |
+| `P12-BCP-AC-05` | Define the exact intended internal development use and restrictions, with a reviewed disposition of known active defects and risks for that use. An unassessed active unsafe defect in the intended use blocks the checkpoint. Unproved physical assurance may be recorded as an unresolved risk for source-based analysis; it cannot authorize physical operation, deployment safety or unsupported hardware qualification. A safety disclaimer alone is not a risk disposition. |
+| `P12-BCP-AC-06` | Submit the specific source/evidence snapshot, AC-01 through AC-05 findings, limits, intended use, residual blockers and separate decision request for explicit Owner review. Acceptance requires a recorded separate Owner decision naming that snapshot and permitted use; neither this definition nor an agent RESULT supplies that decision. |
+
+Block rather than label READY/ACCEPTED when identity is missing, an active unsafe defect is unassessed for the intended use, an evidence/verification claim is misleading, or the proposed claim conflicts with a frozen contract or release authority. A known open BC item alone does not block this distinct milestone if its risk and restrictions satisfy the criteria; it remains gating for Clean Baseline. Discovery of an actual unsafe condition still invokes the applicable Hard STOP and corrective/restricted-use process.
+
+#### Reconciliation and permitted reliance
+
+`CHECKPOINT_ACCEPTED` concerns an internal engineering milestone. `LIMITED_ASSURANCE_ACCEPTED` in §3.1 concerns only a proposed, separately approved supplemental physical claim. Neither implies the other; §3.1 remains unadopted. A checkpoint can acknowledge the existing C08 gap without accepting a C08 exception, changing `NOT_PROVEN`, declaring AC09 PASS or waiving essential R1/R2.
+
+The [VGA evidence envelope](08_vga.md#61-assurance-scope--draft-claim-boundary), [VGA bounded assurance proposal](08_vga.md#72-bounded-assurance-proposal--not-an-active-exception) and [limitation register](physical_assurance_limitations.md) remain PROPOSED/NOT_ACCEPTED in their draft portions. Existing accepted physical-execution scheduling in §23A remains scheduling only. The six-document proposal creates no new device fact, reset-loss coverage or safety certificate.
+
+A separately Owner-approved PLIC/AXI task may cite a checkpoint only as a bounded input, carrying its exact scope, restrictions and unverified assumptions forward. Checkpoint acceptance is not GO for that task, stable-stage progression or any Git action. Clean Baseline retains all eleven §3 conditions, every BC High/Blocker VERIFIED, required STA/board/ADC/C09 evidence and the private release checklist unchanged. No checklist edit or release exception is needed merely to define this separate milestone.
+
+
 ## 4. Recommended Implementation Order
 
 ```text
@@ -417,6 +477,27 @@ Non-gating unless promoted by a future spec:
 - framebuffer readback if write-only VRAM remains the approved policy.
 
 ---
+
+## 23A. C08 physical-assurance obligation
+
+`C08-PHYS-001` — **NOT_PROVEN / UNDETERMINABLE physical assurance; deferred execution only.** Owner: VGA/clock-reset specification maintainer and physical board owner. Target phase: **`POST_BASELINE_P12_PHYSICAL_QUALIFICATION`**. Detailed scope and operating/board-use claim boundary are in [VGA deferred work](08_vga.md#71-c08-physical-assurance-obligation--post-baseline-execution-scope).
+
+Only qualification of raw PLL lock-loss near HCLK/PCLK/VRAM WE, minimum loss/capture/rearm pulses, split reset capture/release skew and reconvergence, and AHB final-response/M9K write-edge atomicity leaves the current cleanup execution queue. Existing digital diagnostic/Boolean-gating evidence and positive internal STA do not establish these physical bounds; `IS_CDC=0` or captured `LOCK_LOSS_COUNT` is not a safety certificate. No demonstrated defect has been established by that evidence gap.
+
+Re-entry: before a physical lock-loss safety claim, on relevant clock/reset/PLL/M9K or write-commit change, or on an observed lock-loss anomaly. Acceptance needs source/IP/bitstream/board identity, primary MAX10/ALTPLL/M9K pulse/reset/write contracts, applicable timing/RDC coverage with explicit gaps, and independently observed targeted physical evidence wherever contracts/analysis cannot establish the guarantee, followed by Owner review. A proven active defect instead triggers immediate corrective/restricted-use review.
+
+This future task is not an `OPT` classification or a DEFERRED status for an existing BC row. The [exit gate](#3-cleanup-exit-gate), BC High/Blocker taxonomy and required evidence remain unchanged: `CDC-001 OPEN`, `VER-003 OPEN`, `STA-001 IN_PROGRESS`, `STA-002 BLOCKED`; `VGA-CDC-AC-09 BLOCK / NOT_VERIFIED`, `SYNCASYNCNET NOT_WAIVED`. Immediate-write-suppression, abort, recovery, no-side-effect and ownership contracts, including `VGA-CDC-AC-05/09`, are not weakened. C09, ADC exception and external-I/O obligations are not moved by this item.
+
+Removing this physical qualification task from the execution queue cannot close cleanup, accept physical safety or release Clean Baseline. Any exemption of a BC High/Blocker requirement or change to frozen behavior/AC needs a separate explicit Owner decision; none is granted here.
+
+### 23A.1 Draft register linkage and release impact
+
+> **PROPOSED / NOT_ACCEPTED:** The canonical limitation record is [C08-PHYS-001](physical_assurance_limitations.md#c08-phys-001). The preceding accepted scheduling text is retained without expansion.
+
+`LIMITED_ASSURANCE_ACCEPTED` is only the proposed separate claim disposition of §3.1; no C08 exception is accepted. The record separates independent supplemental physical qualification from R1/R2 facts essential to unchanged AC09, without deferring or waiving those facts.
+
+The active private release checklist separately requires verified active milestones and CDC/I/O evidence, as well as BC closure. Its “closed or formally waived” wording does not itself authorize a BC High/Blocker waiver. This public draft neither edits nor overrides that checklist or the Git/release policy. A future adoption decision must reconcile each affected checklist clause; an internal checkpoint remains NOT_RELEASED. Current AC09/CDC/VER/STA and warning states above are preserved.
+
 
 # Part VII — Dependency Summary
 

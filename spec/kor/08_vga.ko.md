@@ -4,6 +4,8 @@
 >
 > **검토 소스 앵커:** `f28e95df2eafcb939e04ffaca728c44f74c90612`. 기능 범위 승인이지 릴리스, CDC, 전체 타이밍 sign-off 선언이 아니다.
 
+> **C08 diagnostic ABI 개정:** Section 3.2의 bit 5 및 bits 31:16, Sections 3.2.1–3.2.4, Section 5.2는 Owner/Chat spec review 대기 중인 normative draft다. 아직 구현·검증되지 않았다. 기존 bits 4:0, functional timing, accepted P08B criterion은 계약을 유지한다. 위 source anchor는 새 diagnostic의 근거가 아니다.
+
 ## 1. Status and Scope
 
 활성 디스플레이 주변장치는 `AMBA_SoC_TOP`의 AHB-side `AHB_VRAM_DUAL_BUFFER`다. 휴면 `APB_VGA_Top`은 활성 인터페이스가 아니다. 범위는 canonical AHB 접근, 이중 버퍼 소유권, hardware clear, VGA scanout, firmware-visible status/control 계약이다.
@@ -120,11 +122,45 @@ misaligned CPU instruction은 CPU pre-bus misalignment path(store cause 6)를 �
 | 2 | `OP_BUSY` | RO | accepted nonzero CONTROL request부터 overall completion, PLL-loss abort 또는 system reset까지의 live one-outstanding-operation state |
 | 3 | `OP_ABORT` | RO / W1C | HCLK state가 살아 있는 동안 PLL-domain invalidation이 active operation을 종료했을 때 sticky abort. full system reset은 다른 status와 함께 clear |
 | 4 | `DOMAIN_READY` | RO | current recovery epoch가 확립되어 framebuffer/nonzero CONTROL acceptance 재개 가능. raw PLL lock 자체가 아님 |
-| 31:5 | reserved | RO / W1C ignored | read zero, write effect 없음 |
+| 5 | `IS_CDC` | RO / W1C | 관측된 lock-loss-associated sampled CPU framebuffer write-command / final accepted AHB response 불일치의 sticky fault. reset 값 0. Section 3.2.1 참조 |
+| 15:6 | reserved | RAZ / WI | read zero, write ignored |
+| 31:16 | `LOCK_LOSS_COUNT` | RO / WI | captured PLL lock-loss episode의 16-bit saturating count. reset 값 0, saturation `0xFFFF`. Section 3.2.2 참조 |
 
-1을 쓰면 각각 bit 0, 1, 3만 clear하며 0 write는 clear하지 않는다. W1C 처리가 hardware event update보다 먼저여서 coincident event는 set-dominant다. reset은 sticky event를 clear한다. `OP_BUSY`와 `DOMAIN_READY`는 live이며 W1C state가 아니다.
+1 write는 bit 0, 1, 3과 (이번 개정의) bit 5만 선택적으로 clear하며 0 write는 acknowledge하지 않는다. 같은 HCLK edge의 hardware set이 W1C clear보다 우선한다. 기존 bits 4:0의 reset/event priority와 timing은 유지한다. `OP_BUSY`와 `DOMAIN_READY`는 live이며 W1C state가 아니다. bits 31:16, 15:6, 4, 2의 write는 ignored다. 어떤 STATUS write도 counter를 바꾸거나 선택하지 않은 event를 acknowledge할 수 없다.
+
+`HRESETn=0`은 두 새 diagnostic과 pending diagnostic event/transaction history를 clear한다. bit-5 selective W1C만 `IS_CDC`의 software clear이고, `HRESETn`만 reset source다. PLL loss, pixel reset, ownership-epoch invalidation, recovery는 두 diagnostic이나 pending captured loss를 지우면 안 된다. counter에는 software clear가 없고 bit-5 W1C도 counter를 바꾸지 않는다. reset asserted 동안 reset이 diagnostic set/clear보다 우선하며 release 이후 hardware set이 W1C보다 우선한다.
 
 STATUS access는 framebuffer/control readiness rejection gate를 사용하지 않는다. 따라서 aligned status read/W1C write는 `OP_BUSY=1` 또는 `DOMAIN_READY=0`에서도 수락될 수 있다. 수락된 W1C bus write는 선택 event acknowledge만 수행하며 VRAM word write가 아니다.
+
+### 3.2.1 Sampled-command mismatch와 transaction association (draft)
+
+diagnostic은 bank write-port interface의 HCLK-sampled **CPU-attributable framebuffer write command**와 **동일한 captured data-phase transaction**의 response를 관측한다. command intent, address/data, selected bank, command multiplicity를 관측하며 독립 BRAM bitcell acknowledgement가 아니다. supported aligned canonical framebuffer word write의 비교 기준은 final OKAY일 때 CPU command 정확히 1회, final ERROR일 때 0회다. Cleaner write, CONTROL/STATUS transfer, unsupported address/size/direction, unrelated bus phase는 제외한다.
+
+terminal response는 HCLK completion edge에서 local `HREADY=1`과 `HREADY_IN=1`이 모두 성립해야 globally accepted다. ERROR의 첫 `HREADY=0` cycle은 final completion이 아니다. `HREADY_IN=0`일 때 OKAY는 held이며 accepted가 아니다. early/held-phase observation은 독립 completed comparison을 만들면 안 된다. out-of-completion CPU command를 기록한다면 같은 transaction에 command-timing/multiplicity violation으로 결합하여 terminal comparison까지 유지해야 한다. synthetic completion, duplicate transaction, Cleaner write attribution은 금지한다.
+
+command/response disagreement가 검출되고 **동시에** 해당 outstanding data-phase interval에서 lock-loss association이 관측된 transaction만 `IS_CDC`를 set한다. association은 sampled invalid raw lock 또는 contemporaneous transaction association이 명확한 captured loss notice다. delayed untagged loss notification을 이전 completion이나 무관한 이후 transaction에 소급 적용하면 안 된다. ambiguous association은 diagnostic coverage 밖이다. 이후 loss 전에 정상 완료된 command는 mismatch가 아니며, CPU command 0회의 정상 loss-rejected ERROR도 fault가 아니다. CPU framebuffer transaction 없는 captured loss는 counter만 증가시킨다.
+
+monitor는 관측 전용이며 functional commit, write-enable, AHB response, bank ownership, reset, recovery control을 구동하면 안 된다. `IS_CDC=0`은 observed qualified mismatch가 없었다는 의미뿐이다. response와 write-command가 같은 Boolean expression을 공유하면 비교가 vacuous할 수 있고 synthesis가 redundant logic을 제거할 수도 있다. monitor 보존이나 zero flag 모두 독립성을 증명하지 않는다. physical memory write edge 근처 lock transition, metastability, pulse width, 실제 bitcell effect는 sampled-command proof 밖이다.
+
+### 3.2.2 Captured PLL loss episode, arm/rearm, clock stop (draft)
+
+episode는 diagnostic capture가 armed일 때 captured `vga_pll_locked:1→0` transition이며 low cycle 수가 아니다. `HRESETn` 이후 capture는 disarmed/pending 없음으로 시작한다. initial lock=0과 첫 lock acquisition은 counter를 증가시키지 않는다. arming의 stable lock은 `HRESETn=1` 동안 synchronized lock=1을 최소 두 번 연속 HCLK에서 관측한 것이다. 이는 digital qualification interval이며 analog PLL stability 증명이 아니다.
+
+stable-lock qualification 및 이전 captured notice의 acknowledgement/retirement가 끝나고 capture/transfer channel이 idle일 때만 arm한다. 첫 captured loss는 capture를 disarm하고 HCLK consume까지 pending episode 하나를 보존한다. consume은 `LOCK_LOSS_COUNT`를 한 번 증가시키거나 `0xFFFF`를 유지하고 notice를 acknowledge한다. rearm은 loss 이후 **새** stable-lock qualification과 capture/acknowledgement 완료를 모두 요구한다. 지속 low는 rearm할 수 없다. capture, transfer, acknowledgement, disarmed recovery 중 loss는 coalesce하거나 count되지 않을 수 있다. loss-event FIFO나 모든 physical event의 정확한 counter가 아니다.
+
+asynchronous capture mechanism은 armed 상태에서 성공적으로 captured된 episode를 PLL/pixel epoch reset에도 보존해야 한다. HCLK가 stop하면 retirement, counter update, software observation은 HCLK restart까지 지연된다. `HRESETn` asserted가 아닌 한 그동안 captured pending notice를 보존해야 한다. PCLK stop/restart 자체는 lock-loss episode나 counter reset이 아니고 diagnostic transfer는 PCLK progress에 의존하면 안 된다. 이미 disarmed일 때 loss는 count되지 않을 수 있다. arbitrary short pulse capture는 보장하지 않는다. minimum capture/rearm pulse width와 physical implementation 한계는 이후 device/board evidence가 필요하다.
+
+### 3.2.3 STATUS sampling과 해석 (draft)
+
+aligned STATUS read 하나는 globally accepted read-completion edge에서 완전한 32-bit HCLK-visible register image를 sample한다. 두 diagnostic field는 같은 pre-update image에서 읽고 그 edge에 retired된 update는 이후 read에서 보인다. held read는 독립 completion이 아니다. 이는 software의 counter/flag torn read를 막지만 pending asynchronous loss capture, transaction diagnosis, counter retirement, 다른 live status field를 external edge와 atomic하게 ordering하지 않는다. pending notice가 반환 count에 아직 없을 수 있고 fault와 count가 동시에 보일 필요도 없다.
+
+`HRESETn` 없는 interval에서 양 endpoint count가 `0xFFFF` 미만이면 positive ordinary counter difference는 test setup 및 event provenance가 valid할 때 captured/retired loss opportunity만 증명한다. 모든 physical loss나 특정 write edge stress를 증명하지 않는다. saturation 이후 추가 loss 수는 알 수 없으며 modulo/wrap subtraction은 금지한다. `COUNT=0`은 physical loss 부재를 인증하지 않고 `COUNT>0 && IS_CDC=0`도 physical commit이나 CDC correctness를 증명하지 않는다. fault W1C 이후 counter retention 및 delayed capture retirement 때문에 두 field를 하나의 event log로 취급할 수도 없다.
+
+### 3.2.4 Firmware / Health diagnostic 사용 (draft)
+
+firmware는 하나의 `vram_status()` 결과에서 두 field를 얻는다. bit 5는 fault이고 `(status >> 16) & 0xFFFF`는 captured count다. explicit bit-5 W1C 전에 snapshot을 read/report해야 한다. routine `vram_clear_events()` 및 operation/VSYNC housekeeping mask는 bits 0, 1, 3만 유지한다. bit 5를 acknowledge하거나 저장한 full STATUS를 event-clear mask로 write-back하면 안 된다. 현재 driver API가 새 explicit fault-clear operation을 구현한다고 주장하지 않는다. pending newly diagnosed mismatch는 software가 old history를 clear해도 sticky bit를 set/re-set할 수 있다.
+
+Health qualification은 기존 READY/VSYNC/SWAP/DONE progress 및 abort/error rule을 계속 요구한다. diagnostic은 이를 보완하며 zero fault나 nonzero counter만으로 Health PASS 또는 `VGA-CDC-AC-09`를 만족할 수 없다. framebuffer는 write-only다. readiness precheck는 MMIO race, terminal ERROR trap, automatic retry/trap recovery 부재를 해소하지 않는다. 이후 board stress는 독립 external lock-loss/stimulus timing evidence와 capture/arm 조건 확인이 필요하다. internal counter만으로 edge-near loss opportunity를 입증할 수 없다.
 
 ### 3.3 Control register: `VRAM_CONTROL` (`0x2001_0004`)
 
@@ -225,6 +261,21 @@ normal production sequence는 bounded다. READY 대기, aligned word로 back ban
 
 `VGA-CDC-AC-08`은 behavioral proof, `VGA-CDC-AC-09`는 structural CDC proof다. TimeQuest generated clock, recovery/removal, exception, slack review는 `STA-001`에 남으며 어느 criterion에서도 추론하지 않는다.
 
+### 5.2 Diagnostic 개정 acceptance case (draft; 미실행)
+
+새 criterion은 `VGA-AC-01..08` 및 `VGA-CDC-AC-01..09`를 대체하지 않으며 accepted implementation/DV evidence가 없다. positive case와 아래 counterexample은 이후 별도 범위 승인으로 independent transaction/event oracle 기반 verification이 필요하다. 이번 문서 개정은 test execution을 승인하지 않는다.
+
+| ID | Required case와 counterexample | Pass condition |
+|---|---|---|
+| `VGA-DIAG-AC-01` | initial lock low, acquisition, qualified arm, sustained loss 1회; low 유지 | startup/acquisition count 0; captured armed loss 1회만 증가; low cycle 반복 증가 없음 |
+| `VGA-DIAG-AC-02` | loss/ack/relock/rearm; rearm 전 rapid pulse; saturation | rearm 뒤 새 qualified episode는 1회 증가; unarmed/rapid loss의 개별 count 보장 없음; `0xFFFF` wrap 금지 |
+| `VGA-DIAG-AC-03` | qualified same-transaction loss-associated command/response mismatch와 matching OKAY/command 1회, ERROR/command 0회 비교 | qualified mismatch만 bit 5 set; framebuffer traffic 없는 loss는 count만 변경. 이후 isolated negative control로 production state 변경 없이 checker sensitivity 확인 필요 |
+| `VGA-DIAG-AC-04` | held OKAY, ERROR wait/final, early command, Cleaner/CONTROL/unsupported traffic, delayed untagged notice | global completion 및 transaction identity로 비교; excluded traffic은 bit 5 set 금지; unrelated/retroactive association 없음 |
+| `VGA-DIAG-AC-05` | selective/routine W1C, zero write, RO/reserved write, simultaneous set/clear | selected sticky event만 clear; bit-5 hardware set이 W1C보다 우선; count/live/unselected field 불변 |
+| `VGA-DIAG-AC-06` | PLL/pixel reset, HCLK/PCLK stop/restart, 이후 HRESETn | diagnostic/pending captured loss는 PLL/pixel recovery에도 보존; HCLK restart 뒤 1회 retire; transfer에 PCLK 불필요; HRESETn은 diagnostic history clear |
+| `VGA-DIAG-AC-07` | retirement와 coincident STATUS read, pending transfer, fault clear, saturation; Health progress 없음 | 하나의 pre-update register image; asynchronous total-order 보장 없음; counter delta 한계 적용; diagnostic만으로 Health/AC09 PASS 금지 |
+| `VGA-DIAG-AC-08` | common-logic matching, edge-near/uncaptured short loss, count 0, count positive/fault 0 | coverage 한계를 보고하고 physical signoff/perfect event-count로 변환 금지; independent board stimulus evidence 별도 필요 |
+
 ## 6. Current Requirement Status
 
 | Requirement | 상태 | Compact basis |
@@ -246,6 +297,8 @@ CDC/reset 관련 requirement state는 accepted P08B row와 별도로 유지한�
 | `VER-003` | OPEN | downstream async-clock/reset verification 필요 |
 | `STA-001` | IN_PROGRESS | timing/exception closure는 별도 later gate |
 
+**C08 evidence disposition:** 별도 승인된 diagnostic ABI/implementation에는 captured loss episode, diagnostic behavior 및 Boolean lock-gating에 대한 current-candidate portable digital 검증이 제한된 범위로 존재한다. 이 상태 설명은 앞의 diagnostic draft/not-executed 표기를 대체하며 ABI나 acceptance case는 바꾸지 않는다. 물리적인 edge-near raw PLL lock-loss 안전성은 **NOT_PROVEN / UNDETERMINABLE**이며, 가용 증거로 입증된 결함은 없다. `IS_CDC=0`과 captured `LOCK_LOSS_COUNT`는 물리적 안전성 인증이 아니다. Positive internal timing과 fitted combinational SCC 0도 reset/RDC 안전성이나 AHB/M9K write-edge 원자성을 입증하지 않는다. `VGA-CDC-AC-09`는 **BLOCK / NOT_VERIFIED**, `SYNCASYNCNET`은 **NOT_WAIVED**를 유지한다.
+
 현재 criterion-to-evidence mapping은 다음 compact 표로 유지한다.
 
 | AC ID | Current result | Evidence class | Link |
@@ -259,7 +312,36 @@ CDC/reset 관련 requirement state는 accepted P08B row와 별도로 유지한�
 | `VGA-AC-07` | PHOTO_OBSERVED | bounded cycle-0 board photographs | [P08B-VGA-EV-01](../../reports/evidence/vga-hwclear/summary.md) |
 | `VGA-AC-08` | USER_ATTESTED | bounded operator report through cycle 5 | [P08B-VGA-EV-01 result](../../reports/evidence/vga-hwclear/result.json) |
 
+### 6.1 Assurance 범위 — 주장 경계 초안
+
+> **PROPOSED / NOT_ACCEPTED:** 이 절과 §7.2는 검토 초안이다. 현재 operating contract, acceptance criterion, requirement 상태를 바꾸지 않는다.
+
+기존 functional evidence는 established valid epoch에서의 제한된 동작을 뒷받침한다. 그 범위는 nominal 50 MHz HCLK/reference와 25 MHz pixel clock, stable clock operation, destination-domain release를 갖는 qualified system reset, one-outstanding command 및 정상 request/commit/ACK와 selected-bank RAM handoff다. 이는 evidence envelope이며 새로운 device operating specification도, 모든 물리적 startup/lock-loss event가 그 epoch를 확립한다는 보장도 아니다. Clock-progress 가정은 liveness를 한정하며, clock stop이 임의의 ACK나 completion을 허용하지 않는다.
+
+공통의 effective reset assertion과 유효한 release가 성립하면 조건부 abort/rebase 순서를 뒷받침한다. **R1**은 여전히 모든 required PLL invalidation이 두 reset branch를 clear할 것을 요구한다. **R2**는 pixel READY/ACK/pending invalidation과 HCLK abort/rebase가 stale state를 fresh로 소비하기 전에 완료될 것을 요구한다. 두 release stage, diagnostic count 또는 positive STA만으로 어느 전제도 입증되지 않는다. 최소 raw LOW width, differential reset skew 또는 edge-near AHB/WE/M9K bitcell atomicity는 인증하지 않는다.
+
+미입증 물리 조건은 assurance claim의 제한이며 acceptance stimulus의 제외가 아니다. Short loss나 asymmetric capture loss를 `VGA-CDC-AC-05/06/08/09`에서 암묵적으로 제거하지 않는다. Required-event coverage, immediate write suppression, no-side-effect, abort, stale-event suppression은 계속 binding이다. 정본 [assurance limitation register](physical_assurance_limitations.ko.md#c08-phys-001)를 참조한다.
+
+
 ## 7. Approved Target / Deferred Work
+
+### 7.1 C08 물리적 보장 의무 — post-baseline 실행 범위
+
+`C08-PHYS-001`은 HCLK/PCLK/VRAM WE edge 근처의 비동기 raw PLL `locked` 하강, 최소 loss/capture/rearm pulse, 분리된 reset의 capture/release skew와 reconvergence, AHB final response와 M9K write-edge 원자성에 대한 미입증 물리적 보장만 식별한다. 해당 qualification 작업은 현재 baseline-cleanup 실행 대기열에서 제외하고 **`POST_BASELINE_P12_PHYSICAL_QUALIFICATION`**에 배정한다. 이는 조건부 물리 증거 실행 일정이며 승인된 safety waiver, VERIFIED 결과 또는 기존 cleanup gate의 면제가 아니다.
+
+기존 digital test와 Boolean gating은 모델링된 clock/reset 가정 안에서 제한된 동작을 확인한다. Device pulse width, metastability, routing skew, 물리적 reset capture 또는 edge-near lock transition의 RAM commit 동작까지 보장하지 않는다. `VGA-CDC-AC-05/09`를 포함한 현재 immediate-write-suppression, abort, recovery, no-side-effect 및 ownership 계약은 변경하거나 면제하지 않는다. C09 dual-clock-memory qualification, ADC timing exception 및 외부 I/O closure는 별도 의무이며 이 항목으로 이관되지 않는다.
+
+기존 제한된 범위의 개발/보드 관찰을 edge-near PLL loss 안전성의 증거로 제시하면 안 된다. 그 보장을 요구하는 board-use 또는 deployment 주장은 향후 증거와 Owner acceptance 전까지 미인증 상태다. Diagnostic fault flag 0이나 captured loss count로 그러한 주장을 승인할 수 없다.
+
+담당자는 VGA/clock-reset specification maintainer이며 board owner가 물리 실행과 acceptance를 담당한다. 물리적 lock-loss 안전성 주장 전, 관련 clock/reset/PLL/M9K 설정 또는 write-commit 변경 시, lock-loss 이상 관측 시 재진입해야 한다. Active safety defect가 입증되면 통상적 이관으로 처리하지 않고 즉시 corrective/restricted-use review가 필요하다.
+
+향후 acceptance에는 정확한 source/IP/bitstream/board binding, primary MAX10/ALTPLL/M9K pulse/reset/write-edge 계약, NOT_ANALYZABLE 공백을 명시한 해당 timing/RDC 및 reset-branch/diagnostic-capture coverage, 그리고 계약이나 분석만으로 보장할 수 없는 부분의 targeted physical evidence가 필요하다. 물리 자극과 clock/write edge의 관계는 독립 관측해야 하며 diagnostic counter로 추정하면 안 된다. Safety 주장 전 Owner review에서 남은 가정을 모두 해결해야 하고 미해결 사례는 NOT_VERIFIED로 유지한다.
+
+[Cleanup exit gate](../baseline_cleanup.md#3-cleanup-exit-gate)는 모든 BC High/Blocker 항목의 VERIFIED를 계속 요구한다. `CDC-001 OPEN`, `VER-003 OPEN`, `STA-001 IN_PROGRESS`, `STA-002 BLOCKED`, `VGA-CDC-AC-09 BLOCK / NOT_VERIFIED`를 보존한다. BC row, gate taxonomy, reset spec 또는 release checklist는 완화하지 않는다. [C08 deferred obligation](baseline_cleanup.ko.md#23a-c08-물리적-보장-의무)을 참조한다.
+
+Owner-authorized uncommitted C09 `rd_aclr(1'b0)` binding은 보존한다. 이번 개정은 read latency, bank isolation, reset/recovery, first-visible-pixel 계약을 바꾸지 않는다. C09 physical primitive behavior는 별도의 P12 device/physical work로 유지한다.
+
+이번 개정 밖의 proposed follow-up: [memory map](../01_memory_map.md)의 historical W1C summary/legacy VGA link, [firmware contract](../19_firmware_contract.md)의 legacy clear 용어, [Health firmware contract](../22_soc_health_firmware.md)의 향후 diagnostic reporting을 정리한다. memory-map address/width ownership은 불변이며 해당 문서들은 detailed peripheral semantics를 owning spec에 위임한다. 이번 개정은 tracker에 C08 physical-obligation 범위 설명만 추가하며 driver, Health qualification, evidence acceptance는 바꾸지 않는다.
 
 | Item | 상태 | 범위 |
 |---|---|---|
@@ -269,6 +351,15 @@ CDC/reset 관련 requirement state는 accepted P08B row와 별도로 유지한�
 | VGA/ADC warnings | OPEN | critical proximity warning 명시 처분 필요 |
 | `RESET_WINDOW_UNPROTECTED_BEFORE_MTVEC_COMMIT` | known risk | verified safe firmware trap interval이 아님 |
 | Programmer/JTAG binding | unavailable | independent SOF-to-board binding 미수집 |
+
+### 7.2 Bounded assurance 제안 — 활성 예외 아님
+
+> **PROPOSED / NOT_ACCEPTED:** 기존 RTL과 모든 active behavior를 유지한다. 이 제안은 주장 한계를 기록하며 물리적 safety waiver를 부여하지 않는다.
+
+`C08-PHYS-001`의 단일 정본 record는 [assurance limitation register](physical_assurance_limitations.ko.md#c08-phys-001)에 두며 §7.1의 accepted 실행 일정과 주장 경계를 유지한다. 물리 상태는 `NOT_PROVEN`, 예외 요청은 `PROPOSED / NOT_ACCEPTED`다. AC09의 essential R1/R2 dependency는 [cleanup §3.1](baseline_cleanup.ko.md#31-proposed-limited-assurance-disposition)의 supplemental-claim 예외 경로에 들어갈 수 없다.
+
+Limited internal engineering checkpoint는 기존 조건부 functional evidence와 모든 residual blocker를 설명할 수 있다. 이는 Clean Baseline v1 release, deployment safety certification, AC09 acceptance 또는 stable PLIC/AXI stage로 진행할 권한이 아니다. Required-event class 축소나 부적합한 reset/startup 가정은 채택 전 별도 frozen-contract 결정이 필요하며 exception record로 도입할 수 없다.
+
 
 ## 8. Traceability
 

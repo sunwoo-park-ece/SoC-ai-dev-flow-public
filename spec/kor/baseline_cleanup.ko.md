@@ -80,6 +80,66 @@ DEFERRED    PLIC / AXI / optional future로 의도적으로 이동
 10. implementation evidence 전에는 target text를 active behavior로 승격하지 않음.
 11. source commit, FW build, IMEM/DMEM image, SOF, timing, board evidence 연결.
 
+### 3.1 Proposed limited-assurance disposition
+
+> **PROPOSED / NOT_ACCEPTED — normative amendment 초안만 해당.** 별도 승인된 개정을 채택하기 전까지 위의 active exit condition 11개와 §2 taxonomy는 계속 binding이다. 현재 BC row 상태를 바꾸지 않는다.
+
+추가 exit rule 제안: 모든 mandatory functional requirement와 essential device assumption에서 분리 가능한, 명시적으로 열거된 **supplemental physical assurance claim**에 한해 [assurance limitation register](physical_assurance_limitations.ko.md#exception-process)의 절차로 별도 `LIMITED_ASSURANCE_ACCEPTED` disposition을 부여할 수 있다. 이는 해당 주장의 승인된 한계를 기록하며 `VERIFIED`나 BC requirement status가 아니다.
+
+다음을 모두 충족해야 한다.
+
+1. Essential capture/recovery premise를 포함한 source-bound functional requirement를 독립적으로 충족하고 accept했으며 다른 applicable mandatory evidence도 모두 유효해야 한다.
+2. Claim마다 정확한 limitation ID, scope, risk/impact, restriction, 해당 source/IP/board binding, responsible owner, acceptance authority, rationale, re-entry trigger 및 명시적 expiry 또는 review date를 기록해야 한다.
+3. 정확히 그 claim과 binding에 대한 Owner approval을 기록해야 한다. Pending, expired, revoked 또는 materially changed record는 인정하지 않는다.
+4. Applicable BC, STA, board, ADC, C09 및 release gate를 각각의 조건으로 충족해야 한다. 예외로 missing required oracle, device premise 또는 acceptance case를 대체할 수 없다.
+5. Release decision은 limited claim과 permitted use를 별도로 식별해야 하며 physical safety certification이나 암묵적 Git/publication 권한을 부여하지 않는다.
+
+이 disposition으로 기존 `BC High/Blocker`가 VERIFIED, DEFERRED, OPT 또는 closed가 되지 않는다. §3(1)은 해당 row의 VERIFIED를 계속 요구하고 §3(2)의 기존 Medium acceptance rule도 유지한다. 따라서 이 제안은 mandatory requirement 충족 후 추가 물리적 보장 주장만 한정할 수 있다. `CDC-001`/`VER-003` OPEN 또는 `STA-002` BLOCKED 상태에서 현재 cleanup closure를 가능하게 하지 않는다.
+
+**현재 부적격:** R1/R2는 현재 AC09 reset-epoch 논증의 essential premise다. 그 missing evidence를 분리 가능한 supplemental claim으로 재명명할 수 없다. 전제가 미해결인데 이 경로로 release하면 frozen contract 및 §3와 충돌하므로 그러한 예외는 제안하지 않는다. 더 넓은 gate/operating-contract 변경에는 별도 구체적 Owner 결정과 동기화된 release-authority review가 필요하다.
+
+
+### 3.2 P12_BOUNDED_CHECKPOINT
+
+> **DEFINITION_ACCEPTED_BOUNDED — internal milestone 정의만 해당.** 이 절의 상태 4개와 acceptance criterion 6개는 채택되었다. Candidate assessment와 checkpoint acceptance에는 별도 결정이 필요하며 이 정의는 candidate를 accept하거나 candidate approval record를 만들지 않는다.
+
+`P12_BOUNDED_CHECKPOINT`는 명시적으로 한정된 development analysis를 위한 internal engineering snapshot이다. Clean Baseline v1, §3 exit gate 및 BC row status와 별개다. **모든 BC High/Blocker의 VERIFIED를 요구하지 않지만**, 모든 미해결 의무는 계속 드러내야 한다. Production/board-safety baseline, code freeze, Git branch, publication 또는 release가 아니다.
+
+#### Checkpoint lifecycle
+
+| 상태 | 진입 및 결정 경계 |
+|---|---|
+| `CHECKPOINT_NOT_ASSESSED` | Candidate를 checkpoint 기준으로 아직 평가하지 않은 상태. 기준 초안 작성 자체는 평가가 아님. |
+| `CHECKPOINT_READY_FOR_OWNER_REVIEW` | 특정 snapshot이 아래 AC-01부터 AC-05를 충족하고 완전한 AC-06 decision packet을 갖춘 상태. Owner acceptance는 아직 pending. |
+| `CHECKPOINT_ACCEPTED` | 채택된 checkpoint 정의 아래에서 6개 기준을 모두 충족한 뒤 정확히 그 source/evidence/use snapshot을 별도의 명시적 Owner 결정으로만 accept함. 다른 gate acceptance는 암묵적으로 성립하지 않음. |
+| `CHECKPOINT_BLOCKED` | 아래 blocking condition을 포함해 required checkpoint criterion을 충족할 수 없는 상태. Intended checkpoint use에 중요한 evidence 부재는 PASS가 아님. |
+
+이 상태는 `baseline_cleanup IN_PROGRESS`, BC VERIFIED status 및 `clean_baseline_v1 NOT_RELEASED`와 독립적이다. RESULT, REVIEWED, ACCEPTED, INTEGRATED, PUBLISHED, RELEASED는 별도 lifecycle 결정으로 남는다. Source/evidence/use의 material change가 있으면 별도 재평가와 승인 전까지 과거 checkpoint 결정에 의존할 수 없으며 새 snapshot이 acceptance를 상속하지 않는다.
+
+#### Checkpoint acceptance criteria
+
+아래 ID는 internal milestone에만 적용하고 frozen VGA acceptance case에 적용하지 않는다. 이 정의로 어느 criterion도 충족 상태로 표시하지 않는다.
+
+| ID | 감사 가능한 필수 조건 |
+|---|---|
+| `P12-BCP-AC-01` | 정확한 RTL, FW, constraint, IP configuration을 repository/worktree HEAD, index, dirty membership, 실제 working-content hash 및 source/evidence 대응에 binding한다. Proposed use에 관련되면 bitstream/image/board identity도 binding하며, 관련이 없으면 hardware/image qualification claim이 없는 use이므로 not applicable임을 명시한다. 관련 identity가 없으면 assessment를 막는다. |
+| `P12-BCP-AC-02` | 각 bounded functional DV, STA, primitive/model receipt를 실제 source/run/model identity, 원래 claim, limit 및 review status에 mapping한다. Source 차이와 reuse 타당성을 설명하고 평가하지 않은 변경에 PASS를 상속하지 않는다. 기존 conditional analysis는 conditional로 유지하며 simulation, STA, physical evidence는 서로 대체하지 않는다. |
+| `P12-BCP-AC-03` | AC09, CDC-001, VER-003, STA-001, STA-002를 포함해 모든 applicable OPEN/BLOCKED obligation 및 row status/severity/gate를 열거한다. Frozen AC05/06/08/09, reset obligation, mandatory Clean Baseline/vendor/board gate 및 추가 blocker를 보존한다. Register/checkpoint로 required case를 지울 수 없다. |
+| `P12-BCP-AC-04` | [Limitation register](physical_assurance_limitations.ko.md#c08-phys-001)의 기존 정본 C08-PHYS-001 record를 참조하고 모든 applicable physical limit, operating assumption 및 nonclaim을 열거한다. R1 capture/R2 re-entry는 미입증 essential AC09 premise로 유지한다. 빠진 limit은 review 전에 기록해야 하며 새 limitation ID나 accepted physical exception을 의미하지 않는다. |
+| `P12-BCP-AC-05` | 정확한 intended internal development use와 restriction을 정의하고 그 use에 대한 known active defect/risk disposition을 검토한다. Intended use의 active unsafe defect를 평가하지 않았으면 checkpoint를 막는다. Unproved physical assurance는 source-based analysis의 unresolved risk로 기록할 수 있으나 physical operation, deployment safety 또는 unsupported hardware qualification을 승인할 수 없다. Safety disclaimer만으로 risk disposition이 되지 않는다. |
+| `P12-BCP-AC-06` | 특정 source/evidence snapshot, AC-01부터 AC-05의 finding, limit, intended use, residual blocker 및 별도 decision request를 explicit Owner review에 제출한다. Acceptance에는 그 snapshot과 permitted use를 명시한 별도의 기록된 Owner 결정이 필요하며 이 정의나 agent RESULT로 그 결정을 대신할 수 없다. |
+
+Identity 누락, intended use의 미평가 active unsafe defect, misleading evidence/verification claim 또는 frozen contract/release authority와 충돌하는 claim이면 READY/ACCEPTED로 표시하지 않고 block한다. Known open BC item만으로 이 별도 milestone을 block하지는 않되 risk/restriction이 기준을 충족해야 하며 해당 item은 Clean Baseline에 계속 gating이다. 실제 unsafe condition 발견 시에는 여전히 applicable Hard STOP 및 corrective/restricted-use 절차를 적용한다.
+
+#### Reconciliation and permitted reliance
+
+`CHECKPOINT_ACCEPTED`는 internal engineering milestone에 관한 상태다. §3.1의 `LIMITED_ASSURANCE_ACCEPTED`는 제안된, 별도 승인 대상인 supplemental physical claim만 다룬다. 어느 쪽도 다른 쪽을 암시하지 않으며 §3.1은 미채택 상태다. Checkpoint는 기존 C08 gap을 인정할 수 있지만 C08 exception acceptance, `NOT_PROVEN` 변경, AC09 PASS 또는 essential R1/R2 waiver가 아니다.
+
+[VGA evidence envelope](08_vga.ko.md#61-assurance-범위--주장-경계-초안), [VGA bounded assurance proposal](08_vga.ko.md#72-bounded-assurance-제안--활성-예외-아님), [limitation register](physical_assurance_limitations.ko.md)의 draft 부분은 계속 PROPOSED/NOT_ACCEPTED다. §23A의 기존 accepted physical-execution scheduling은 일정만 의미한다. 6개 문서의 제안으로 새 device fact, reset-loss coverage 또는 safety certificate가 생기지 않는다.
+
+별도 Owner 승인 PLIC/AXI task는 checkpoint의 정확한 scope, restriction, unverified assumption을 함께 승계하는 bounded input으로만 checkpoint를 인용할 수 있다. Checkpoint acceptance는 그 task, stable-stage progression 또는 Git action의 GO가 아니다. Clean Baseline의 §3 조건 11개, 모든 BC High/Blocker VERIFIED, required STA/board/ADC/C09 evidence 및 private release checklist는 그대로 유지한다. 이 별도 milestone의 정의만을 위해 checklist edit나 release exception이 필요하지 않다.
+
+
 ## 4. 권장 구현 순서
 
 ```text
@@ -395,6 +455,27 @@ Baseline cleanup 범위 아님:
 - optional framebuffer readback.
 
 ---
+
+## 23A. C08 물리적 보장 의무
+
+`C08-PHYS-001` — **NOT_PROVEN / UNDETERMINABLE 물리적 보장; 실행만 이관.** 담당자: VGA/clock-reset specification maintainer와 physical board owner. 대상 단계: **`POST_BASELINE_P12_PHYSICAL_QUALIFICATION`**. 세부 범위와 operating/board-use 주장 경계는 [VGA deferred work](08_vga.ko.md#71-c08-물리적-보장-의무--post-baseline-실행-범위)에 있다.
+
+HCLK/PCLK/VRAM WE edge 근처 raw PLL lock-loss, 최소 loss/capture/rearm pulse, 분리된 reset의 capture/release skew와 reconvergence, AHB final-response/M9K write-edge 원자성의 qualification만 현재 cleanup 실행 대기열에서 제외한다. 기존 digital diagnostic/Boolean-gating 증거와 positive internal STA는 이 물리적 한계를 입증하지 못한다. `IS_CDC=0`이나 captured `LOCK_LOSS_COUNT`는 안전성 인증이 아니며, 이러한 증거 공백으로 입증된 결함은 없다.
+
+재진입: 물리적 lock-loss 안전성 주장 전, 관련 clock/reset/PLL/M9K 또는 write-commit 변경 시, lock-loss 이상 관측 시. Acceptance에는 source/IP/bitstream/board identity, primary MAX10/ALTPLL/M9K pulse/reset/write 계약, 공백을 명시한 해당 timing/RDC coverage, 계약/분석으로 보장할 수 없는 부분의 독립 관측 targeted physical evidence 및 Owner review가 필요하다. Active defect가 입증되면 대신 즉시 corrective/restricted-use review를 수행한다.
+
+이 future task는 기존 BC row의 `OPT` 분류나 DEFERRED 상태가 아니다. [Exit gate](../baseline_cleanup.md#3-cleanup-exit-gate), BC High/Blocker taxonomy와 required evidence는 그대로다. `CDC-001 OPEN`, `VER-003 OPEN`, `STA-001 IN_PROGRESS`, `STA-002 BLOCKED`, `VGA-CDC-AC-09 BLOCK / NOT_VERIFIED`, `SYNCASYNCNET NOT_WAIVED`를 유지한다. `VGA-CDC-AC-05/09`를 포함한 immediate-write-suppression, abort, recovery, no-side-effect, ownership 계약은 완화하지 않는다. C09, ADC exception 및 외부 I/O 의무도 이 항목으로 옮기지 않는다.
+
+물리 qualification task를 실행 대기열에서 제외해도 cleanup 종료, 물리적 안전성 acceptance 또는 Clean Baseline release가 성립하지 않는다. BC High/Blocker requirement 면제나 frozen behavior/AC 변경에는 별도 명시적 Owner 결정이 필요하며 여기서는 승인하지 않는다.
+
+### 23A.1 Draft register linkage and release impact
+
+> **PROPOSED / NOT_ACCEPTED:** 정본 limitation record는 [C08-PHYS-001](physical_assurance_limitations.ko.md#c08-phys-001)이다. 앞의 accepted 실행 일정 문구를 확장 없이 유지한다.
+
+`LIMITED_ASSURANCE_ACCEPTED`는 §3.1의 별도 claim disposition 제안일 뿐 C08 예외는 accept되지 않았다. Record는 independent supplemental physical qualification과 unchanged AC09에 essential한 R1/R2 사실을 구분하며 후자를 이관하거나 면제하지 않는다.
+
+Active private release checklist는 BC closure 외에도 verified active milestone과 CDC/I/O evidence를 별도로 요구한다. 그 “closed or formally waived” 문구 자체가 BC High/Blocker waiver를 승인하지 않는다. 이 public draft는 checklist나 Git/release policy를 수정하거나 대체하지 않는다. 향후 채택 결정은 영향받는 checklist clause 각각을 정합화해야 하며 internal checkpoint는 NOT_RELEASED를 유지한다. 앞의 AC09/CDC/VER/STA 및 warning 상태를 보존한다.
+
 
 # Part VII — Dependency / Decision
 
