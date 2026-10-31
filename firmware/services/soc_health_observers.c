@@ -39,7 +39,9 @@ unsigned soc_health_format_line(const soc_health_snapshot_t *s,unsigned line,
         case SOC_IP_UART_LOOP:case SOC_IP_GSENSOR:case SOC_IP_ADC:string(&t,"SEQ=");hex(&t,ip->detail,8);break;
         case SOC_IP_GPIO:string(&t,"LOOP");break;
         case SOC_IP_JOY_POLICY:string(&t,"MATCH");break;
-        case SOC_IP_VGA:string(&t,"SWAP");break;
+        case SOC_IP_VGA:
+            string(&t,"SWAP L=");hex(&t,vram_status_lock_loss_count(ip->detail),4);
+            string(&t," C=");hex(&t,vram_status_is_cdc(ip->detail),1);break;
         case SOC_IP_SW:case SOC_IP_LED:string(&t,"V=");hex(&t,ip->detail&0x3ffu,3);break;
         case SOC_IP_HEX:string(&t,"M=");hex(&t,(ip->detail>>9)&1u,1);string(&t," P=");hex(&t,ip->detail&0x1ffu,3);break;
         default:break;

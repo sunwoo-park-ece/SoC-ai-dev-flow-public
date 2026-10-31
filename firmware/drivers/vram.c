@@ -7,6 +7,11 @@ uint32_t vram_status(void)
     return mmio_read32(VRAM_BASE + VRAM_STATUS);
 }
 
+void vram_clear_cdc_fault(void)
+{
+    mmio_write32(VRAM_BASE + VRAM_STATUS, VRAM_STATUS_IS_CDC);
+}
+
 void vram_clear_events(uint32_t mask)
 {
     mmio_write32(VRAM_BASE + VRAM_STATUS,

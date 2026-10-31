@@ -253,6 +253,18 @@ void soc_health_vga_service(soc_health_core_t *c, soc_health_providers_t *p)
 {
     soc_health_transaction_t *t = &p->vga;
     uint32_t status = vram_status();
+    /* One coherent sampled STATUS for both diagnostics. Pending observation
+     * changes detail only, never invents progress or overwrites older FAIL
+     * detail. No automatic fault acknowledgement: report before owner clear. */
+    if (c->ip[SOC_IP_VGA].state != SOC_HB_FAIL)
+        (void)soc_health_report(c, SOC_IP_VGA, SOC_STEP_PENDING, 0u, status);
+    if (vram_status_is_cdc(status)) {
+        fail(c, SOC_IP_VGA, status);
+        if (p->vga_release) p->vga_release(c, p->vga_context, 0);
+        t->phase = VGA_READY;
+        t->deadline.armed = 0u;
+        return;
+    }
     if (!t->deadline.armed) arm(c, p, t);
     if ((status & VRAM_STATUS_OP_ABORT) != 0u) {
         fail(c, SOC_IP_VGA, 0x60000000u | status); /* preserve before W1C */
@@ -294,6 +306,11 @@ void soc_health_vga_service(soc_health_core_t *c, soc_health_providers_t *p)
             (status & VRAM_STATUS_OP_BUSY) != 0u) break;
         /* Recheck ABORT before start_operation clears old events internally. */
         status = vram_status();
+        if (vram_status_is_cdc(status)) {
+            fail(c, SOC_IP_VGA, status);
+            if (p->vga_release) p->vga_release(c, p->vga_context, 0);
+            t->phase = VGA_READY; break;
+        }
         if ((status & VRAM_STATUS_OP_ABORT) != 0u) {
             fail(c, SOC_IP_VGA, 0x60000000u | status);
             if (p->vga_release) p->vga_release(c, p->vga_context, 0);

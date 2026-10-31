@@ -200,6 +200,9 @@ module AHB_VRAM_DUAL_BUFFER (
     reg data_rejected;
     reg [13:0] data_word_addr;
     reg error_final;
+    // Diagnostics capture supported FB identity independently of readiness
+    // rejection; unsupported sizes/directions must never enter the monitor.
+    reg diagnostic_fb_phase;
 
     // Address acceptance does not complete a write.  Revalidate the
     // commit-time conditions in the data phase so loss of the VGA domain
@@ -236,6 +239,7 @@ module AHB_VRAM_DUAL_BUFFER (
             data_rejected   <= 1'b0;
             data_word_addr  <= 14'd0;
             error_final     <= 1'b0;
+            diagnostic_fb_phase <= 1'b0;
         end else begin
             if (data_valid && effective_data_rejected && !error_final) begin
                 // Preserve a commit-time rejection for the final ERROR cycle
@@ -251,6 +255,7 @@ module AHB_VRAM_DUAL_BUFFER (
                 data_rejected   <= address_rejected;
                 data_word_addr  <= HADDR[15:2];
                 error_final     <= 1'b0;
+                diagnostic_fb_phase <= address_supported && address_is_fb && HWRITE;
             end
         end
     end
@@ -258,7 +263,8 @@ module AHB_VRAM_DUAL_BUFFER (
     always @(*) begin
         HRDATA = 32'h0000_0000;
         if (data_valid && !data_write && data_is_status) begin
-            HRDATA = {27'h0, domain_ready, operation_abort_sticky,
+            HRDATA = {lock_loss_count, 10'h0, is_cdc_sticky,
+                      domain_ready, operation_abort_sticky,
                       operation_busy, operation_done_sticky, vsync_sticky};
         end
     end
@@ -384,12 +390,137 @@ module AHB_VRAM_DUAL_BUFFER (
     wire vram0_we = physical_write && (write_target_bank == 1'b0);
     wire vram1_we = physical_write && (write_target_bank == 1'b1);
 
+    // ------------------------------------------------------------------
+    // Observational diagnostics. No signal below drives functional write,
+    // bus response, ownership, cleaner or recovery controls.
+    // ------------------------------------------------------------------
+    localparam [1:0] DIAG_ACK = 2'd0, DIAG_QUALIFY = 2'd1, DIAG_ARMED = 2'd2;
+    reg [1:0] diagnostic_capture_state;
+    wire diagnostic_armed = diagnostic_capture_state == DIAG_ARMED;
+    wire diagnostic_capture_reset_n = HRESETn && vga_pll_locked;
+    reg diagnostic_capture_high;
+    (* async_reg = "true" *) reg diagnostic_capture_meta;
+    (* async_reg = "true" *) reg diagnostic_capture_sync;
+    reg diagnostic_high_seen;
+    reg [15:0] lock_loss_count;
+    reg is_cdc_sticky;
+
+    // An asynchronously cleared one-bit mailbox. While armed its D feedback
+    // holds a loss (zero) even after lock returns or HCLK pauses. Disarmed
+    // HCLK writes one to acknowledge; wait for its synchronized return before
+    // fresh stable-high qualification. Startup zero is ignored while unarmed.
+    // Single async clear, no raw-lock clock or competing async set/reset.
+    // Pulse width/recovery-removal and placement remain physical-review work.
+    always @(posedge HCLK or negedge diagnostic_capture_reset_n) begin
+        if (!diagnostic_capture_reset_n)
+            diagnostic_capture_high <= 1'b0;
+        else if (!diagnostic_armed)
+            diagnostic_capture_high <= 1'b1;
+    end
+
+    always @(posedge HCLK or negedge HRESETn) begin
+        if (!HRESETn) begin
+            diagnostic_capture_meta <= 1'b0;
+            diagnostic_capture_sync <= 1'b0;
+            diagnostic_capture_state <= DIAG_ACK;
+            diagnostic_high_seen <= 1'b0;
+            lock_loss_count <= 16'd0;
+        end else begin
+            diagnostic_capture_meta <= diagnostic_capture_high;
+            diagnostic_capture_sync <= diagnostic_capture_meta;
+            case (diagnostic_capture_state)
+                DIAG_ACK: begin
+                    diagnostic_high_seen <= 1'b0;
+                    if (diagnostic_capture_sync && pll_lock_h2 && h_epoch_valid)
+                        diagnostic_capture_state <= DIAG_QUALIFY;
+                end
+                DIAG_QUALIFY: begin
+                    // The existing async-assert/sync-release epoch witness
+                    // prevents a short unarmed loss from being mistaken for
+                    // an armed loss through stale synchronized-high samples.
+                    if (!diagnostic_capture_sync || !pll_lock_h2 || !h_epoch_valid) begin
+                        diagnostic_high_seen <= 1'b0;
+                        diagnostic_capture_state <= DIAG_ACK;
+                    end else if (diagnostic_high_seen) begin
+                        diagnostic_capture_state <= DIAG_ARMED;
+                        diagnostic_high_seen <= 1'b0;
+                    end else
+                        diagnostic_high_seen <= 1'b1;
+                end
+                DIAG_ARMED: begin
+                    if (!diagnostic_capture_sync) begin
+                        if (lock_loss_count != 16'hffff)
+                            lock_loss_count <= lock_loss_count + 16'd1;
+                        diagnostic_capture_state <= DIAG_ACK;
+                        diagnostic_high_seen <= 1'b0;
+                    end
+                end
+                default: diagnostic_capture_state <= DIAG_ACK;
+            endcase
+        end
+    end
+
+    // Final comparison uses only this captured FB data phase. A raw-low
+    // observation is contemporaneous; the delayed mailbox is deliberately
+    // NOT used as an untagged loss association for another transaction.
+    wire diagnostic_phase = data_valid && diagnostic_fb_phase;
+    wire diagnostic_completion = data_valid && HREADY && HREADY_IN;
+    wire diagnostic_advance = HREADY_IN &&
+        !(data_valid && effective_data_rejected && !error_final);
+    wire diagnostic_cpu_we0 = !use_clear && vram0_we;
+    wire diagnostic_cpu_we1 = !use_clear && vram1_we;
+    wire [1:0] diagnostic_commands_now =
+        {1'b0, diagnostic_cpu_we0} + {1'b0, diagnostic_cpu_we1};
+    reg [1:0] diagnostic_commands_seen; // saturating 0/1/2-or-more
+    reg diagnostic_bad_command;
+    reg diagnostic_loss_seen;
+    wire [2:0] diagnostic_command_total =
+        {1'b0, diagnostic_commands_seen} + {1'b0, diagnostic_commands_now};
+    wire diagnostic_bad_now = (diagnostic_commands_now != 0) &&
+        (!diagnostic_completion || (write_addr != data_word_addr) ||
+         (write_data != HWDATA) ||
+         (diagnostic_cpu_we0 && cpu_target_bank != 1'b0) ||
+         (diagnostic_cpu_we1 && cpu_target_bank != 1'b1));
+    wire diagnostic_disagreement = diagnostic_bad_command || diagnostic_bad_now ||
+        ((HRESP == 2'b00) ? (diagnostic_command_total != 3'd1) :
+                             (diagnostic_command_total != 3'd0));
+    wire diagnostic_fault = diagnostic_phase && diagnostic_completion &&
+        (diagnostic_loss_seen || !vga_pll_locked) && diagnostic_disagreement;
+
+    always @(posedge HCLK or negedge HRESETn) begin
+        if (!HRESETn) begin
+            diagnostic_commands_seen <= 2'd0;
+            diagnostic_bad_command <= 1'b0;
+            diagnostic_loss_seen <= 1'b0;
+            is_cdc_sticky <= 1'b0;
+        end else begin
+            if (accepted_status_write && HWDATA[5])
+                is_cdc_sticky <= 1'b0;
+            if (diagnostic_fault)
+                is_cdc_sticky <= 1'b1;
+            if (diagnostic_advance) begin
+                diagnostic_commands_seen <= 2'd0;
+                diagnostic_bad_command <= 1'b0;
+                diagnostic_loss_seen <= 1'b0;
+            end else if (diagnostic_phase) begin
+                diagnostic_commands_seen <= (diagnostic_command_total >= 3'd2) ?
+                    2'd2 : diagnostic_command_total[1:0];
+                diagnostic_bad_command <= diagnostic_bad_command || diagnostic_bad_now;
+                diagnostic_loss_seen <= diagnostic_loss_seen || !vga_pll_locked;
+            end
+        end
+    end
+
+    // Response and write-enable share existing functional predicates; these
+    // comparisons can be vacuous/optimized. They observe sampled port command
+    // intent, never bitcell acknowledgement or edge-near physical correctness.
+
     wire vram0_q;
     wire vram1_q;
 
     VRAM u_VRAM0 (
         .data      (write_data),
-        .rd_aclr   (~vga_reset_n),
+        .rd_aclr   (1'b0),
         .rdaddress (vram_read_addr),
         .rdclock   (pclk_25),
         .wraddress (write_addr),
@@ -400,7 +531,7 @@ module AHB_VRAM_DUAL_BUFFER (
 
     VRAM u_VRAM1 (
         .data      (write_data),
-        .rd_aclr   (~vga_reset_n),
+        .rd_aclr   (1'b0),
         .rdaddress (vram_read_addr),
         .rdclock   (pclk_25),
         .wraddress (write_addr),
