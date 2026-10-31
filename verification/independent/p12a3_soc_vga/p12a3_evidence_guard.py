@@ -2,7 +2,9 @@
 """G1 build/run evidence and independent raw-evidence guard. No RTL writes."""
 import hashlib,json,os,re,shutil,struct,subprocess,sys,time
 from pathlib import Path
-BASE='8c3a4d6948e3061ff48021b81a6a3eec708f7788'
+# Owner-authorized source-pin reconciliation. Dirty bytes remain bound by
+# source_before/source_after and the live closure; this is not an evidence waiver.
+BASE='86882aa22220de0a8b3c97f67a13bc285036bd6e'
 ADAPTERS={'RESET':('normal','FAIL_G1_RESET'),'ROUTE':('normal','FAIL_G1_ROUTE'),'PHASE':('normal','FAIL_G1_PHASE'),'BANK':('normal','FAIL_G1_COMMIT'),'DATA':('normal','FAIL_G1_COMMIT'),'STATUS':('normal','FAIL_G1_STATUS'),'NOOP':('normal','FAIL_G1_NOOP'),'BOOT':('normal','FAIL_G1_BOOT'),'ERROR':('fault','FAIL_G1_ERROR'),'CAUSE':('fault','FAIL_G1_CPU_FAULT'),'MEPC':('fault','FAIL_G1_CPU_FAULT'),'RETIRE':('fault','FAIL_G1_RETIRE'),'YOUNGER':('fault','FAIL_G1_RETIRE'),'IMAGE':('normal','FAIL_G1_IMAGE'),'MEMORY':('normal','FAIL_G1_COMMIT')}
 def sha(p): return hashlib.sha256(p.read_bytes()).hexdigest()
 def put(p,v): p.write_text(json.dumps(v,indent=2)+'\n')
@@ -44,6 +46,11 @@ class GuardFailure(Exception):
 
 def need(condition,pid,detail):
     if not condition: raise GuardFailure(pid,detail)
+
+def pinned_head(repo):
+    head=subprocess.check_output(['git','-C',str(repo),'rev-parse','HEAD'],text=True).strip()
+    need(head==BASE,'G1C_GUARD_SOURCE','SOURCE_IDENTITY_DRIFT: actual HEAD '+head+' expected '+BASE)
+    return head
 
 def selected(mode):
     need(mode in ('targeted','owner_g1'),'G1C_GUARD_CASE_SET',mode)
@@ -352,7 +359,7 @@ def semantic_lane(root,m,lane,binary,symbols,oracle):
 
 def guard(root):
     m=json.loads((root/'manifest.json').read_text());repo=Path(m['repo']);mode=m.get('run_set');adapters=selected(mode)
-    need(m['base']==BASE and m['source_before']==m['source_after'],'G1C_GUARD_SOURCE','producer source closure')
+    need(m['base']==pinned_head(repo) and m['source_before']==m['source_after'],'G1C_GUARD_SOURCE','producer source closure')
     live=closure(repo)[1]
     if (root/'replay.json').exists():
         # An explicitly copied replay may validate old CPU evidence with a new
@@ -383,12 +390,12 @@ def guard(root):
     return 0
 
 def run(repo,root):
+    head=pinned_head(repo)  # reject a wrong checkout before creating run artifacts
     root.mkdir(exist_ok=False,parents=True)
     sources,identity=closure(repo)
     mode=os.environ.get('RUN_SET','targeted');adapters=selected(mode)
-    m={'schema':'P12A3-G1C-v1','run_set':mode,'run_root':str(root),'repo':str(repo),'base':subprocess.check_output(['git','-C',str(repo),'rev-parse','HEAD'],text=True).strip(),'source_before':identity,'images':{},'cases':{},'artifacts':{}}
+    m={'schema':'P12A3-G1C-v1','run_set':mode,'run_root':str(root),'repo':str(repo),'base':head,'source_before':identity,'images':{},'cases':{},'artifacts':{}}
     put(root/'manifest.json',m)
-    if m['base']!=BASE:raise RuntimeError('SOURCE_IDENTITY_DRIFT')
     for tool in ('git','python3','iverilog','vvp','riscv32-unknown-elf-gcc','riscv32-unknown-elf-objcopy','riscv32-unknown-elf-objdump','riscv32-unknown-elf-nm'):
         command([tool,'-V' if tool in ('iverilog','vvp') else '--version'],root/(tool+'.version.log'))
     b=repo/'verification/independent/p12a3_soc_vga'
