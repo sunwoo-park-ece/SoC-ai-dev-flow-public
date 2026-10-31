@@ -6,6 +6,8 @@
 >
 > **Parent specifications:** `soc_architecture.md`, `memory_map.md`.
 
+> **Store payload/mask contract status:** Response independence below is the approved A2 contract; implementation and verification are pending. Existing RTL shall not be described as A2-compliant on the basis of this specification update. Earlier implementation observations remain historical where superseded by the approved data-bus fault contracts.
+
 ## 1. Purpose
 
 This document defines the baseline SoC memory subsystem below the address-map level. It specifies the architectural behavior of the CPU-local instruction memory, AHB-side data memory, load/store lane handling, synchronous BRAM timing, read-after-write bypass behavior, firmware image initialization, and reset-visible memory semantics.
@@ -175,6 +177,14 @@ Thus **0-wait-state** in this document means no extra AHB stall cycle is inserte
 
 `HRESP` is always OKAY in the current DMEM slave. Address-error policy for unmapped regions is owned by `ahb_fabric.md` and `memory_map.md`.
 
+### 6.1 Accepted Store Ownership at the BRAM Edge
+
+A physical DMEM write shall belong to an accepted, legal store data phase. At an advancing address-phase edge (`HREADY_IN=1`), valid `HSEL`/`HTRANS` and `HWRITE` establish the registered `addr_reg` and `write_en_reg`; without a valid selected transfer the next write authority is cleared. These registers hold during a bus wait. The BRAM write edge uses the **pre-edge** registered address/`write_en_reg` together with the matching live MEM-stage `HWDATA` and `byteena_a`; simultaneous register updates establish the following transaction only.
+
+Nonzero data or byte-lane intent alone shall never authorize a write. Unaccepted, cancelled and rejected stores shall have no memory/peripheral side effect. Fabric/default ERROR and APB/VRAM rejection are distinct from the fixed-OKAY DMEM response; the owning fabric/slave shall reject an invalid store before committing its side effect. Zeroing HWDATA on ERROR is neither required nor a substitute for this acceptance rule.
+
+In the current single-master integration, registered DMEM write authority and the fabric's DMEM data-phase owner advance together. A DMEM address presented while another slave stalls is not yet accepted. Final ERROR cancels the following address phase. `write_en_reg` is the registered DMEM authority, not a combinational copy of current HSEL; this contract does not introduce a global-HREADY AND gate on BRAM wren or a new DMEM wait state.
+
 ## 7. Store Data Alignment and Byte Enables
 
 The CPU `StoreAligner` generates both the 32-bit write data and the 4-bit write mask. The DMEM slave carries this write mask as a project-specific sideband to the BRAM byte-enable input.
@@ -202,6 +212,14 @@ This is consistent with the architectural little-endian convention.
 | `SW` | `0` | `1111` | source word unchanged |
 
 For misaligned `SH` or `SW`, the active StoreAligner produces a zero write mask. Architectural handling is nevertheless the synchronous misaligned-store trap defined by the CPU exception path; the zero mask is a defensive implementation behavior and not a substitute for the trap contract.
+
+### 7.3 Response-Independent Payload and Lane Intent
+
+Both the aligned store data and `CUSTOM_WRITE_MASK` shall be generated from the matching MEM store with eligibility `Q = MEM_valid && MEM_memory_write && !MEM_exc_valid`, independently of final `HRESP`/`mem_fault_now`. The mask shall not be ANDed with `!mem_fault_now`. The custom mask is a DMEM-local, nonstandard byte-lane sideband, not transaction acceptance or universal AHB/AXI write permission; APB and VRAM do not consume it.
+
+Address, payload and mask shall remain paired to the same accepted store across stalls and consecutive SB/SH/SW transfers. Partial writes shall preserve unstroked bytes. RAW bypass shall capture the matching store's data, mask and hazard indication at the qualified edge, and merge those registered values bytewise with BRAM data. A previous store's mask or the following EX address shall not qualify the current write. Existing lane encodings, zero-wait DMEM timing and deterministic same-word bypass are unchanged.
+
+Acceptance requires checking physical write-edge address/data/lanes and exactly-once ownership for successful stores, zero writes for rejected/cancelled transfers, back-to-back lane changes, partial RAW merge, and DMEM crossings with APB/VRAM/default responses including waits and both ERROR phases. Structural checks shall cover response-to-data and response-to-mask dependencies with explicit sequential/blackbox boundaries. These are unverified obligations of the A2 change, not claims of completed verification.
 
 ## 8. Load Extraction and Extension
 
@@ -356,7 +374,7 @@ Any future hardware memory-clear mechanism shall be specified explicitly before 
 
 The following are observed implementation details and shall not be generalized beyond this baseline without specification review:
 
-1. **DMEM coarse decode alias** — top-level selection is wider than the canonical 32 KiB range; only the canonical range in `memory_map.md` is supported.
+1. **Historical DMEM coarse decode alias** — pre-cleanup top-level selection was wider than the canonical 32 KiB range. The approved canonical-range/error contract in `memory_map.md` and `ahb_fabric.md` governs current accesses; this historical observation grants no alias access.
 2. **Custom DMEM write-mask sideband** — byte enables are supplied outside the standard AHB signal set rather than reconstructed solely from `HSIZE`/address.
 3. **Vendor BRAM collision mode** — mixed-port read-during-write is `DONT_CARE`; deterministic same-word store-to-load behavior depends on explicit bypass logic.
 4. **IMEM physical placement** — the ROM instance currently resides inside `IF_ID_Register`; this is not a required future hierarchy.
@@ -411,3 +429,9 @@ This document is refined by or interacts with:
 - `firmware_contract.md` — linker/startup/image generation contract.
 
 If active RTL conflicts with this document while the document is DRAFT, the conflict shall be reviewed explicitly. After baseline approval, implementation changes shall be made against the approved specification rather than silently redefining memory behavior.
+
+## 18. Future Shared-DMEM Buffer Considerations (Non-Normative)
+
+AXI/DMA sharing is an architecture proposal only; no address allocation, DMA/AXI implementation or frozen future design is approved. A possible shared-buffer interface would use independent CPU/DMA requests, master-owner arbitration and captured transaction identity/address/data/byte strobes (WSTRB or equivalent), with legal precommit acceptance. CPU `mem_fault_now` is CPU-local and must not qualify shared BRAM WEN/byte strobes or another master's transaction.
+
+Future design review would need to resolve address/data-channel pairing, permissions and partition boundaries for every enabled byte/beat, producer-consumer ownership, partial writes, same-address arbitration, read-during-write collision/bypass, ordering and visibility. Completion should be defined against the owning transaction's commit/visibility point; a later error cannot undo an irrevocable write, so burst partial-completion versus atomic buffering needs an explicit policy. No reliance on undefined BRAM collisions or the CPU-only bypass is implied. Cache/coherency and software synchronization require separate contracts; the present no-DMA baseline and FENCE semantics remain unchanged.

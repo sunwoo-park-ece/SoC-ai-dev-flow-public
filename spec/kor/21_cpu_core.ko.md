@@ -8,6 +8,8 @@
 
 > **Phase 4A-3A 읽기 규칙:** 앞의 access-fault 미구현 설명은 cleanup 전 CPU 기록이다. 마지막 access-fault 문단은 검증된 load/store bus-fault 부분만 현행으로 승격하며 일반 retirement와 전체 `TRAP-003` 완료를 뜻하지 않는다.
 
+> **Store payload/mask 계약 상태:** §20.1은 승인된 A2 계약이다. RTL 구현과 검증은 미완료이며 기존에 검증된 fault 동작이 A2 준수나 timing closure를 입증하지 않는다.
+
 ## 1. 목적과 범위
 
 이 문서는 현재 FPGA baseline의 `RV32I46F5SPMMIO` CPU 내부 동작과 cleanup target을 구분하여 정의한다.
@@ -567,6 +569,22 @@ oBRAM_HAZARD
 ```
 
 외부 master의 undriven HSIZE, HRESP 미사용, EX_funct3 width mismatch, bus-stall semantics는 `03_cpu_interface.md`가 상세 소유한다.
+
+### 20.1 승인된 A2 CPU/Slave 책임
+
+CPU는 동일한 MEM-stage store의 `Q = MEM_valid && MEM_memory_write && !MEM_exc_valid`를 사용해 aligned store payload와 byte-lane 의도를 모두 생성해야 한다. StoreAligner HWDATA와 `CUSTOM_WRITE_MASK`는 최종 `HRESP`/`mem_fault_now`와 독립적이고 출력에 직접 연결되어야 하며 mask에 final-fault AND를 추가해서는 안 된다. EX는 주소·제어, MEM은 대응하는 데이터·lane을 소유하며 stall 동안 pairing과 안정성을 유지해야 한다. Lane 및 physical-edge 소유권의 세부 계약은 [memory subsystem](02_memory_subsystem.ko.md#73-응답-독립적인-payload와-lane-의도)과 [CPU interface](03_cpu_interface.ko.md#71-승인된-a2-payloadmask-계약)에 정의한다.
+
+Payload와 lane 의도는 쓰기 권한이 아니다. 소유 slave/fabric은 자신의 트랜잭션을 검증·수락하고, 잘못된 store의 메모리·주변장치 부작용이 commit되기 전에 거부해야 한다. DMEM은 등록된 data-phase 쓰기 권한과 이에 대응하는 MEM 데이터·byte enable을 사용한다. APB/VRAM 부작용은 계속 로컬에서 qualify하며 DMEM custom mask를 소비하지 않는다. CPU는 faulting MEM 트랜잭션의 최종 ERROR(`HRESP=2'b01`, `HREADY=1`)를 정확한 해당 명령 PC의 `mepc`와 load/store access fault `mcause=5`/`mcause=7`로 처리해야 한다. 실패한 load는 GPR을 쓰지 않고 실패한 store는 부작용이 없어야 하며 둘 다 성공 은퇴해서는 안 된다. 더 오래된 성공 WB 소유권은 보존하고 더 어린 request·부작용은 취소해야 한다.
+
+버스 요청 전 misalignment 검출·방지 및 cause 4/6의 access-fault 대비 우선순위를 유지한다. 기존 CPU final-fault writeback 억제, 예외·redirect 순서, request 취소는 계속 응답에 의해 qualify하며 StoreAligner payload/mask 생성만 응답 독립적으로 한다. 최종 ERROR에서 HWDATA나 byte-lane 의도를 0으로 만들 필요는 없다. 새로운 pipeline stage, slave latency, interrupt 동작 또는 retirement 정책은 도입하지 않는다.
+
+변경 후 실제 response-to-HWDATA/mask 및 SCC 검사, wait와 cross-slave ERROR에서의 transaction/physical-write-edge 소유권, partial RAW/lane 보존, 정확한 cause/PC/retirement, older-WB 보존, younger 취소, reset/recovery의 acceptance는 미완료이다. 기존 fault evidence는 post-A2 검증이 아니며 fitted timing closure를 증명하지 않는다.
+
+### 20.2 향후 CPU/DMA Commit 소유권 (비규범적)
+
+향후 shared-DMEM 설계에서는 CPU와 DMA request를 분리하고 arbitration과 commit 동안 master identity, 수락된 주소·데이터·strobe, 권한, 응답 소유권을 보존하는 방향을 검토한다. CPU `mem_fault_now`는 자신의 예외·request 취소에 사용할 수 있지만 global/shared BRAM WEN/byte strobe나 다른 master의 트랜잭션을 qualify해서는 안 된다. Shared controller는 되돌릴 수 없는 commit 전에 검증하고 transaction-local commit/visibility를 기준으로 completion을 정의하는 방향을 검토한다. 나중의 응답 error는 이미 commit된 쓰기를 rollback하지 못한다.
+
+주소·데이터·WSTRB pairing, 부분/동일 주소 쓰기, collision/bypass, producer-consumer 권한, ordering/visibility, cache/coherency synchronization은 별도 architecture 계약이 필요하다. [향후 memory 고려사항](02_memory_subsystem.ko.md#18-향후-shared-dmem-buffer-고려사항-비규범적)을 참조한다. 이는 승인되지 않은 설계 제안이며 구현되었거나 동결된 target이 아니다. 주소 배정, AXI/DMA, cache, FENCE/FENCE.I, PLIC 변경은 승인하지 않는다. 현재 cacheless/no-DMA FENCE-family legal-no-op 계약은 유지하며 이 계약이 향후 DMA ordering을 증명한다고 가정해서는 안 된다.
 
 ---
 

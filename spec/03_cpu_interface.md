@@ -8,6 +8,8 @@
 
 > **Phase 4A-3A reading rule:** Earlier “current baseline” descriptions of undriven `HSIZE` and unconsumed `HRESP` are pre-cleanup observations. The final Phase 4A-3A data-bus fault contract states the implemented scope; unrelated CPU cleanup remains open.
 
+> **Store payload/mask contract status:** Section 7.1 defines the approved A2 contract; its implementation and verification are pending. Existing response-qualified StoreAligner behavior is not evidence of A2 compliance. Historical observations do not override newer frozen fault contracts.
+
 ## 1. Purpose
 
 This document defines the architectural boundary between the active RV32I 5-stage CPU and the SoC data interconnect. It specifies how CPU pipeline state maps onto the implemented AHB-style bus signals, how load/store data is transferred, how bus back-pressure freezes the pipeline, and which project-specific sideband signals are required by the baseline implementation.
@@ -171,6 +173,22 @@ Project-specific lane path:
 The custom mask is consumed by the DMEM BRAM wrapper. It is **not** an AMBA AHB signal and shall not be treated as portable bus semantics.
 
 Detailed SB/SH/SW lane formation is defined in `memory_subsystem.md`.
+
+### 7.1 Approved A2 Payload/Mask Contract
+
+EX owns the bus address/control phase; the matching MEM stage owns both HWDATA and the 4-bit byte-lane intent. StoreAligner eligibility shall be `Q = MEM_valid && MEM_memory_write && !MEM_exc_valid`. Its aligned data shall feed HWDATA and its mask shall feed `CUSTOM_WRITE_MASK` directly. **Both outputs shall be independent of final HRESP/mem_fault_now; no `& !mem_fault_now` mask qualification is permitted.** MEM funct3, forwarded source data and address offset shall all belong to that same store. While the transaction is stalled, its owned payload and lane intent shall remain stable.
+
+`CUSTOM_WRITE_MASK` is a DMEM-local, nonstandard lane sideband passed unchanged by the master. It is not universal AHB/AXI write permission or acceptance, and APB/VRAM do not consume it. A nonzero payload/mask shall never independently cause a physical write. DMEM commits using the accepted data-phase owner's captured address and registered `write_en_reg`, together with that owner's matching MEM data and byte enables at the BRAM edge; see [memory ownership](02_memory_subsystem.md#61-accepted-store-ownership-at-the-bram-edge). Current EX HADDR can already belong to a following transaction and shall not be paired with the current MEM mask.
+
+CPU final-ERROR exception processing and younger-request cancellation remain response-qualified. Final ERROR does not require HWDATA or the mask to become zero. Slaves shall reject invalid transactions before side effects commit; response-independent data formation does not relax failed-store-zero-side-effect requirements. Preserve DMEM zero-wait/OKAY, fabric/default ERROR, slave acceptance, all lane encodings, partial writes and registered RAW bypass; this contract adds no APB latency, global-HREADY write gate or generic bus compliance claim.
+
+### 7.2 A2 Acceptance and Unverified Obligations
+
+Acceptance requires checking response independence of both outputs in the actual elaborated/optimized design with explicit sequential and blackbox boundaries; physical DMEM write-edge address/data/lane pairing; and stable payload/lanes during waits. Back-to-back stores and DMEM↔APB/VRAM/default transitions shall produce exactly one correctly addressed/lane-qualified write per accepted successful store and none for an unaccepted, cancelled or rejected store. Include first/final ERROR, partial-store RAW merge and recovery. These checks remain pending; a specification update or a saved-graph edge cut does not establish RTL correctness, whole-SoC SCC absence or fitted timing closure.
+
+### 7.3 Future Shared-Buffer Interface (Non-Normative)
+
+Future CPU/DMA sharing would need master-specific request ownership, arbitration and captured address/data/strobes, including pairing independently accepted address/data channels and WSTRB or equivalent lane intent. CPU `mem_fault_now` is useful for its own exception/request cancellation; it must not gate shared BRAM WEN/byte strobes or another master's accepted write. Permissions, same-address ordering, collision/bypass, visibility and completion require a separately reviewed interface; see [future memory considerations](02_memory_subsystem.md#18-future-shared-dmem-buffer-considerations-non-normative). No AXI/DMA implementation, address allocation, fence/coherency change or frozen future design is authorized by this note.
 
 ## 8. Load Return Path
 

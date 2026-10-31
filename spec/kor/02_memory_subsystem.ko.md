@@ -6,6 +6,8 @@
 >
 > **상위 명세:** `soc_architecture.md`, `memory_map.md`.
 
+> **Store payload/mask 계약 상태:** 아래 응답 독립성은 승인된 A2 계약이며 구현과 검증은 미완료이다. 이 명세 갱신만으로 기존 RTL이 A2를 준수한다고 표현해서는 안 된다. 승인된 data-bus fault 계약으로 대체된 이전 구현 관찰은 역사적 기록으로 유지한다.
+
 ## 1. 목적
 
 이 문서는 address-map보다 한 단계 아래 수준에서 baseline SoC의 memory subsystem을 정의한다. CPU-local instruction memory, AHB-side data memory, load/store byte-lane 처리, synchronous BRAM timing, read-after-write bypass, firmware image 초기화, reset 시 memory semantics를 규정한다.
@@ -175,6 +177,14 @@ Cycle N+1 data phase:
 
 현재 DMEM slave의 `HRESP`는 항상 OKAY이다. Unmapped region error 정책은 `ahb_fabric.md`, `memory_map.md`에서 정의한다.
 
+### 6.1 BRAM Edge에서 수락된 Store의 소유권
+
+실제 DMEM 쓰기는 수락된 합법적인 store data phase에 속해야 한다. 주소 phase가 전진하는 edge(`HREADY_IN=1`)에서 유효한 `HSEL`/`HTRANS`와 `HWRITE`가 등록된 `addr_reg`, `write_en_reg`를 설정하며, 유효한 선택 transfer가 없으면 다음 쓰기 권한을 해제한다. Bus wait 동안 이 register들은 유지된다. BRAM write edge는 **edge 직전**의 등록된 주소/`write_en_reg`와 동일 store에 대응하는 live MEM-stage `HWDATA`, `byteena_a`를 사용한다. 같은 edge의 register 갱신은 다음 트랜잭션에만 적용된다.
+
+0이 아닌 데이터나 byte-lane 의도만으로 쓰기를 허가해서는 안 된다. 미수락·취소·거부된 store는 메모리·주변장치 부작용을 발생시키지 않아야 한다. Fabric/default ERROR와 APB/VRAM 거부는 DMEM의 고정 OKAY 응답과 별개이며, 소유 fabric/slave는 잘못된 store의 부작용이 commit되기 전에 이를 거부해야 한다. ERROR에서 HWDATA를 0으로 만드는 것은 요구사항이 아니며 이 수락 규칙을 대체하지 않는다.
+
+현재 single-master 통합에서는 등록된 DMEM 쓰기 권한과 fabric의 DMEM data-phase 소유자가 함께 전진한다. 다른 slave의 stall 중 제시된 DMEM 주소는 아직 수락되지 않았다. 최종 ERROR는 다음 주소 phase를 취소한다. `write_en_reg`는 등록된 DMEM 권한이며 현재 HSEL의 조합 복사본이 아니다. 이 계약은 BRAM wren에 global-HREADY AND gate나 새로운 DMEM wait state를 추가하지 않는다.
+
 ## 7. Store Data Alignment 및 Byte Enable
 
 CPU `StoreAligner`가 32-bit write data와 4-bit write mask를 생성한다. DMEM slave는 이 write mask를 project-specific sideband로 BRAM byte-enable input까지 전달한다.
@@ -202,6 +212,14 @@ CPU `StoreAligner`가 32-bit write data와 4-bit write mask를 생성한다. DME
 | `SW` | `0` | `1111` | source word 그대로 사용 |
 
 Misaligned `SH`, `SW`에 대해서 active StoreAligner는 zero write mask를 만든다. 하지만 architectural handling은 CPU exception path의 synchronous misaligned-store trap이다. Zero mask는 defensive implementation behavior이며 trap contract를 대체하지 않는다.
+
+### 7.3 응답 독립적인 Payload와 Lane 의도
+
+Aligned store data와 `CUSTOM_WRITE_MASK`는 모두 동일 MEM store의 적격성 `Q = MEM_valid && MEM_memory_write && !MEM_exc_valid`로 생성하며 최종 `HRESP`/`mem_fault_now`와 독립적이어야 한다. Mask에 `!mem_fault_now`를 AND해서는 안 된다. Custom mask는 DMEM-local 비표준 byte-lane sideband이며 transaction acceptance나 범용 AHB/AXI 쓰기 권한이 아니다. APB와 VRAM은 이를 소비하지 않는다.
+
+Stall 및 연속 SB/SH/SW transfer에서도 주소·payload·mask는 동일한 수락 store에 대응해야 한다. 부분 쓰기는 선택되지 않은 byte를 보존해야 한다. RAW bypass는 적격 edge에서 동일 store의 데이터·mask·hazard indication을 capture하고, 이 등록된 값과 BRAM 데이터를 byte 단위로 merge해야 한다. 이전 store의 mask나 다음 EX 주소로 현재 쓰기를 qualify해서는 안 된다. 기존 lane encoding, zero-wait DMEM timing, deterministic same-word bypass는 유지한다.
+
+Acceptance에는 실제 write-edge 주소·데이터·lane, 성공 store의 exactly-once 소유권, 거부·취소 transfer의 zero write, 연속 lane 변경, partial RAW merge, DMEM과 APB/VRAM/default 사이의 전환 및 wait와 두 ERROR phase를 확인해야 한다. 구조 검사는 sequential/blackbox 경계를 명시하고 response-to-data와 response-to-mask 의존성을 포함해야 한다. 이는 미검증 A2 의무이며 검증 완료 주장이 아니다.
 
 ## 8. Load Extraction 및 Extension
 
@@ -356,7 +374,7 @@ Startup code는 다음 순서로 C runtime semantics를 만든다.
 
 다음은 현재 implementation에서 관찰되는 세부사항이며 specification review 없이 일반화하면 안 된다.
 
-1. **DMEM coarse decode alias** — top-level selection이 canonical 32 KiB보다 넓다. `memory_map.md`의 canonical range만 지원한다.
+1. **역사적 DMEM coarse decode alias** — cleanup 전 top-level selection은 canonical 32 KiB보다 넓었다. 현재 접근에는 `memory_map.md`, `ahb_fabric.md`의 승인된 canonical-range/error 계약이 적용되며, 이 역사적 관찰은 alias 접근을 허용하지 않는다.
 2. **Custom DMEM write-mask sideband** — byte enable이 standard AHB signal만으로 복원되지 않고 별도 project-specific sideband로 전달된다.
 3. **Vendor BRAM collision mode** — mixed-port read-during-write가 `DONT_CARE`이므로 deterministic same-word store-to-load behavior는 explicit bypass logic에 의존한다.
 4. **IMEM physical placement** — ROM instance가 현재 `IF_ID_Register` 안에 있지만 future hierarchy requirement는 아니다.
@@ -411,3 +429,9 @@ Baseline-compatible memory implementation은 최소 다음 항목을 검증해�
 - `firmware_contract.md` — linker/startup/image generation contract.
 
 문서가 DRAFT인 동안 active RTL과 충돌이 발견되면 해당 충돌을 명시적으로 검토해야 한다. Baseline 승인 이후에는 RTL 동작으로 memory behavior를 암묵적으로 재정의하지 말고 승인된 specification에 맞춰 implementation을 변경해야 한다.
+
+## 18. 향후 Shared-DMEM Buffer 고려사항 (비규범적)
+
+AXI/DMA 공유는 architecture proposal일 뿐이며 주소 배정, DMA/AXI 구현 또는 동결된 미래 설계는 승인되지 않았다. 가능한 shared-buffer interface는 독립적인 CPU/DMA request, master-owner arbitration, capture된 transaction identity/주소/데이터/byte strobe(WSTRB 또는 동등 신호), 합법적인 precommit acceptance를 사용한다. CPU `mem_fault_now`는 CPU-local이며 shared BRAM WEN/byte strobe나 다른 master의 트랜잭션을 qualify해서는 안 된다.
+
+향후 설계 검토에서는 주소·데이터 channel pairing, 활성 byte/beat별 권한 및 partition 경계, producer-consumer 소유권, 부분 쓰기, 동일 주소 arbitration, read-during-write collision/bypass, ordering과 visibility를 결정해야 한다. Completion은 소유 트랜잭션의 commit/visibility 시점을 기준으로 정의하는 방향을 검토한다. 나중의 error는 되돌릴 수 없는 쓰기를 취소하지 못하므로 burst partial-completion과 atomic buffering 중 명시적인 정책이 필요하다. 정의되지 않은 BRAM collision이나 CPU 전용 bypass에 의존한다는 의미는 아니다. Cache/coherency와 software synchronization은 별도 계약이 필요하며 현재 no-DMA baseline과 FENCE 의미는 유지한다.

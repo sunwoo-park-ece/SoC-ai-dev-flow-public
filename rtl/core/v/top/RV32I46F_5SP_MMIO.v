@@ -566,7 +566,7 @@ module RV32I46F5SPMMIO(
 	 
     StoreAligner store_aligner (
     .memory_write            (MEM_valid && MEM_memory_write &&
-                              !MEM_exc_valid && !mem_fault_now),
+                              !MEM_exc_valid),
     .funct3                  (MEM_funct3),
     .register_file_read_data (MEM_read_data2), // Forwarding 된 데이터 적용!
     .address                 (MEM_alu_result[1:0]),

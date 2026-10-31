@@ -8,6 +8,8 @@
 
 > **Phase 4A-3A 읽기 규칙:** 앞의 `HSIZE` 미구동·`HRESP` 미소비를 ‘현재 baseline’으로 서술한 부분은 cleanup 전 기록이다. 아래 Phase 4A-3A data-bus fault 계약이 현행 구현 범위다. 기타 CPU cleanup은 열린 상태다.
 
+> **Store payload/mask 계약 상태:** §7.1은 승인된 A2 계약이며 구현과 검증은 미완료이다. 기존 응답 종속 StoreAligner 동작은 A2 준수 근거가 아니다. 역사적 관찰은 더 새로운 동결 fault 계약을 대체하지 않는다.
+
 ## 1. 목적
 
 이 문서는 활성 RV32I 5-stage CPU와 SoC data interconnect 사이의 architectural boundary를 정의한다. CPU pipeline state가 구현된 AHB-style bus signal에 어떻게 매핑되는지, load/store data가 어떻게 전달되는지, bus back-pressure가 pipeline을 어떻게 정지시키는지, baseline 구현이 어떤 project-specific sideband signal에 의존하는지를 규정한다.
@@ -171,6 +173,22 @@ Project-specific lane path:
 Custom mask는 DMEM BRAM wrapper가 소비한다. 이는 **AMBA AHB signal이 아니며**, portable bus semantics로 간주하면 안 된다.
 
 SB/SH/SW의 구체적인 lane formation은 `memory_subsystem.md`에서 정의한다.
+
+### 7.1 승인된 A2 Payload/Mask 계약
+
+EX는 bus 주소·제어 phase를 소유하고, 이에 대응하는 MEM stage는 HWDATA와 4-bit byte-lane 의도를 모두 소유한다. StoreAligner 적격성은 `Q = MEM_valid && MEM_memory_write && !MEM_exc_valid`여야 한다. Aligned data는 HWDATA에, mask는 `CUSTOM_WRITE_MASK`에 직접 연결해야 한다. **두 출력 모두 최종 HRESP/mem_fault_now와 독립적이어야 하며 mask에 `& !mem_fault_now` qualification을 추가해서는 안 된다.** MEM funct3, forwarding된 source data, address offset은 모두 동일 store에 속해야 한다. 트랜잭션 정체 중에는 소유 payload와 lane 의도가 안정적으로 유지되어야 한다.
+
+`CUSTOM_WRITE_MASK`는 master가 그대로 전달하는 DMEM-local 비표준 lane sideband이다. 범용 AHB/AXI 쓰기 권한이나 수락 신호가 아니며 APB/VRAM은 이를 소비하지 않는다. 0이 아닌 payload/mask가 독립적으로 실제 쓰기를 발생시켜서는 안 된다. DMEM은 수락된 data-phase 소유자의 저장된 주소 및 등록된 `write_en_reg`와, BRAM edge에서 동일 소유자에 대응하는 MEM 데이터·byte enable로 commit한다. [Memory ownership](02_memory_subsystem.ko.md#61-bram-edge에서-수락된-store의-소유권)을 참조한다. 현재 EX HADDR는 이미 다음 트랜잭션에 속할 수 있으므로 현재 MEM mask와 짝지어서는 안 된다.
+
+CPU의 최종 ERROR 예외 처리와 더 어린 request 취소는 계속 응답에 의해 qualify한다. 최종 ERROR에서 HWDATA나 mask를 0으로 만들 필요는 없다. Slave는 잘못된 트랜잭션의 부작용이 commit되기 전에 이를 거부해야 하며 응답 독립적인 데이터 생성이 failed-store-zero-side-effect 요구를 완화하지 않는다. DMEM zero-wait/OKAY, fabric/default ERROR, slave acceptance, 모든 lane encoding, 부분 쓰기, 등록된 RAW bypass를 유지한다. 이 계약은 APB latency, global-HREADY write gate, 범용 bus compliance 주장을 추가하지 않는다.
+
+### 7.2 A2 Acceptance와 미검증 의무
+
+Acceptance에는 실제 elaborated/optimized design에서 sequential/blackbox 경계를 명시한 두 출력의 응답 독립성, 실제 DMEM write-edge 주소·데이터·lane pairing, wait 중 payload/lane 안정성 검사가 필요하다. 연속 store와 DMEM↔APB/VRAM/default 전환에서 수락된 성공 store마다 정확한 주소·lane의 쓰기가 한 번 발생하고, 미수락·취소·거부 store에서는 쓰기가 없어야 한다. 첫/최종 ERROR, partial-store RAW merge, recovery를 포함한다. 이 검사는 미완료이며 명세 갱신이나 저장된 graph의 edge 삭제는 RTL 정확성, whole-SoC SCC 부재 또는 fitted timing closure를 입증하지 않는다.
+
+### 7.3 향후 Shared-Buffer Interface (비규범적)
+
+향후 CPU/DMA 공유에는 master별 request 소유권, arbitration, capture된 주소·데이터·strobe가 필요하다. 여기에는 독립적으로 수락되는 주소·데이터 channel의 pairing과 WSTRB 또는 동등 lane 의도가 포함된다. CPU `mem_fault_now`는 자신의 예외·request 취소에 유용하지만 shared BRAM WEN/byte strobe나 다른 master의 수락된 쓰기를 gate해서는 안 된다. 권한, 동일 주소 ordering, collision/bypass, visibility, completion은 별도 검토 interface가 필요하다. [향후 memory 고려사항](02_memory_subsystem.ko.md#18-향후-shared-dmem-buffer-고려사항-비규범적)을 참조한다. 이 note는 AXI/DMA 구현, 주소 배정, fence/coherency 변경 또는 동결된 미래 설계를 승인하지 않는다.
 
 ## 8. Load Return Path
 

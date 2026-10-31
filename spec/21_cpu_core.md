@@ -10,6 +10,8 @@
 
 > **Phase 4A-3A reading rule:** Earlier missing-access-fault descriptions reconstruct the pre-cleanup CPU. The final access-fault section records the verified load/store bus-fault sub-scope; it does not close general precise retirement or other `TRAP-003` dependencies.
 
+> **Store payload/mask contract status:** Section 20.1 specifies the approved A2 contract. Its RTL implementation and verification are pending; historical verified fault behavior does not establish A2 compliance or timing closure.
+
 ## 1. Purpose and Scope
 
 This document defines the implemented microarchitecture of the active `RV32I46F5SPMMIO` CPU used by the validated FPGA baseline and separates that baseline from approved cleanup behavior.
@@ -747,6 +749,22 @@ Bus-interface quirks already owned by `cpu_interface.md` include:
 - CPU does not consume `HRESP`,
 - project-specific custom store mask,
 - bus backpressure converted directly into full-pipeline stall.
+
+### 20.1 Approved A2 CPU/Slave Responsibilities
+
+The CPU shall produce both aligned store payload and byte-lane intent from the matching MEM-stage store using `Q = MEM_valid && MEM_memory_write && !MEM_exc_valid`. StoreAligner HWDATA and `CUSTOM_WRITE_MASK` shall be independent of final `HRESP`/`mem_fault_now`, with direct output connections and no final-fault AND on the mask. EX owns address/control; MEM owns matching data/lanes, which shall remain paired and stable during a stall. Detailed lane and physical-edge ownership contracts are in [memory subsystem](02_memory_subsystem.md#73-response-independent-payload-and-lane-intent) and [CPU interface](03_cpu_interface.md#71-approved-a2-payloadmask-contract).
+
+Payload and lane intent are not write permission. The owning slave/fabric shall validate and accept its transaction and reject an invalid store before committing a memory/peripheral side effect. DMEM uses its registered data-phase write authority and matching MEM data/byte enables; APB/VRAM side effects remain locally qualified and do not consume the DMEM custom mask. The CPU shall consume final ERROR (`HRESP=2'b01`, `HREADY=1`) for the faulting MEM transaction as load/store access fault `mcause=5`/`mcause=7`, with `mepc` equal to that instruction's PC. A failed load shall not write a GPR, a failed store shall have no side effect, and neither shall retire successfully. Older successful WB ownership shall be preserved; younger requests/side effects shall be cancelled.
+
+Pre-bus misalignment detection/prevention and causes 4/6 retain priority over access faults. Existing CPU final-fault writeback suppression, exception/redirect ordering and request cancellation remain response-qualified; only StoreAligner payload/mask formation is response-independent. Final ERROR need not zero HWDATA or byte-lane intent. No new pipeline stage, slave latency, interrupt behavior or retirement policy is introduced.
+
+Acceptance remains pending for actual post-change response-to-HWDATA/mask and SCC checks, transaction/physical-write-edge ownership across waits and cross-slave ERROR, partial RAW/lane preservation, precise cause/PC/retirement, older-WB preservation, younger cancellation and reset/recovery. Existing fault evidence is not post-A2 verification and does not prove fitted timing closure.
+
+### 20.2 Future CPU/DMA Commit Ownership (Non-Normative)
+
+Future shared-DMEM design would separate CPU and DMA requests and retain each master's identity, accepted address/data/strobes, permission and response ownership through arbitration and commit. CPU `mem_fault_now` may govern its own exception/request cancellation, but must not qualify global/shared BRAM WEN/byte strobes or another master's transaction. A shared controller would validate before irreversible commit and define completion against transaction-local commit/visibility; a later response error cannot roll back an already committed write.
+
+Address/data/WSTRB pairing, partial/same-address writes, collision/bypass, producer-consumer permissions, ordering/visibility and any cache/coherency synchronization need a separate architecture contract; see [future memory considerations](02_memory_subsystem.md#18-future-shared-dmem-buffer-considerations-non-normative). This is an unapproved design proposal, not an implemented or frozen target. No address allocation, AXI/DMA, cache, FENCE/FENCE.I or PLIC change is authorized. The current cacheless/no-DMA FENCE-family legal-no-op contract remains unchanged and shall not be assumed to prove future DMA ordering.
 
 ---
 
