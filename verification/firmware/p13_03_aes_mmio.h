@@ -1,0 +1,8 @@
+#ifndef P13_03_AES_MMIO_H
+#define P13_03_AES_MMIO_H
+/* Test-only forced include; never included by production firmware. */
+#include <stdint.h>
+#define SOC_MMIO_H
+uint32_t mmio_read32(uint32_t addr);
+void mmio_write32(uint32_t addr, uint32_t value);
+#endif

@@ -48,6 +48,9 @@
 #define HEX_RAW_LOW          0x08u
 #define HEX_RAW_HIGH         0x0cu
 
+#define AES_VERSION          0x08u
+#define AES_VERSION_V2       0x322e3030u
+#define AES_HDR0             0x80u
 #define AES_CTRL             0x0cu
 #define AES_STATUS           0x10u
 #define AES_KEY0             0x20u
