@@ -629,6 +629,8 @@ DP는 RTL/top/QSF가 명시적으로 확장되기 전까지 unavailable이다.
 
 ## 29. Target AES-GCM
 
+> **P13-01 상세:** Owner 승인 D01~D12 Target FW API/STATUS Cause/Finite Poll/Zeroize 계약은 아래 §40과 [AES 명세](../14_aes_gcm.md) §25를 참조한다. 현재 동작은 §15에 유지한다.
+
 Target driver는 다음을 직접 enforce한다.
 
 ```text
@@ -865,4 +867,61 @@ ADC snapshot lifecycle은 CAPTURE-only다. 새 LIVE가 있으면 atomic HOLD 교
 FW는 raw HOLD + current center/deadzone으로 독립 `joystick_policy_eval()` 계열 함수를 구현하여 HW `JOY_STATUS`의 golden/reference oracle로 사용한다. Calibration write는 HOLD raw가 그대로여도 HW/FW direction 결과를 즉시 바꿀 수 있다.
 
 물리적 축 극성 및 방향 매핑(CH1=X, CH2=Y; right/left, up/down)은 C4-C 실기 보드 특성화를 통해 검증 완료되었다.
+
+## 40. P13-01 Approved AES-GCM Firmware Target Contract — 구현 전
+
+> **Lifecycle:** Owner 승인 D01~D12 Target ABI. 현재 `aes_gcm.c/.h` 구현이나 검증 완료를 주장하지 않는다. §15는 Current Baseline이고 §29는 Target 요약이다. 이 절은 상세 Firmware Target API를 소유한다. Hardware 계약은 [AES Spec](../14_aes_gcm.md) §25, 영어 FW 정본은 [19_firmware_contract.md](../19_firmware_contract.md). Target Driver는 신규 Status/Zeroize를 사용하기 전에 `VERSION` ASCII `"2.00"`을 확인하며, 기존 `"1.00"`을 v2 호환으로 취급하지 않는다.
+
+### 40.1 Owner / Input / Packing (D01, D03, D09, D12)
+
+- 신뢰 가능한 AES Driver는 단일 직렬화 Owner를 가져야 한다. Application/ISR의 동시 Raw MMIO는 금지. BUSY 중 KEY/IV/LEN/PAYLOAD_IN/TAG_IN 변경 또는 START 재요청 금지. HW는 BUSY Write를 `BUSY_WRITE_ERR`로 거부하지만 FW가 오류를 유발하지 않는 것이 원칙이다.
+- **최초 MMIO 전에** `uint32_t len` 전체(`0<=len<=16`), Pointer/Buffer Size/Mode 및 순수 인자를 검증한다. `len & 0xFFFF` 형태의 절단 금지. Invalid Argument는 `INVALID_ARG`, Hardware Side Effect 0. Byte Pack은 CPU 메모리 Endianness와 별개로 `w=(b0<<24)|(b1<<16)|(b2<<8)|b3`, Offset 증가 순 MSW-first. LEN 밖의 Tail Byte는 인증된 Payload가 아니다.
+- Nonce/IV Uniqueness(동일 Key 아래), Sequence 할당·영속성, Replay Defense는 Firmware/Protocol 책임이다. HW Auto-IV와 Replay State는 없다.
+
+### 40.2 FW Result와 STATUS 진단 (D03, D08, D11)
+
+정상 Transaction API는 `OK`, `INVALID_ARG`, `BUSY`, `TIMEOUT`, `HW_LEN_ERROR`, `AUTH_FAIL`, `HW_CORE_ERROR`, `PROGRAM_ERROR`, `RECOVERY_REQUIRED`를 의미상 구분한다. 실제 C Enum은 Prefix를 적용할 수 있지만 의미 구분을 유지한다. 완료된 STATUS Snapshot과 Poll Count를 사용자 Data와 별도로 제공한다. STATUS Summary는 `ERROR[3]=OP_ERROR[4]|PROG_ERROR[5]`이고 `LEN_ERROR[6]`, `AUTH_FAIL[7]`, `CORE_OVERFLOW[8]`, `BUSY_WRITE_ERR[9]`, `CTRL_CMD_ERR[10]`, `BUSY_START_ERR[11]`, `ZEROIZE_BUSY_ERR[12]`, `ZEROIZE_ACTIVE[13]`을 참조한다. `DONE`이나 `TAG_OK` 단독으로 성공 판정 금지.
+
+정상 Caller 성공 조건:
+
+```c
+DONE && TAG_OK && !ERROR
+```
+
+Preflight Busy는 START 없이 `BUSY` 반환. `TAG_OK=1`이어도 PROG_ERROR가 있으면 `PROGRAM_ERROR`로 Fail-closed. 복수 원인이 있으면 전체 STATUS를 보존하면서 결정적 Primary Result를 반환한다. 완료된 연산에서는 `HW_CORE_ERROR` > `AUTH_FAIL` > `HW_LEN_ERROR` > `PROGRAM_ERROR` 순 우선 적용을 권장하며, `TIMEOUT`은 Budget 내 Terminal Status를 못 봤을 때만 사용한다. 미인식 ERROR도 HW/Unknown Error로 실패 처리하며 성공으로 변환하지 않는다.
+
+### 40.3 Bounded Transaction과 Output Gate (D02, D04, D07, D11)
+
+1. Pure Argument 및 Poll Budget 사전 검증. 올바른 인자이지만 `poll_budget==0`이면 MMIO 0회, START 없음, 즉시 `TIMEOUT`.
+2. STATUS로 IDLE 및 Non-zeroize 상태 확인. BUSY면 현재 연산을 유지하고 `BUSY` 반환.
+3. IDLE에서 `CTRL=0x4` CLR_STATUS로 모든 Sticky Cause/DONE/TAG_OK 제거, Direction/Data 유지.
+4. KEY/NONCE_DIR/SEQ/LEN/PAYLOAD_IN/(Decrypt TAG_IN) 설정 후 STATUS에서 Programming Cause 검사. BUSY 중 덮어쓰기 금지.
+5. `CTRL=0x1` Encrypt 또는 `0x3` Decrypt START를 정확히 한 번 사용. START는 OP Cause/DONE/TAG_OK는 초기화하지만 과거 PROG Cause는 숨기지 않는다.
+6. `poll_budget=N>0`에서 **완료된 STATUS MMIO Read 최대 N회**. DONE 시 상세 Error를 해석하고 `DONE&&TAG_OK&&!ERROR`에서만 Caller Output 반영. 실패 시 Caller Output은 0으로 유지. LEN 유효 Byte만 복사하고 정상 Encrypt의 Tag는 전체 16 Byte 제공. Wrong Tag는 Raw PAYLOAD_OUT이 비어 있지 않아도 Caller에게 Plaintext 비공개.
+7. Budget 고갈 시 `TIMEOUT`, 마지막 STATUS/Poll Count 기록, Recovery-required 상태로 관리. 자동 재START, BUSY ZEROIZE, 동일 Encrypt IV 재사용 금지. MMIO Read 자체의 무한 HREADY Stall/CPU Trap을 Software Poll Budget으로 제한할 수 없음.
+
+기존 Unbounded `aes_gcm_wait_done()`과 인증 없이 읽는 `aes_gcm_get_payload_words()`는 Legacy/Debug 전용이다. 정상 API로 직접 사용 금지. 과거 KAT의 12회 STATUS Poll은 PCLK 49~50 Cycle 보장이나 안전한 Default Budget을 뜻하지 않는다. P13-04에서 Latency와 Poll Margin을 측정한다.
+
+### 40.4 Zeroize API / Recovery (D05, D06, D08)
+
+명시적인 Bounded Zeroize Helper는 IDLE 확인 후 `CTRL=0x8`을 실행한다. BUSY 중 ZEROIZE는 Abort가 아니며 HW는 `ZEROIZE_BUSY_ERR`를 기록하고 Crypto/Key를 보존한다. 정상 접수된 ZEROIZE는 `BUSY/ZEROIZE_ACTIVE` 해제까지 별도 Finite Budget으로 Poll하고 종료 후 KEY/IV/SEQ/LEN/PAYLOAD_IN/TAG_IN/PAYLOAD_OUT/TAG_OUT/HDR Readback=0 확인을 요구한다. BUSY, Poll Budget 고갈, 예상하지 못한 STATUS Cause, 성공을 구분해야 한다. 물리 Key Erasure나 Core 모든 Flop Reset을 증명했다고 표현하지 않는다.
+
+Core Overflow는 SW BUSY ZEROIZE가 아닌 **내부 Fatal Fault Termination**이며 자동 재사용을 금지한다. Core Hang으로 BUSY가 지속되면 SW Zeroize 불가하다. 별도의 System Reset/Recovery는 이 API의 암묵적 기능이 아니다.
+
+### 40.5 APB 및 통합 한계 (D07, D10, D12)
+
+Canonical 32-bit Aligned Slot4 주소만 사용한다. Bridge는 Invalid Offset/Size/Alignment를 AES PSEL 전에 차단하고 Two-cycle AHB ERROR로 종료한다. 하지만 유효 Offset의 Wrong-direction 접근까지 Fault로 보장하지 않는다. 현재 Wrapper는 PSLVERR 없이 Partial Direct-APB Alias가 남는다. 승인된 Target은 Wrapper에서 사용 가능한 전체 Address Width의 정확한 Local Offset Decode와 Reserved/Noncanonical Direct-APB RAZ/WI 및 부작용 없음을 요구하며 `+0x100`/High-bit Alias를 제거하고 AES PSLVERR 없음을 유지한다. Local 정책은 잘못된 CPU 접근을 성공시키지 않으며 정규 RO/WO Wrong-direction 동작은 별개로 변경하지 않는다. 인증 전 Raw MMIO Plaintext 접근도 가능하다. Trusted FW Driver가 직렬화해서 접근할 때만 Software Authentication Gate를 보장한다. IRQ/DMA/PLIC/Health AES Provider 활성화는 Deferred이며 SoC Health AES는 `EXCLUDED_PENDING_CLEANUP` 유지.
+
+### 40.6 AC 및 Lifecycle
+
+| AC ID | Req | 검증 조건 | 현재 |
+|---|---|---|---|
+| `FW-AES-AC-01` | FW-010, D01/D11 | 32-bit LEN/Pointer 사전 검증, Invalid Argument MMIO 부작용 없음 | OPEN |
+| `FW-AES-AC-02` | FW-010, D11 | START 후 완료된 STATUS Read 최대 N회, DONE 시 종료; Zero-budget 0 MMIO; Bus Hang과 SW Timeout 구분 | OPEN |
+| `FW-AES-AC-03` | AES-004, D07 | Wrong Tag/Error/Timeout Caller Plaintext 비공개 | OPEN |
+| `FW-AES-AC-04` | AES-005/006, D03/D05/D06 | BUSY Write 억제, Cause 해석, Zeroize Readback | OPEN |
+| `FW-AES-AC-05` | AES-003, D09/D12 | Word/Byte Pack, Partial Output, IV Unique/Replay 책임 | OPEN |
+| `FW-AES-AC-06` | FW-010, D08 | Cause별 결과·Diagnostics, PROG_ERROR 상태 정상 성공 금지 | OPEN |
+
+이는 Target AC이며 Evidence가 아니다. AES-001은 기존 Actual-core 6-case KAT 범위에서만 VERIFIED. AES-002~007 및 FW-010은 상태 승격하지 않는다. P13-03 FW 구현, P13-04 독립 DV, P13-05 CPU E2E는 후속 Gate다.
 

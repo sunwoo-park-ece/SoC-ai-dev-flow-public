@@ -1,8 +1,8 @@
 # Baseline SoC AES-GCM Accelerator Specification — 한국어 Companion
 
-> **상태:** DRAFT — active FPGA baseline을 기준으로 복원한 문서이며 Developer + ChatGPT Chat의 최종 리뷰 대상이다.
+> **상태:** 현재 Baseline 기록 + Owner 승인 P13-01 TARGET (§24), 구현 및 Acceptance 전. 기존 Baseline 절은 관측값이며 Target 구현 완료를 의미하지 않는다.
 >
-> **정본 언어:** 영어. 이 문서와 `spec/14_aes_gcm.md`가 충돌할 경우 영문 canonical specification이 authoritative source이다.
+> **정본 언어:** 영어. 이 문서와 `../14_aes_gcm.md`가 충돌할 경우 영문 canonical specification이 authoritative source이다.
 >
 > **상위 명세:** `soc_architecture.md`, `memory_map.md`, `apb_subsystem.md`, `reset_clock.md`, `interrupt_architecture.md`.
 
@@ -381,9 +381,9 @@ Wrapper는 `PADDR[7:2]`만 decode하기 때문에 register map이 0x100-byte 주
 
 이 alias는 implementation artifact이며 canonical address가 아니다.
 
-Unsupported offset read는 0이고 write는 무시된다.
+현재 Direct-APB Wrapper-local Unsupported Decoded Offset은 Read 0/Write 무시이나 Partial Decode로 등록된 Register에 Alias되는 경우는 제외한다. 이는 CPU Bridge가 비정규 Slot4 Offset을 차단하는 정책을 무효화하지 않는다.
 
-현재 APB path에는 PSLVERR/AHB bus-fault propagation도 없다.
+AES Wrapper 자체에는 `PSLVERR`가 없고 Crypto/Program 오류는 STATUS로만 전달한다. 다만 현재 CPU→AHB/APB Bridge는 비정규 Slot4 Offset/Size를 AES PSEL 전에 차단하여 Two-cycle AHB ERROR를 반환한다. Direct-APB Wrapper Alias와 Direction 제한은 남는다.
 
 Canonical firmware access는 aligned 32-bit MMIO를 사용한다.
 
@@ -451,7 +451,7 @@ Expected crypto value는 RTL 자체가 아니라 independent trusted implementat
 | Medium | BUSY 중 input write block/semantics 정의 | mid-operation ambiguity |
 | Medium | CLR_STATUS와 ENC_DEC retained state 분리 | 현재 clear write도 direction readback 변경 |
 | Medium | bounded firmware timeout | 무한 polling 방지 |
-| Medium | register alias 제거 | current partial decode |
+| Medium | AES Local Exact Decode 구현/검증 | CPU Bridge의 비정규 주소/크기 차단을 유지하고 승인된 Target은 Wrapper Alias를 제거하며 Direction 정책은 별도로 유지 |
 | Medium | future PLIC AES interrupt contract | baseline polling-only |
 | Medium | future DMA/streaming 별도 architecture | current one-block APB window |
 
@@ -492,3 +492,108 @@ security/isolation
 15. Key는 readable MMIO state이며 secure storage가 아니다.
 16. VHDL crypto core는 third-party Apache-2.0-derived이고 APB/SoC integration은 project-local이다.
 17. Historical reference-model test는 fresh active-core KAT signoff를 대체하지 않는다.
+
+## 24. P13-01 Approved Target Contract — 구현 및 Acceptance 전
+
+> **Lifecycle:** Owner가 승인한 D01~D12 Architecture와 상세 ABI를 반영한 Target 명세이다. **현재 RTL/FW가 이미 구현했다는 뜻이 아니다.** 위의 기존 Baseline 절은 현재/레거시 동작을 기록하며, 이 절은 구현 후 적용할 Target Contract다. 이 Target 명세만으로 Tracker, AES SoC Health, VERIFIED 상태를 승격하지 않는다.
+> **Scope boundary:** APB, Memory Map 또는 Tracker의 변경은 별도 범위 결정을 필요로 한다.
+
+### 24.1 인터페이스와 데이터 포맷 (D01, D04, D05, D09)
+
+- `AES_GCM_BASE=0x4004_0000`, `PSEL[4]`, aligned 32-bit MMIO, `PREADY=1`, AES-128, Payload 0~16 byte, PCLK/polling-only 유지. AES IRQ/DMA/Replay Engine 없음.
+- `+0x3C LEN`은 전체 32-bit R/W 저장·Readback. Firmware에서 truncation/masking 금지. START 시 전체 LEN을 `<=16`으로 검증하고, 유효한 LEN에만 AAD의 하위 16 bit 사용.
+- Target `+0x08 VERSION`은 ASCII `"2.00"` (`0x322E3030`). 기존 현재 버전 `"1.00"`과 구분.
+- KEY/IV/SEQ/PAYLOAD/TAG/HDR는 Offset 증가 순 MSW-first. Byte Array→Word는 `w=(b0<<24)|(b1<<16)|(b2<<8)|b3` 형태의 Word 값 Big-endian Pack으로 CPU byte-address endianness와 별개다.
+- IV는 `NONCE_DIR || SEQ_HI || SEQ_LO` 96 bit, AAD는 `16'hA55A || NONCE_DIR || SEQ_HI || SEQ_LO || LEN[15:0]` 128 bit. `LEN=n`이면 가장 높은 n byte만 valid (`LEN=7 -> bval=16'hFE00`), LEN 밖의 Tail Byte는 인증된 결과가 아니며 Caller로 복사하지 않는다.
+
+### 24.2 CTRL `+0x0C` — 배타적 명령 (D04~D06)
+
+| Bit | Name | Target 의미 |
+|---|---|---|
+| 0 | `START` | W1P; IDLE에서 Encrypt/Decrypt 시작, Read 0. |
+| 1 | `ENC_DEC` | START 인자(0 Encrypt, 1 Decrypt). 마지막 **IDLE에서 수락된 유효 Encoding START**의 방향 Readback, Invalid LEN Terminal Reject 포함. CLR_STATUS는 보존, Reset/Zeroize는 0. |
+| 2 | `CLR_STATUS` | IDLE 전용 W1P. DONE/TAG_OK/모든 Operation·Programming Cause 삭제; 방향/입출력/Key/Core 내용 유지. Read 0. |
+| 3 | `ZEROIZE` | IDLE 전용 W1P. 민감 상태 소거 + Core Reset Maintenance 시작. Read 0. |
+| 31:4 | Reserved | Read 0; Write-one은 `CTRL_CMD_ERR`. |
+
+허용되는 32-bit 값은 `0x0` No-op, `0x1` Encrypt START, `0x3` Decrypt START, `0x4` CLR_STATUS, `0x8` ZEROIZE뿐이다. `0x2`, 복합 Command(`0x5`, `0x9` 등), Reserved-bit 사용은 `CTRL_CMD_ERR`로 거부하고 Command/Direction/Data Side Effect가 없다. BUSY 중 명령은 24.4에 따라 거부한다. Invalid LEN START는 Encoding은 유효하므로 Direction Readback은 갱신한다.
+
+### 24.3 STATUS `+0x10` — Terminal / Error Cause (D02, D03, D08)
+
+| Bit | Name | Target 의미 |
+|---:|---|---|
+| 0 | `BUSY` | Crypto 또는 Zeroize Maintenance 중. 새 START 접수 불가. |
+| 1 | `DONE` | 마지막 IDLE-accepted START의 Terminal Outcome. **성공 의미 아님**. ZEROIZE는 DONE 미설정. |
+| 2 | `TAG_OK` | 정상 Encrypt/Tag Match, PROG_ERROR가 있더라도 1일 수 있음. |
+| 3 | `ERROR` | `OP_ERROR \| PROG_ERROR`, 독립 Sticky 아님. |
+| 4 | `OP_ERROR` | `LEN_ERROR \| AUTH_FAIL \| CORE_OVERFLOW`. |
+| 5 | `PROG_ERROR` | `BUSY_WRITE_ERR \| CTRL_CMD_ERR \| BUSY_START_ERR \| ZEROIZE_BUSY_ERR`. |
+| 6 | `LEN_ERROR` | full-width LEN>16 START 거부. |
+| 7 | `AUTH_FAIL` | Decrypt Tag 불일치. |
+| 8 | `CORE_OVERFLOW` | Core ICB Overflow Terminal Fault. |
+| 9 | `BUSY_WRITE_ERR` | BUSY 중 Program Register Write 거부. |
+| 10 | `CTRL_CMD_ERR` | Malformed CTRL 또는 BUSY CLR_STATUS. |
+| 11 | `BUSY_START_ERR` | BUSY 중 유효 START 요청 거부. |
+| 12 | `ZEROIZE_BUSY_ERR` | BUSY 중 ZEROIZE 거부. |
+| 13 | `ZEROIZE_ACTIVE` | Zeroize Reset Sequence 진행 중. 이때 BUSY=1. |
+| 31:14 | Reserved | Read 0. |
+
+Operation Cause(LEN/AUTH/OVERFLOW)는 새 IDLE Accepted START, IDLE CLR_STATUS, Accepted ZEROIZE, Reset에서 Clear. Programming Cause(BUSY_WRITE/CTRL_CMD/BUSY_START/ZEROIZE_BUSY)는 **IDLE CLR_STATUS, Accepted ZEROIZE 또는 Reset에서만** Clear. 새 START에서 자동 Clear하지 않음. STATUS Read는 Side Effect 없음. `DONE/TAG_OK`는 새 Accepted START/CLR/ZEROIZE/Reset 시 Clear. 요약 비트는 원인 비트의 OR와 항상 일치. `DONE=1,TAG_OK=1,PROG_ERROR=1,ERROR=1` 가능하며 Trusted FW는 실패 반환.
+
+BUSY는 실제 새 START 접수가 가능한 시점까지 1을 유지해야 하며 Core Completion 직후 조기 BUSY=0으로 Back-to-back START를 놓쳐서는 안 된다. Zeroize 수행 중 BUSY=ZEROIZE_ACTIVE=1이고 DONE=0; 정상 완료 후 양 비트는 0이며 불법 접근이 없었다면 전체 STATUS는 0.
+
+### 24.4 Command 우선순위와 에러 동작 (D01~D04, D06, D08)
+
+1. System/APB Reset이 최우선. Software-visible 상태와 Core-control Epoch Reset. Reset으로 중단된 Bus Transaction은 정상 응답 보장 없음.
+2. ACTIVE Operation의 Core Overflow는 동시 Success/Tag Pulse보다 우선. `BUSY=0,DONE=1,TAG_OK=0,CORE_OVERFLOW=1` Terminal Failure이며 Late Pulse로 이전 Output이 재노출되면 안 됨. 이것은 **Software BUSY Zeroize 허용이 아니라 내부 Fatal Fault Handling**이다. VHDL Core Reset 시퀀스로 불가능하면 Hard STOP 및 Owner 재결정; 무한 BUSY를 정상 성공으로 인정하지 않음.
+3. IDLE ZEROIZE 수락은 24.5 수행.
+4. IDLE START 수락 시 이전 Operation Outcome/Cause 및 PAYLOAD_OUT/TAG_OUT Clear. Full LEN `<=16`이면 Crypto 진입/HDR 생성. 초과하면 Core Pulse 없이 `BUSY=0,DONE=1,TAG_OK=0,LEN_ERROR=1`, 이전 PAYLOAD_OUT/TAG_OUT/HDR를 0으로 Clear. Program Input은 진단용 유지.
+5. IDLE CLR_STATUS는 모든 DONE/TAG_OK/Cause만 Clear, Direction/Input/Output/Core 유지. 잔존 Output은 신뢰 유효성이 없음.
+6. BUSY 중 부적합 접근은 관련 Programming Cause만 기록하고 진행 중 연산/FSM/Tag Comparator/Direction/Output에 영향 없음. 유효 START -> BUSY_START_ERR, 유효 ZEROIZE -> ZEROIZE_BUSY_ERR, CLR_STATUS 또는 Malformed CTRL -> CTRL_CMD_ERR, KEY/IV/LEN/PAYLOAD_IN/TAG_IN Write -> BUSY_WRITE_ERR. `CTRL=0`은 No-op. 완료와 불법 Write가 동일 PCLK에서 겹치면 완료 상태와 Programming Cause를 모두 기록.
+
+BUSY 중 거부된 APB Write는 `PREADY=1`, `PSLVERR` 없이 OKAY로 완료되고 `PROG_ERROR`로만 보고한다. 총 16개 Program Word(KEY4/IV3/LEN1/PAYLOAD4/TAG4)는 BUSY에서 변경하지 않는다. 특히 Decrypt TAG_IN 비교값에 대한 Side Effect가 없어야 한다.
+
+### 24.5 Zeroize C 목표와 BUSY Reject (D05, D06)
+
+`CTRL=0x8` IDLE 수락 시 KEY, NONCE_DIR/SEQ/LEN, PAYLOAD_IN/TAG_IN, PAYLOAD_OUT/TAG_OUT, HDR, Wrapper-held Core-driving Secret/Control State, Direction/Status를 Clear하고 VHDL Core Reset을 적절히 Assert/Release한다. 완료까지 BUSY=1, ZEROIZE_ACTIVE=1로 새 START를 받지 않는다. 완료 후 상기 SW Readback은 0, Old Core Late Result 재노출 금지. RESET Coverage와 Pulse Width는 P13-02/04에서 증명한다.
+
+BUSY 중 ZEROIZE 요청은 `ZEROIZE_BUSY_ERR`를 Set하면서 기존 연산/Key/Output/Reset State를 변경하지 않고 거부한다. Core Hang/Timeout 시 SW Zeroize 불가하므로 별도 System Reset/Recovery가 필요하다. 이 정책은 **물리 Flop Erasure, Key Vault, Side-channel Resistance를 보장하지 않는다**.
+
+### 24.6 Decrypt Trust와 Output 수명 (D07, D08)
+
+선택된 정책은 **Firmware-only Authentication Gate**다. Hardware의 Raw PAYLOAD_OUT은 Tag Match 전이나 Wrong-tag 후에도 Plaintext를 노출할 수 있다. 인증 전 Raw MMIO 접근 차단을 보장하지 않는다. 정상 FW API만 `DONE && TAG_OK && !ERROR` 확인 후 Caller Output에 Valid LEN Byte만 제공한다. AUTH_FAIL, Programming Error, Overflow, Invalid LEN, Timeout 시 Caller Output은 0 초기화 상태(또는 미변경이 아닌 0 선택)로 유지한다. Firmware Single Owner/Serial MMIO 전제가 깨지면 Hardware가 해당 Trust Boundary를 보호하지 않는다.
+
+새 IDLE Accepted START는 이전 PAYLOAD_OUT/TAG_OUT Clear. LEN Invalid START는 HDR도 Clear. 정상 완료 후 LEN 범위 내 Data/Tag는 다음 START/ZEROIZE/RESET까지 Readable. CLR_STATUS는 Output 물리 값을 지우지 않으나 신뢰 상태는 해제한다.
+
+### 24.7 APB/AHB Bridge 및 Wrapper Local Decode 정책 (D10)
+
+CPU→AHB/APB Bridge는 Slot4의 Canonical Offset/Aligned Word/Full Address를 Validation하고 Invalid Offset, Alias, Size, Alignment는 AES PSEL 없이 기존 Two-cycle AHB ERROR로 종료한다. Target AES Wrapper도 Wrapper에서 사용 가능한 전체 APB Address Width로 정확한 Canonical Local Offset을 Decode해야 하며 수락 판정에 `PADDR[7:2]`로 잘라서는 안 된다. 정규 Register Word는 계속 사용 가능하며 `+0x100` 및 다른 High-bit Alias는 이를 선택하지 못한다. Direct-APB의 Reserved/Noncanonical Local Offset Read는 0(RAZ), Write는 무시(WI)하고 MMIO 상태나 Crypto Core 부작용이 없어야 한다. `PREADY=1`, AES `PSLVERR` 없음을 유지하며 Local RAZ/WI가 잘못된 CPU 접근의 성공을 뜻하지 않는다.
+
+정규 RO/WO Register의 Wrong-direction 접근은 Invalid Offset과 별개이며 이번 개정은 기존 정책을 변경하지 않는다. 특히 Bridge는 Direction을 검사하지 않아 정규 RO Write는 OKAY/No-op일 수 있다. 현재 Wrapper는 앞 절의 Partial-decode Alias가 여전히 존재하며 Exact Decode 및 검증은 Target 작업이지 구현 완료 주장이 아니다. APB-005 전체 VERIFIED 승격 금지.
+
+### 24.8 Firmware 연계 및 Security Scope (D11, D12)
+
+정상 FW는 전체 LEN/Pointer 검증을 MMIO보다 먼저 수행하고, IDLE 확인/CLR_STATUS/입력 Program/STATUS 재검증/START 후 최대 caller-supplied Poll Budget회 STATUS Read로 Terminal을 판정한다. 성공 조건은 `DONE && TAG_OK && !ERROR`; 실패 때 Output 공개 금지. `poll_budget=0`은 순수 Argument Check 후 **MMIO 0회, 즉시 TIMEOUT**. `N>0`이면 최대 N개 **완료된** STATUS Read로 판정; Bus 영구 Stall/CPU Trap은 이 소프트웨어 한도로 제한 불가. AES-001 기존 12 Poll 관측을 49~50 PCLK Latency 최대치로 오인하지 않으며 실제 Cycle/기본 Poll Budget은 P13-04에서 측정한다.
+
+FW/Protocol은 Encryption `(Key, IV)` 유일성, Sequence Persistence 및 Replay Defense를 책임진다. HW는 Auto-IV/Nonce, Replay Counter, Secure Vault, Physical Erasure, DMA, IRQ/PLIC, Constant-time System Guarantee 또는 Health AES Provider Enable을 제공하지 않는다. SoC Health AES는 후속 검증 전 `EXCLUDED_PENDING_CLEANUP` 유지.
+
+### 24.9 Target AC와 현재 상태
+
+| AC ID | Req | 필요한 검증 | 현재 |
+|---|---|---|---|
+| `AES-AC-01` | AES-002, D01/D02 | 0~16 /17/65535/65536/65552 LEN, Full Readback, Invalid START Core Pulse 없음/DONE 확인 | OPEN |
+| `AES-AC-02` | AES-003, D09 | MSW/BE Byte Order, 독립 GCM Oracle, Partial Tail 정책 | OPEN (AES-001 KAT만 VERIFIED) |
+| `AES-AC-03` | AES-004, D07/D08 | Wrong Tag Cause와 FW Plaintext 비공개 | OPEN |
+| `AES-AC-04` | AES-005, D05/D06 | Zeroize 후 민감 MMIO=0, Reset/Late Pulse, BUSY Zeroize 거부 | OPEN |
+| `AES-AC-05` | AES-006, D03/D04/D08 | BUSY Write No-mutation, CTRL, Direction, Sticky Cause, 동시 Event | OPEN |
+| `AES-AC-06` | AES-007, D10 | Direct-APB Reserved/Noncanonical RAZ/WI 및 부작용 없음, `+0x100`/High-bit Alias 차단, CPU Invalid 접근의 Two-cycle ERROR 및 AES PSEL 차단을 검증하고 정규 Wrong-direction 정책은 별도로 유지 | OPEN |
+| `AES-AC-07` | FW-010/FW-002, D11 | Bounded Poll, Zero-budget 0 MMIO, Error Code와 Output Gate | OPEN |
+| `AES-AC-08` | D08/D11 | Overflow Terminal Fault, Late Result 차단 | OPEN |
+| `AES-AC-09` | D12 | Security/Nonce/Replay 책임 및 한계 명시 | OPEN |
+
+`AES-001`은 이전 Actual-core 6-case KAT (Encrypt/Decrypt LEN 0/7/16) 범위에서만 VERIFIED. AES-002~007, FW-010, VER-006 및 APB-005/FW-002 상태는 이 Target 명세만으로 승격하지 않는다. 이 명세는 Simulation, Synthesis, Board Run의 증거가 아니다.
+
+### 24.10 Traceability
+
+- [AES English canonical](../14_aes_gcm.md), [Firmware companion](19_firmware_contract.ko.md), [APB subsystem](../05_apb_subsystem.md), [Memory Map](../01_memory_map.md), [Tracker](../baseline_cleanup.md).
+- 구현/검증은 P13-02 RTL, P13-03 FW, P13-04 Actual-core independent DV 및 Latency, P13-05 CPU E2E 후속 단계에서 별도 수행한다.

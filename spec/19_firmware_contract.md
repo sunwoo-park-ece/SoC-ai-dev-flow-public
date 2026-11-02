@@ -800,6 +800,8 @@ intentionally extended and the HEX specification is revised.
 
 ## 29. Target AES-GCM Contract
 
+> **P13-01 detail:** The Owner-approved but not yet implemented D01–D12 target API, status causes, finite polling and zeroize boundary are specified in Section 40 and in [14_aes_gcm.md](14_aes_gcm.md) Section 25. Current behavior remains in Section 15.
+
 The target crypto driver shall enforce, rather than merely document:
 
 ```text
@@ -1052,3 +1054,60 @@ The coherent G-sensor firmware API `gsensor_read_sample()` is fully integrated i
 ### Historical Pre-P09 Firmware Contract
 
 Prior to P09B, the firmware had no coherent driver or snapshot mechanism. Software read raw telemetry directly from two APB registers (`GSENSOR_XY_DATA` and `GSENSOR_Z_DATA`), which lacked `VALID` or `SEQ` indicators and risked torn reads across separate bus transactions. This raw interface is retained only as historical background and is superseded by the active driver contract in §12.
+
+## 40. P13-01 Approved AES-GCM Firmware Target Contract — Pending Implementation
+
+> **Lifecycle:** Owner-approved D01–D12 target ABI; not current `aes_gcm.c/.h` behavior or firmware verification. Section 15 remains the current baseline; Section 29 is the target overview. This section owns the detailed **target firmware API**. The AES register/operation ABI is defined in [AES specification](14_aes_gcm.md), Section 25; Korean companion is [here](kor/19_firmware_contract.ko.md). The target driver shall recognize `VERSION` ASCII `"2.00"` before using new status/zeroize semantics; legacy `"1.00"` cannot be treated as v2-compatible.
+
+### 40.1 Ownership, input and packing (D01, D03, D09, D12)
+
+- One serialized driver/transaction owner is required. Applications and ISRs shall not write raw AES MMIO concurrently with a trusted driver call. A driver shall never modify any KEY/IV/LEN/PAYLOAD_IN/TAG_IN word or issue another START while BUSY. The target hardware rejects busy-time writes with `BUSY_WRITE_ERR`, but firmware must avoid generating such misuse.
+- Before **any MMIO**, validate the full `uint32_t len` without `&0xFFFF` truncation (`0<=len<=16`), required pointers/buffer sizes, the requested mode and other pure arguments. Invalid arguments return `INVALID_ARG`, with no hardware side effect. Pack each word from byte buffers as `(b0<<24)|(b1<<16)|(b2<<8)|b3` regardless of CPU byte address ordering; the input and output window follows MSW-first offset order. For partial input, only leftmost LEN bytes are meaningful; do not expose trailing result bytes as authenticated data.
+- Firmware/protocol owns nonce uniqueness under a fixed key, sequence allocation/persistence and replay defense. The hardware neither allocates IVs nor maintains anti-replay state.
+
+### 40.2 Required result classes and diagnostics (D03, D08, D11)
+
+Normal transaction APIs shall return distinct results equivalent to `OK`, `INVALID_ARG`, `BUSY`, `TIMEOUT`, `HW_LEN_ERROR`, `AUTH_FAIL`, `HW_CORE_ERROR`, `PROGRAM_ERROR`, and `RECOVERY_REQUIRED`. Implementations may encode the enum with a project naming prefix but shall preserve these semantic distinctions. A diagnostic result shall provide a last completed STATUS snapshot and completed poll count separately from caller plaintext/ciphertext. `ERROR[3]` is `OP_ERROR[4] | PROG_ERROR[5]`; operation causes are `LEN_ERROR[6]`, `AUTH_FAIL[7]`, `CORE_OVERFLOW[8]`; programming causes are `BUSY_WRITE_ERR[9]`, `CTRL_CMD_ERR[10]`, `BUSY_START_ERR[11]`, `ZEROIZE_BUSY_ERR[12]`; ZEROIZE progress is `ZEROIZE_ACTIVE[13]`. Firmware shall not infer success from `DONE` alone or from `TAG_OK` alone.
+
+Use this fail-closed success predicate:
+
+```c
+DONE && TAG_OK && !ERROR
+```
+
+The driver may report `BUSY` for a preflight busy device without issuing START. A programming misuse by the driver is `PROGRAM_ERROR` regardless of a concurrent good cryptographic tag; the operation may have finished but the trusted transaction failed. In case of simultaneous cause bits, return one deterministic primary result while retaining the complete STATUS snapshot; precedence should favor `HW_CORE_ERROR`, then `AUTH_FAIL`, then `HW_LEN_ERROR`, then `PROGRAM_ERROR` for completed operations, with `TIMEOUT` only when no terminal status was seen during the finite window. When `ERROR` is set without a recognized cause, treat it as `HW_CORE_ERROR` or equivalent fail-closed unknown-hardware-error result, never `OK`.
+
+### 40.3 Bounded transaction sequence and output release (D02, D04, D07, D11)
+
+1. Validate arguments and `poll_budget` in pure software before any MMIO. A syntactically valid call with `poll_budget==0` returns `TIMEOUT` immediately, performing **zero MMIO reads/writes and no START**, after argument validation.
+2. Read STATUS to require an IDLE, non-zeroizing device; if BUSY, return `BUSY`, leaving the running transaction intact.
+3. Write `CTRL=0x4` (CLR_STATUS) in IDLE. This clears all sticky operation/programming errors without changing retained `ENC_DEC` or data registers.
+4. Write all KEY, NONCE_DIR, SEQ, LEN, PAYLOAD_IN and, for decrypt, TAG_IN; inspect STATUS for unexpected programming errors. Do not overwrite a busy operation.
+5. Write `CTRL=0x1` (encrypt) or `0x3` (decrypt) once. Accepted START clears old DONE/TAG_OK/operation causes but does **not** erase a previously latched programming cause.
+6. Perform no more than **N completed STATUS MMIO reads** for `poll_budget=N>0`; stop on DONE, read error/cause bits, and release output only after exact `DONE && TAG_OK && !ERROR` success. On failure keep the caller's output buffer zero-initialized; only copy the first LEN payload bytes and 16 tag bytes where appropriate. A failed decrypt never publishes unauthenticated plaintext even if raw PAYLOAD_OUT is nonzero.
+7. On timeout return `TIMEOUT` with last observed STATUS/poll count and mark the peripheral recovery-required when progress cannot be established. Do not silently re-START, attempt BUSY ZEROIZE, or reuse the same encryption IV. A software poll budget does not bound an individual stuck APB/AHB read or a CPU trap.
+
+Normal code shall not use the legacy **unbounded** `aes_gcm_wait_done()` or unguarded raw `aes_gcm_get_payload_words()` as trusted transaction APIs; those helpers are legacy/debug-only and may be retained only with explicit restrictions. A new driver cannot claim a fixed START-to-DONE clock bound or safe default poll count from the historical KAT's 12 APB polls. Actual PCLK latency, firmware overhead and budget margins require later measurement.
+
+### 40.4 Zeroize API and recovery (D05, D06, D08)
+
+Expose an explicit bounded zeroization helper using `CTRL=0x8` only after IDLE preflight. `CTRL[3]` is not an abort: if BUSY, the hardware records `ZEROIZE_BUSY_ERR` and keeps the operation and key material. After accepted ZEROIZE, poll the maintenance state `BUSY/ZEROIZE_ACTIVE` with a separately specified finite budget and validate that KEY/IV/SEQ/LEN/PAYLOAD_IN/TAG_IN/PAYLOAD_OUT/TAG_OUT/HDR read back zero once both bits drop. The API must distinguish BUSY, budget exhaustion, unexpected STATUS/cause, and success; it may not claim physical key erasure or unverified VHDL flip-flop clearing.
+
+Core overflow is a **fatal internal hardware termination** target, distinct from rejecting software BUSY Zeroize; a `CORE_OVERFLOW` outcome means firmware shall not reuse the device automatically. If a stuck core remains BUSY, a software zeroize cannot recover it. A system reset/recovery is a separately governed action, not an implicit recovery command provided by this API.
+
+### 40.5 APB and integration limitations (D07, D10, D12)
+
+Always use canonical aligned 32-bit slot-4 addresses. The bridge rejects invalid offset, size and alignment before AES PSEL with a two-cycle AHB ERROR; it **does not** guarantee wrong-direction accesses to otherwise canonical offsets fault. The current AES wrapper has no local PSLVERR and retains partial direct-APB aliases. The approved target requires exact full-width wrapper-local offset decode and reserved/noncanonical direct-APB RAZ/WI without side effects or `+0x100`/high-bit aliases; it retains no AES PSLVERR. This local policy does not turn invalid CPU accesses into successes, and canonical RO/WO wrong-direction behavior remains separate and unchanged. Raw MMIO may expose pre-authentication plaintext. The firmware-only authentication gate is effective only for callers using the serialized trusted API. AES IRQ, DMA, PLIC hookup and Health AES provider enable are deferred; current Health AES remains `EXCLUDED_PENDING_CLEANUP`.
+
+### 40.6 Acceptance criteria and lifecycle
+
+| AC ID | Owner requirement | Required verification | Current status |
+|---|---|---|---|
+| `FW-AES-AC-01` | FW-010, D01/D11 | Complete 32-bit LEN validation before MMIO, wrong arguments leave MMIO untouched | OPEN |
+| `FW-AES-AC-02` | FW-010, D11 | At most N completed post-START STATUS reads, stop on DONE; zero-budget 0 MMIO; distinguish timeout from hanging bus | OPEN |
+| `FW-AES-AC-03` | AES-004, D07 | Wrong tag / error / timeout never expose plaintext to normal caller | OPEN |
+| `FW-AES-AC-04` | AES-005/006, D03/D05/D06 | No busy mutation; status cause mapping; idle zeroize API/readback and busy reject | OPEN |
+| `FW-AES-AC-05` | AES-003/D09/D12 | Byte packing, partial output masking, IV uniqueness and replay responsibility | OPEN |
+| `FW-AES-AC-06` | FW-010, D08 | Correct cause-based result/diagnostics, no success when PROG_ERROR persists | OPEN |
+
+These are target criteria, not evidence. `AES-001` retains its separate, narrow VERIFIED actual-core six-case KAT. FW-010 and relevant AES-002..007 rows are not promoted. P13-03 FW implementation, P13-04 independent KAT/DV and P13-05 CPU E2E are deferred separate gates.

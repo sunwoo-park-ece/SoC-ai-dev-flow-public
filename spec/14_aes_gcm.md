@@ -1,8 +1,8 @@
 # Baseline SoC AES-GCM Accelerator Specification
 
-> **Status:** DRAFT — reconstructed from the active FPGA baseline and subject to Developer + ChatGPT Chat final review.
+> **Status:** Current baseline documentation plus **P13-01 Owner-approved TARGET** in Section 25 (pending implementation and acceptance). Original baseline sections remain observational; target behavior is not yet implemented.
 >
-> **Canonical language:** English. If this file and `aes_gcm.ko.md` conflict, this file is authoritative.
+> **Canonical language:** English. If this file and `kor/14_aes_gcm.ko.md` conflict, this file is authoritative.
 >
 > **Parent specifications:** `soc_architecture.md`, `memory_map.md`, `apb_subsystem.md`, `reset_clock.md`, `interrupt_architecture.md`.
 
@@ -137,7 +137,7 @@ The wrapper decodes `PADDR[7:2]`.
 | `0x88` | `HDR2` | R | `0` | debug AAD header bits `[63:32]` |
 | `0x8C` | `HDR3` | R | `0` | debug AAD header bits `[31:0]` |
 
-Offsets not listed above return zero unless they alias a listed register because of the current partial decode.
+For **direct wrapper-local APB access**, offsets not listed above read zero unless they alias a listed register because of the current partial decode. Noncanonical CPU accesses through the active bridge are rejected before AES selection.
 
 ## 5. CTRL Register
 
@@ -495,9 +495,9 @@ PADDR[7:2]
 
 so the register map repeats every `0x100` bytes inside the already coarsely decoded APB slot. Such mirrors are implementation aliases, not canonical addresses.
 
-The block exposes no `PSLVERR`, and the active AHB/APB subsystem does not propagate peripheral operation errors as CPU bus faults.
+The block exposes no `PSLVERR`; its crypto/programming errors use STATUS rather than bus faults. The current AHB/APB **bridge** separately blocks noncanonical CPU slot-4 offsets/sizes before selecting AES and returns two-cycle AHB ERROR. Wrapper-local direct-APB aliases/direction limitations remain.
 
-Unsupported or unused register offsets read as zero and writes are ignored.
+For **current direct wrapper-local APB access**, unsupported or unused decoded offsets read as zero and writes are ignored, except where the partial decode aliases a listed register. This does not override the CPU-side bridge error response for noncanonical slot-4 addresses.
 
 All canonical firmware accesses shall use naturally aligned 32-bit MMIO operations.
 
@@ -575,7 +575,7 @@ The following items shall be transferred into the consolidated baseline cleanup 
 | Medium | Block or formally define input-register writes while BUSY | avoids mid-operation state ambiguity, especially TAG_IN |
 | Medium | Separate status-clear command from retained ENC_DEC state | CTRL clear currently also rewrites direction readback |
 | Medium | Add bounded completion/timeout policy to production firmware | current low-level wait helper can spin forever |
-| Medium | Tighten register decode and remove `0x100` aliases | current `PADDR[7:2]` decode mirrors register bank |
+| Medium | Implement and verify exact AES local decode | CPU bridge blocks noncanonical offsets/sizes; the approved target removes wrapper-local aliases while preserving the separate direction policy |
 | Medium | Decide AES completion/error interrupt contract for future PLIC | baseline is polling-only |
 | Medium | Decide future DMA/streaming architecture independently | current accelerator only accepts one 128-bit payload window |
 | Low | Review debug-header exposure in final production-facing register map | debug visibility may not belong in a hardened interface |
@@ -619,3 +619,109 @@ The following statements are authoritative for the current FPGA baseline:
 15. Keys are readable MMIO state and are not secure-storage protected.
 16. The VHDL cryptographic core is third-party Apache-2.0-derived; the APB/SoC integration is project-local.
 17. Historical reference-model verification is not a substitute for fresh active-core cryptographic KAT signoff.
+
+## 25. P13-01 Approved Target Contract — Pending Implementation and Acceptance
+
+> **Lifecycle:** Owner-approved D01–D12 architecture and detailed ABI. This section is the **target contract**, not an assertion that the current RTL/FW implements it. Existing Sections 2–21 and 24 describe the observed/legacy baseline until P13-02/03 implementation and corresponding verification. No requirement status, tracker verdict, or AES-GCM SoC Health provider is promoted by this target contract.
+> **Scope boundary:** Changes to the cross-owned APB, memory map or tracker require a separate scoped decision.
+
+### 25.1 Fixed interface and register map (D01, D04, D05, D09)
+
+- Preserve `AES_GCM_BASE=0x4004_0000`, slot `PSEL[4]`, aligned 32-bit APB/MMIO access, `PREADY=1`, AES-128, a single 0–16-byte payload window, PCLK domain and polling-only completion. There is no AES interrupt, DMA or hardware replay manager.
+- Existing DATA register offsets remain unchanged. `LEN` at `+0x3C` becomes **full-width `uint32_t` R/W storage and readback**; no masking or truncation at write, before validation, or in firmware. A valid operation is `LEN<=16`; the AAD uses its lower 16 bits only after full-width validation.
+- `VERSION` at `+0x08` becomes ASCII `"2.00"` (`0x322E3030`) when the target ABI is implemented. Existing `"1.00"` remains the current pre-cleanup value.
+- Register words are concatenated in increasing offset, **MSW first**. Byte arrays pack to each 32-bit register **MSB first**: `w=(b0<<24)|(b1<<16)|(b2<<8)|b3` (not the CPU's byte-address endianness). `KEY=KEY0||KEY1||KEY2||KEY3`, `IV=NONCE_DIR||SEQ_HI||SEQ_LO`, `TAG_IN=TAG_IN0||...||TAG_IN3`; `PAYLOAD` and `HDR` use the same convention.
+- Fixed AAD is exactly `16'hA55A || NONCE_DIR || SEQ_HI || SEQ_LO || LEN[15:0]`, 128 bits. `LEN=n` validates the **leftmost/high-order n bytes** of the one-block payload (`LEN=7 -> bval=16'hFE00`). Trailing output bytes beyond LEN are unspecified and **not authenticated payload**; trusted firmware copies only the first LEN bytes.
+
+### 25.2 CTRL `+0x0C` — exclusive command encoding (D04–D06)
+
+| Bits | Symbol | Approved write/read semantics |
+|---|---|---|
+| 0 | `START` | Write-one pulse for encrypt/decrypt; reads zero. |
+| 1 | `ENC_DEC` | START argument, `0` encrypt / `1` decrypt. Readback is direction of the latest *well-encoded, IDLE-accepted* START (including invalid-LEN terminal rejection); not changed by CLR_STATUS. Reset/accepted ZEROIZE sets it to zero. |
+| 2 | `CLR_STATUS` | IDLE-only write-one pulse: clears DONE, TAG_OK and all operation/programming cause bits; retains direction, all programmed input, stored output, and core state. Reads zero. |
+| 3 | `ZEROIZE` | IDLE-only write-one pulse initiating sensitive-state cleanup and core reset maintenance; reads zero. |
+| 31:4 | Reserved | Read zero; any write-one is a malformed command. |
+
+Only full 32-bit CTRL values `0x0` (no-op), `0x1` (encrypt START), `0x3` (decrypt START), `0x4` (CLR_STATUS), `0x8` (ZEROIZE) are well encoded. `0x2`, `0x5`, `0x9`, START+CLR_STATUS, START+ZEROIZE, CLR_STATUS+ZEROIZE, and reserved-bit writes are malformed: no command/mode/data side effect, set `CTRL_CMD_ERR`. A well-encoded command attempted during `BUSY=1` is rejected according to Section 25.4. An IDLE-accepted START with invalid LEN is nevertheless a validly encoded command and updates retained ENC_DEC.
+
+### 25.3 STATUS `+0x10` — precise outcome and cause ABI (D02, D03, D08)
+
+| Bit | Symbol | Meaning |
+|---:|---|---|
+| 0 | `BUSY` | A crypto transaction or accepted zeroize maintenance is in progress; new START may not be accepted. |
+| 1 | `DONE` | Most recently IDLE-accepted START reached a terminal outcome, **not necessarily success**. ZEROIZE does not assert DONE. |
+| 2 | `TAG_OK` | Crypto completion accepted for encrypt or decrypt tag verified. Can coexist with `PROG_ERROR=1`; not sufficient for trusted FW success. |
+| 3 | `ERROR` | Computed `OP_ERROR \| PROG_ERROR`; no independent stale summary flag. |
+| 4 | `OP_ERROR` | Computed `LEN_ERROR \| AUTH_FAIL \| CORE_OVERFLOW`. |
+| 5 | `PROG_ERROR` | Computed `BUSY_WRITE_ERR \| CTRL_CMD_ERR \| BUSY_START_ERR \| ZEROIZE_BUSY_ERR`. |
+| 6 | `LEN_ERROR` | IDLE START rejected because the full 32-bit LEN exceeds 16. |
+| 7 | `AUTH_FAIL` | Decrypt authentication tag mismatch. |
+| 8 | `CORE_OVERFLOW` | Core ICB overflow terminal fault. |
+| 9 | `BUSY_WRITE_ERR` | Programming register write rejected while BUSY. |
+| 10 | `CTRL_CMD_ERR` | Malformed CTRL command, or CLR_STATUS requested while BUSY. |
+| 11 | `BUSY_START_ERR` | Well-encoded START requested while BUSY. |
+| 12 | `ZEROIZE_BUSY_ERR` | Well-encoded ZEROIZE requested while BUSY. |
+| 13 | `ZEROIZE_ACTIVE` | Accepted zeroize/core-reset maintenance is in progress; BUSY must also be one. |
+| 31:14 | Reserved | Read zero. |
+
+`LEN_ERROR/AUTH_FAIL/CORE_OVERFLOW` are operation cause bits: clear at next IDLE-accepted START, IDLE CLR_STATUS, accepted ZEROIZE, or system reset. `BUSY_WRITE_ERR/CTRL_CMD_ERR/BUSY_START_ERR/ZEROIZE_BUSY_ERR` are sticky programming cause bits: clear **only** at IDLE CLR_STATUS, accepted ZEROIZE, or system reset; a new START does **not** hide prior programming misuse. STATUS reads never clear bits. `DONE/TAG_OK` clear on accepted START, CLR_STATUS, ZEROIZE or reset. If an input-write rejection overlaps final core success, the possible result is `DONE=1, TAG_OK=1, PROG_ERROR=1, ERROR=1`; normal FW must fail closed. STATUS summary bits always equal the OR of their constituent causes.
+
+`BUSY` must not drop until the wrapper is actually ready to accept a subsequent START; a transient DONE pulse, core callback, or FSM cleanup step may not cause a lost back-to-back command. When ZEROIZE is active, `BUSY=1`, `ZEROIZE_ACTIVE=1` and `DONE=0`. After successful maintenance, `BUSY=0`, `ZEROIZE_ACTIVE=0` and, absent concurrent misuse, STATUS reads zero.
+
+### 25.4 Admission, completion and error priority (D01–D04, D06, D08)
+
+1. **System/APB reset** has highest priority; resets all software-visible registers, status, direction and the core-control epoch. A reset-aborted bus access need not return a normal completion response.
+2. **Fatal Core overflow** in an active operation overrides a simultaneous successful completion/tag pulse. The wrapper must reach a bounded terminal failure (`BUSY=0, DONE=1, TAG_OK=0, CORE_OVERFLOW=1`) and prevent any late result from resurrecting a trusted output. The required internal error termination/reset is **not** a software ZEROIZE-on-BUSY exception. Feasibility and stale-pulse suppression require P13-02/04 actual VHDL/core verification; if impossible, stop and return for contract revision, not an endless BUSY presented as successful implementation.
+3. **IDLE accepted ZEROIZE** supersedes stale output/status and enters maintenance as in 25.5.
+4. **IDLE accepted START** clears prior operation outcome/cause and output result registers. If full `LEN<=16`, it enters crypto BUSY and constructs HDR. If LEN is invalid, no core reset/key/IV/data packet pulses are sent, `BUSY=0, DONE=1, TAG_OK=0, LEN_ERROR=1`, and prior PAYLOAD_OUT/TAG_OUT/HDR are cleared; programmed input registers are retained for diagnosis.
+5. **IDLE accepted CLR_STATUS** clears only DONE/TAG_OK/error causes; leaves input, output, direction and core state intact. Data visible after CLR_STATUS has **no trust validity** despite remaining readable.
+6. **BUSY invalid access** sets only the appropriate programming cause and does not mutate in-flight inputs, tag comparator state, outputs, core state or direction. Well-encoded START during BUSY -> `BUSY_START_ERR`; ZEROIZE -> `ZEROIZE_BUSY_ERR`; CLR_STATUS -> `CTRL_CMD_ERR`; a malformed CTRL -> `CTRL_CMD_ERR`; any programming KEY/IV/LEN/PAYLOAD_IN/TAG_IN write -> `BUSY_WRITE_ERR`. `CTRL=0` remains no-op. Concurrent core completion and rejected APB access must preserve both the genuine terminal outcome and new programming cause.
+
+Every busy-time rejected APB write completes with `PREADY=1`, no AES `PSLVERR`/CPU access-fault response. `PROG_ERROR` is the error channel. The 16 programming words (4 KEY, 3 IV/SEQ, 1 LEN, 4 PAYLOAD_IN, 4 TAG_IN) remain unchanged, including live decrypt TAG_IN comparison. Normal SW must serialize access and must not attempt to modify any of these while BUSY.
+
+### 25.5 Zeroization: C target, idle-only admission (D05, D06)
+
+`CTRL=0x8` accepted in IDLE must clear all MMIO-visible KEY, NONCE_DIR, SEQ, LEN, PAYLOAD_IN, TAG_IN, PAYLOAD_OUT, TAG_OUT, HDR and held wrapper secrets/core-driving state, reset retained direction and clear status, and assert/release the VHDL core reset through an actual bounded maintenance sequence. Until maintenance completes, `BUSY=1` and `ZEROIZE_ACTIVE=1`, with no new START admission. At completion (`BUSY=0, ZEROIZE_ACTIVE=0`), all specified software-visible sensitive readbacks must be zero and late core events must not expose stale data. CTRL/STATUS readbacks reflect reset/maintenance semantics.
+
+A ZEROIZE request while `BUSY=1` **must be rejected**, leaving the ongoing crypto/maintenance activity and sensitive contents unchanged while setting `ZEROIZE_BUSY_ERR`. It does not abort a hanging core. On timeout/hang, firmware cannot claim immediate key disposal; separate system reset/recovery is needed. Functional neutralization by the core reset port does **not** prove erasure of every physical flip-flop, secure key storage, resistance to side channels or a key vault. No such guarantees are claimed. Reset coverage and pulse width are P13-02/04 verification obligations.
+
+### 25.6 Decrypt trust boundary and output lifetime (D07, D08)
+
+The selected policy is **firmware-only authenticated output release**. The hardware may publish decrypted plaintext into raw `PAYLOAD_OUT` before tag verification and may leave it readable after a wrong-tag outcome. Raw MMIO is therefore **not** an authenticated-plaintext access-control boundary. Only the normal driver API may release bytes to application callers, and only after `DONE=1 && TAG_OK=1 && ERROR=0`. Authentication failure, programming error, overflow, invalid LEN and timeout all prohibit caller-visible plaintext/ciphertext commit. Failure outputs must be zeroed or never committed; the approved normal driver chooses **zero-initialized caller output**.
+
+At every IDLE-accepted START, previous `PAYLOAD_OUT` and `TAG_OUT` are cleared to avoid confusing stale results with the new operation. At invalid LEN, HDR is also cleared. Under successful completion, only the first LEN bytes are valid, and result/tag remain readable until the next START, ZEROIZE or reset. `CLR_STATUS` does not erase output but removes its trusted completion evidence. Caller access assumes one serialized driver owner; competing raw MMIO agents can subvert FW-managed trust and are **not** protected by the selected hardware.
+
+### 25.7 APB/AHB validation boundary (D10)
+
+The **CPU-visible** path is `CPU -> AHB/APB Bridge -> AES slot 4`: the bridge must allow only precisely specified canonical aligned 32-bit offsets and reject noncanonical slot-4 offsets, byte/halfword/misaligned accesses and address aliases **before asserting AES PSEL[4]**, returning the existing two-cycle AHB ERROR. The target AES wrapper additionally must decode exact canonical local offsets using the full APB address width available at the wrapper; acceptance must not truncate to `PADDR[7:2]`. The legal canonical register words remain available; `+0x100` and all other high-bit aliases must not select them. Direct-APB reads of reserved or noncanonical local offsets return zero (RAZ); writes are ignored (WI), with no MMIO state mutation or cryptographic core side effect. Retain `PREADY=1` and no AES `PSLVERR`; local RAZ/WI does not make invalid CPU accesses successful.
+
+Wrong-direction access to a canonical RO or WO register is a separate case from an invalid offset; this revision does not change its existing policy. In particular, a canonical RO write may receive OKAY/no-op because the bridge does not enforce register direction. The current wrapper still has the partial-decode aliases described in Section 19; exact decode and its verification are target work, not an implementation claim. APB-005 is not promoted.
+
+### 25.8 Firmware and security integration (D11, D12)
+
+A trusted driver validates full-width LEN and buffer arguments **before any MMIO side effect**; it enforces one operation owner, programs key/IV/SEQ/payload/tag while idle, explicitly clears stale sticky status, starts exactly one command, and polls at most a caller-specified finite count. Normal success requires `DONE && TAG_OK && !ERROR`; error cause bits determine distinct returns and recovery. `poll_budget=0` causes an immediate timeout with **no MMIO access**, after pure argument validation. For `N>0`, perform no more than N *completed STATUS reads*; a stuck bus transaction or CPU trap is not bounded by this mechanism. Failure does not publish result bytes. Hardware latency and default safe budget are **not specified** by the prior AES-001 report of 12 STATUS polls; measure PCLK START-to-DONE and firmware polling separately in P13-04.
+
+Hardware does **not** allocate nonce/sequence values or enforce replay prevention. Firmware/protocol must ensure `(key, IV)` uniqueness for encryption, sequence persistence and appropriate anti-replay policy. No secure vault, IRQ/PLIC, DMA/streaming, physical erasure, constant-time system guarantee or SoC Health AES enable is added in P13-01. AES SoC Health remains `EXCLUDED_PENDING_CLEANUP` pending later accepted work.
+
+### 25.9 Target acceptance criteria and current status
+
+| AC ID | Requirement | Required observable check | Status now |
+|---|---|---|---|
+| `AES-AC-01` | AES-002; D01/D02 | 0..16 accepted, 17/65535/65536/65552 rejected at START; full LEN readback, no core activation; terminal DONE and cleared outputs on reject | OPEN |
+| `AES-AC-02` | AES-003; D09 | MSW and big-endian-byte pack for KEY/IV/AAD/TAG/PAYLOAD, independent vectors including partial tail invalidity | OPEN (AES-001 KAT only is VERIFIED) |
+| `AES-AC-03` | AES-004; D07/D08 | Wrong-tag cause and no caller plaintext; raw-MMIO early plaintext limitation documented | OPEN |
+| `AES-AC-04` | AES-005; D05/D06 | All sensitive readbacks zero after completed idle zeroize; reset sequence, no late pulse, busy zeroize reject | OPEN |
+| `AES-AC-05` | AES-006; D03/D04/D08 | Busy write no mutation, command encoding/retained direction, sticky causes and simultaneous done/error | OPEN |
+| `AES-AC-06` | AES-007; D10 | Verify direct-APB reserved/noncanonical RAZ/WI and no side effects, reject `+0x100`/high-bit aliases, and verify invalid CPU bridge access gives two-cycle ERROR without AES PSEL; preserve separate canonical wrong-direction policy | OPEN |
+| `AES-AC-07` | FW-010/FW-002; D11 | Status-returning bounded polling, zero-budget no-MMIO, no plaintext on failure and recovery handling | OPEN |
+| `AES-AC-08` | D08/D11 | Overflow terminates as fault; concurrent late success suppressed, independent fault checking | OPEN |
+| `AES-AC-09` | D12 | No unsupported crypto-security/vault/nonce/replay/health claims; responsibilities explicit | OPEN |
+
+Requirement `AES-001` remains `VERIFIED` **only** for the previously approved actual-core six-case KAT (encrypt/decrypt LEN 0/7/16). AES-002..007, FW-010 and VER-006 are not promoted by target authoring; APB-005/FW-002 remain independently owned statuses. No simulation, synthesis, board run, or new evidence claim is made in P13-01.
+
+### 25.10 Traceability and pending actions
+
+- Owning companion: [Korean AES specification](kor/14_aes_gcm.ko.md); firmware API/ownership target: [firmware contract](19_firmware_contract.md).
+- Cross-owned read-only references: [APB subsystem](05_apb_subsystem.md), [memory map](01_memory_map.md), [SoC Health](22_soc_health_firmware.md), [baseline cleanup tracker](baseline_cleanup.md).
+- P13-02 implements wrapper/core integration and the register/terminal behavior; P13-03 implements firmware API; P13-04 provides actual-core independent DV and measured latency; P13-05 provides SoC CPU E2E. Target specification does not constitute implementation acceptance or verification evidence.
