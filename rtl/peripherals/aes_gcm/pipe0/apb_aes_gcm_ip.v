@@ -19,48 +19,48 @@ module apb_aes_gcm #(
   assign PREADY = 1'b1;
 
   // --------------------------------------------------------------------------
-  // Address map (word aligned, decoded with PADDR[7:2])
+  // Address map (word aligned, full canonical 32-bit addresses (slot 4))
   // --------------------------------------------------------------------------
-  localparam [5:0] ADDR_NAME0        = 6'h00; // 0x00
-  localparam [5:0] ADDR_NAME1        = 6'h01; // 0x04
-  localparam [5:0] ADDR_VERSION      = 6'h02; // 0x08
-  localparam [5:0] ADDR_CTRL         = 6'h03; // 0x0C
-  localparam [5:0] ADDR_STATUS       = 6'h04; // 0x10
+  localparam [31:0] ADDR_NAME0        = 32'h40040000; // 0x00
+  localparam [31:0] ADDR_NAME1        = 32'h40040004; // 0x04
+  localparam [31:0] ADDR_VERSION      = 32'h40040008; // 0x08
+  localparam [31:0] ADDR_CTRL         = 32'h4004000C; // 0x0C
+  localparam [31:0] ADDR_STATUS       = 32'h40040010; // 0x10
 
-  localparam [5:0] ADDR_KEY0         = 6'h08; // 0x20
-  localparam [5:0] ADDR_KEY1         = 6'h09; // 0x24
-  localparam [5:0] ADDR_KEY2         = 6'h0A; // 0x28
-  localparam [5:0] ADDR_KEY3         = 6'h0B; // 0x2C
+  localparam [31:0] ADDR_KEY0         = 32'h40040020; // 0x20
+  localparam [31:0] ADDR_KEY1         = 32'h40040024; // 0x24
+  localparam [31:0] ADDR_KEY2         = 32'h40040028; // 0x28
+  localparam [31:0] ADDR_KEY3         = 32'h4004002C; // 0x2C
 
-  localparam [5:0] ADDR_NONCE_DIR    = 6'h0C; // 0x30 [31:8]=session_nonce(24), [7:0]=DIR
-  localparam [5:0] ADDR_SEQ_HI       = 6'h0D; // 0x34
-  localparam [5:0] ADDR_SEQ_LO       = 6'h0E; // 0x38
-  localparam [5:0] ADDR_LEN          = 6'h0F; // 0x3C [15:0]
+  localparam [31:0] ADDR_NONCE_DIR    = 32'h40040030; // 0x30 [31:8]=session_nonce(24), [7:0]=DIR
+  localparam [31:0] ADDR_SEQ_HI       = 32'h40040034; // 0x34
+  localparam [31:0] ADDR_SEQ_LO       = 32'h40040038; // 0x38
+  localparam [31:0] ADDR_LEN          = 32'h4004003C; // 0x3C full 32-bit LEN
 
-  localparam [5:0] ADDR_PAYLOAD_IN0  = 6'h10; // 0x40
-  localparam [5:0] ADDR_PAYLOAD_IN1  = 6'h11; // 0x44
-  localparam [5:0] ADDR_PAYLOAD_IN2  = 6'h12; // 0x48
-  localparam [5:0] ADDR_PAYLOAD_IN3  = 6'h13; // 0x4C
+  localparam [31:0] ADDR_PAYLOAD_IN0  = 32'h40040040; // 0x40
+  localparam [31:0] ADDR_PAYLOAD_IN1  = 32'h40040044; // 0x44
+  localparam [31:0] ADDR_PAYLOAD_IN2  = 32'h40040048; // 0x48
+  localparam [31:0] ADDR_PAYLOAD_IN3  = 32'h4004004C; // 0x4C
 
-  localparam [5:0] ADDR_TAG_IN0      = 6'h14; // 0x50
-  localparam [5:0] ADDR_TAG_IN1      = 6'h15; // 0x54
-  localparam [5:0] ADDR_TAG_IN2      = 6'h16; // 0x58
-  localparam [5:0] ADDR_TAG_IN3      = 6'h17; // 0x5C
+  localparam [31:0] ADDR_TAG_IN0      = 32'h40040050; // 0x50
+  localparam [31:0] ADDR_TAG_IN1      = 32'h40040054; // 0x54
+  localparam [31:0] ADDR_TAG_IN2      = 32'h40040058; // 0x58
+  localparam [31:0] ADDR_TAG_IN3      = 32'h4004005C; // 0x5C
 
-  localparam [5:0] ADDR_PAYLOAD_OUT0 = 6'h18; // 0x60
-  localparam [5:0] ADDR_PAYLOAD_OUT1 = 6'h19; // 0x64
-  localparam [5:0] ADDR_PAYLOAD_OUT2 = 6'h1A; // 0x68
-  localparam [5:0] ADDR_PAYLOAD_OUT3 = 6'h1B; // 0x6C
+  localparam [31:0] ADDR_PAYLOAD_OUT0 = 32'h40040060; // 0x60
+  localparam [31:0] ADDR_PAYLOAD_OUT1 = 32'h40040064; // 0x64
+  localparam [31:0] ADDR_PAYLOAD_OUT2 = 32'h40040068; // 0x68
+  localparam [31:0] ADDR_PAYLOAD_OUT3 = 32'h4004006C; // 0x6C
 
-  localparam [5:0] ADDR_TAG_OUT0     = 6'h1C; // 0x70
-  localparam [5:0] ADDR_TAG_OUT1     = 6'h1D; // 0x74
-  localparam [5:0] ADDR_TAG_OUT2     = 6'h1E; // 0x78
-  localparam [5:0] ADDR_TAG_OUT3     = 6'h1F; // 0x7C
+  localparam [31:0] ADDR_TAG_OUT0     = 32'h40040070; // 0x70
+  localparam [31:0] ADDR_TAG_OUT1     = 32'h40040074; // 0x74
+  localparam [31:0] ADDR_TAG_OUT2     = 32'h40040078; // 0x78
+  localparam [31:0] ADDR_TAG_OUT3     = 32'h4004007C; // 0x7C
 
-  localparam [5:0] ADDR_HDR0         = 6'h20; // 0x80 debug: MAGIC|IV|LEN
-  localparam [5:0] ADDR_HDR1         = 6'h21; // 0x84
-  localparam [5:0] ADDR_HDR2         = 6'h22; // 0x88
-  localparam [5:0] ADDR_HDR3         = 6'h23; // 0x8C
+  localparam [31:0] ADDR_HDR0         = 32'h40040080; // 0x80 debug: MAGIC|IV|LEN
+  localparam [31:0] ADDR_HDR1         = 32'h40040084; // 0x84
+  localparam [31:0] ADDR_HDR2         = 32'h40040088; // 0x88
+  localparam [31:0] ADDR_HDR3         = 32'h4004008C; // 0x8C
 
   // CTRL bits
   localparam CTRL_START_BIT       = 0;
@@ -77,7 +77,7 @@ module apb_aes_gcm #(
   localparam [15:0] MAGIC_CONST   = 16'hA55A;
   localparam [31:0] CORE_NAME0    = 32'h6170622d; // "apb-"
   localparam [31:0] CORE_NAME1    = 32'h67636d20; // "gcm "
-  localparam [31:0] CORE_VERSION  = 32'h312e3030; // "1.00"
+  localparam [31:0] CORE_VERSION  = 32'h322e3030; // "2.00"
 
   // --------------------------------------------------------------------------
   // APB regs
@@ -86,7 +86,17 @@ module apb_aes_gcm #(
   reg        busy_reg;
   reg        done_reg;
   reg        tag_ok_reg;
-  reg        error_reg;
+  reg len_error_reg, auth_fail_reg, overflow_reg;
+  reg busy_write_err_reg, ctrl_cmd_err_reg, busy_start_err_reg, zeroize_busy_err_reg;
+  reg zeroize_active_reg;
+  wire op_error = len_error_reg | auth_fail_reg | overflow_reg;
+  wire prog_error = busy_write_err_reg | ctrl_cmd_err_reg | busy_start_err_reg | zeroize_busy_err_reg;
+  wire error_reg = op_error | prog_error;
+  wire [31:0] status_wire = {18'b0, zeroize_active_reg, zeroize_busy_err_reg,
+      busy_start_err_reg, ctrl_cmd_err_reg, busy_write_err_reg, overflow_reg,
+      auth_fail_reg, len_error_reg, prog_error, op_error, error_reg,
+      tag_ok_reg, done_reg, busy_reg};
+  integer j;
 
   reg [31:0] key_reg [0:3];
   reg [31:0] payload_in_reg [0:3];
@@ -130,11 +140,13 @@ module apb_aes_gcm #(
   // --------------------------------------------------------------------------
   // Local wires
   // --------------------------------------------------------------------------
-  wire [5:0] addr_word = PADDR[7:2];
+  wire [31:0] addr_word = PADDR;
   wire       apb_write = (PSEL && PENABLE && PWRITE);
   wire       apb_read  = (PSEL && PENABLE && !PWRITE);
   wire       apb_ctrl_write = (apb_write && (addr_word == ADDR_CTRL));
-  wire       start_cmd = (apb_ctrl_write && PWDATA[CTRL_START_BIT]);
+  wire start_cmd = apb_ctrl_write && (PWDATA == 32'd1 || PWDATA == 32'd3);
+  wire ctrl_valid = PWDATA == 0 || PWDATA == 1 || PWDATA == 3 || PWDATA == 4 || PWDATA == 8;
+  wire programming_word = (PADDR >= ADDR_KEY0 && PADDR <= ADDR_TAG_IN3 && PADDR[1:0] == 0);
 
   wire [95:0] iv_wire = {nonce_dir_reg[31:8], nonce_dir_reg[7:0], seq_hi_reg, seq_lo_reg};
   wire [127:0] hdr_wire = {MAGIC_CONST, nonce_dir_reg, seq_hi_reg, seq_lo_reg, len_reg[15:0]};
@@ -178,7 +190,9 @@ module apb_aes_gcm #(
   localparam [3:0] ST_SEND_DATA   = 4'd5;
   localparam [3:0] ST_PKT_END     = 4'd6;
   localparam [3:0] ST_WAIT_RESULT = 4'd7;
-  localparam [3:0] ST_DONE_PULSE  = 4'd8;
+  localparam [3:0] ST_MAINT_HOLD = 4'd8;
+  localparam [3:0] ST_MAINT_RELEASE = 4'd11;
+  localparam [3:0] ST_MAINT_DONE = 4'd12;
   localparam [3:0] ST_WAIT_CT     = 4'd9;
   localparam [3:0] ST_IV_START    = 4'd10;
 
@@ -225,7 +239,10 @@ module apb_aes_gcm #(
       busy_reg    <= 1'b0;
       done_reg    <= 1'b0;
       tag_ok_reg  <= 1'b0;
-      error_reg   <= 1'b0;
+      len_error_reg <= 0; auth_fail_reg <= 0; overflow_reg <= 0;
+      busy_write_err_reg <= 0; ctrl_cmd_err_reg <= 0;
+      busy_start_err_reg <= 0; zeroize_busy_err_reg <= 0;
+      zeroize_active_reg <= 0;
 
       key_reg[0] <= 32'h0; key_reg[1] <= 32'h0; key_reg[2] <= 32'h0; key_reg[3] <= 32'h0;
       payload_in_reg[0] <= 32'h0; payload_in_reg[1] <= 32'h0; payload_in_reg[2] <= 32'h0; payload_in_reg[3] <= 32'h0;
@@ -259,85 +276,13 @@ module apb_aes_gcm #(
       got_tag_reg <= 1'b0;
       tag_match_reg <= 1'b0;
     end else begin
-      // 기본 one-shot 신호 내림
-      core_key_word_val_reg   <= 4'b0000;
-      core_iv_val_reg         <= 1'b0;
-      core_icb_start_reg      <= 1'b0;
-      core_icb_stop_reg       <= 1'b0;
-      core_ghash_aad_bval_reg <= 16'h0000;
-      core_data_in_bval_reg   <= 16'h0000;
-      core_soft_reset_reg     <= 1'b0;
-
-      // APB writes
-      if (apb_write) begin
-        case (addr_word)
-          ADDR_CTRL: begin
-            enc_dec_reg <= PWDATA[CTRL_ENCDEC_BIT];
-            if (PWDATA[CTRL_CLR_STATUS_BIT]) begin
-              done_reg   <= 1'b0;
-              tag_ok_reg <= 1'b0;
-              error_reg  <= 1'b0;
-            end
-          end
-          ADDR_KEY0: key_reg[0] <= PWDATA;
-          ADDR_KEY1: key_reg[1] <= PWDATA;
-          ADDR_KEY2: key_reg[2] <= PWDATA;
-          ADDR_KEY3: key_reg[3] <= PWDATA;
-          ADDR_NONCE_DIR: nonce_dir_reg <= PWDATA;
-          ADDR_SEQ_HI:    seq_hi_reg    <= PWDATA;
-          ADDR_SEQ_LO:    seq_lo_reg    <= PWDATA;
-          ADDR_LEN:       len_reg       <= {16'h0, PWDATA[15:0]};
-          ADDR_PAYLOAD_IN0: payload_in_reg[0] <= PWDATA;
-          ADDR_PAYLOAD_IN1: payload_in_reg[1] <= PWDATA;
-          ADDR_PAYLOAD_IN2: payload_in_reg[2] <= PWDATA;
-          ADDR_PAYLOAD_IN3: payload_in_reg[3] <= PWDATA;
-          ADDR_TAG_IN0: tag_in_reg[0] <= PWDATA;
-          ADDR_TAG_IN1: tag_in_reg[1] <= PWDATA;
-          ADDR_TAG_IN2: tag_in_reg[2] <= PWDATA;
-          ADDR_TAG_IN3: tag_in_reg[3] <= PWDATA;
-          default: ;
-        endcase
-      end
-
-      // start trigger
-      if (start_cmd) begin
-        if (busy_reg) begin
-          error_reg <= 1'b1;
-        end else begin
-          busy_reg    <= 1'b1;
-          done_reg    <= 1'b0;
-          tag_ok_reg  <= 1'b0;
-          enc_dec_reg <= PWDATA[CTRL_ENCDEC_BIT];
-
-          // snapshot debug header
-          hdr_dbg_reg[0] <= hdr_wire[127:96];
-          hdr_dbg_reg[1] <= hdr_wire[95:64];
-          hdr_dbg_reg[2] <= hdr_wire[63:32];
-          hdr_dbg_reg[3] <= hdr_wire[31:0];
-
-          // core setup
-          core_mode_reg       <= 2'b00; // AES-128
-          core_enc_dec_reg    <= PWDATA[CTRL_ENCDEC_BIT];
-          core_key_word_reg   <= key256_wire;
-          core_iv_reg         <= iv_wire;
-          core_ghash_aad_reg  <= hdr_wire;
-          core_data_in_reg    <= payload_in_wire;
-          core_ghash_pkt_val_reg <= 1'b0;
-
-          got_data_reg   <= (len_reg[15:0] == 16'd0);
-          got_tag_reg    <= 1'b0;
-          tag_match_reg  <= 1'b0;
-          if (len_reg[15:0] == 16'd0) begin
-            payload_out_reg[0] <= 32'h0;
-            payload_out_reg[1] <= 32'h0;
-            payload_out_reg[2] <= 32'h0;
-            payload_out_reg[3] <= 32'h0;
-          end
-
-          state_reg <= ST_CORE_RESET;
-        end
-      end
-
+      core_key_word_val_reg <= 0;
+      core_iv_val_reg <= 0;
+      core_icb_start_reg <= 0;
+      core_icb_stop_reg <= 0;
+      core_ghash_aad_bval_reg <= 0;
+      core_data_in_bval_reg <= 0;
+      core_soft_reset_reg <= 0;
       // FSM
       case (state_reg)
         ST_IDLE: begin
@@ -398,13 +343,18 @@ module apb_aes_gcm #(
           state_reg <= ST_WAIT_RESULT;
         end
 
-        ST_WAIT_RESULT: begin
-          if (core_icb_overflow) begin
-            error_reg <= 1'b1;
-          end
+        ST_WAIT_RESULT: begin end
+        // Reset remains asserted for two complete PCLK periods. Release and
+        // one quiet clock precede admission of another operation.
+        ST_MAINT_HOLD: begin
+          core_soft_reset_reg <= 1;
+          state_reg <= ST_MAINT_RELEASE;
         end
-
-        ST_DONE_PULSE: begin
+        ST_MAINT_RELEASE: state_reg <= ST_MAINT_DONE;
+        ST_MAINT_DONE: begin
+          busy_reg <= 0;
+          zeroize_active_reg <= 0;
+          if (!zeroize_active_reg) done_reg <= 1;
           state_reg <= ST_IDLE;
         end
 
@@ -413,38 +363,121 @@ module apb_aes_gcm #(
         end
       endcase
 
-      // Output capture is independent from the drive FSM to avoid missing short valid pulses.
-      if (busy_reg) begin
-        if (core_data_out_val && !got_data_reg) begin
-          payload_out_reg[0] <= core_data_out[127:96];
-          payload_out_reg[1] <= core_data_out[95:64];
-          payload_out_reg[2] <= core_data_out[63:32];
-          payload_out_reg[3] <= core_data_out[31:0];
-          got_data_reg <= 1'b1;
-        end
 
-        if (core_tag_val && !got_tag_reg) begin
-          tag_out_reg[0] <= core_tag_out[127:96];
-          tag_out_reg[1] <= core_tag_out[95:64];
-          tag_out_reg[2] <= core_tag_out[63:32];
-          tag_out_reg[3] <= core_tag_out[31:0];
-          got_tag_reg <= 1'b1;
-          if (core_enc_dec_reg) begin
-            tag_match_reg <= (core_tag_out == tag_in_wire);
-          end else begin
-            tag_match_reg <= 1'b1;
+      // Only the active crypto epoch may consume callbacks. Maintenance and
+      // idle ignore even unsolicited/stale pulses. Fatal overflow wins over
+      // data/tag capture and simultaneous successful completion.
+      if (busy_reg && !zeroize_active_reg && state_reg != ST_MAINT_HOLD &&
+          state_reg != ST_MAINT_RELEASE && state_reg != ST_MAINT_DONE &&
+          state_reg != ST_CORE_RESET && state_reg != ST_KEY_PULSE) begin
+        if (core_icb_overflow) begin
+          overflow_reg <= 1;
+          tag_ok_reg <= 0;
+          done_reg <= 0;
+          got_data_reg <= 0; got_tag_reg <= 0; tag_match_reg <= 0;
+          core_soft_reset_reg <= 1;
+          core_ghash_pkt_val_reg <= 0;
+          core_key_word_val_reg <= 0; core_iv_val_reg <= 0;
+          core_icb_start_reg <= 0; core_icb_stop_reg <= 0;
+          core_ghash_aad_bval_reg <= 0; core_data_in_bval_reg <= 0;
+          for (j=0; j<4; j=j+1) begin
+            payload_out_reg[j] <= 0; tag_out_reg[j] <= 0;
+          end
+          state_reg <= ST_MAINT_HOLD;
+        end else begin
+          if (core_data_out_val && !got_data_reg) begin
+            for (j=0; j<4; j=j+1) payload_out_reg[j] <= core_data_out[127-j*32 -: 32];
+            got_data_reg <= 1;
+          end
+          if (core_tag_val && !got_tag_reg) begin
+            for (j=0; j<4; j=j+1) tag_out_reg[j] <= core_tag_out[127-j*32 -: 32];
+            got_tag_reg <= 1;
+            tag_match_reg <= !core_enc_dec_reg || core_tag_out == tag_in_wire;
+          end
+          if (got_data_reg && got_tag_reg) begin
+            busy_reg <= 0; done_reg <= 1; tag_ok_reg <= tag_match_reg;
+            auth_fail_reg <= !tag_match_reg;
+            core_icb_stop_reg <= 1;
+            state_reg <= ST_IDLE;
           end
         end
+      end
 
-        if (got_data_reg && got_tag_reg) begin
-          busy_reg   <= 1'b0;
-          done_reg   <= 1'b1;
-          tag_ok_reg <= tag_match_reg;
-          if (!tag_match_reg) begin
-            error_reg <= 1'b1;
+      // Admission uses BUSY at the accepting edge, including a completion
+      // edge. Rejection causes are orthogonal to terminal operation outcome.
+      if (apb_ctrl_write) begin
+        if (!ctrl_valid) ctrl_cmd_err_reg <= 1;
+        else if (PWDATA != 0) begin
+          if (busy_reg) begin
+            if (start_cmd) busy_start_err_reg <= 1;
+            else if (PWDATA == 8) zeroize_busy_err_reg <= 1;
+            else ctrl_cmd_err_reg <= 1;
+          end else if (PWDATA == 4 || PWDATA == 8) begin
+            done_reg <= 0; tag_ok_reg <= 0;
+            len_error_reg <= 0; auth_fail_reg <= 0; overflow_reg <= 0;
+            busy_write_err_reg <= 0; ctrl_cmd_err_reg <= 0;
+            busy_start_err_reg <= 0; zeroize_busy_err_reg <= 0;
+            if (PWDATA == 8) begin
+              enc_dec_reg <= 0;
+              for (j=0; j<4; j=j+1) begin
+                key_reg[j] <= 0; payload_in_reg[j] <= 0;
+                tag_in_reg[j] <= 0; payload_out_reg[j] <= 0;
+                tag_out_reg[j] <= 0; hdr_dbg_reg[j] <= 0;
+              end
+              nonce_dir_reg <= 0; seq_hi_reg <= 0; seq_lo_reg <= 0; len_reg <= 0;
+              core_mode_reg <= 0; core_enc_dec_reg <= 0; core_pipe_reset_reg <= 0;
+              core_key_word_reg <= 0; core_iv_reg <= 0;
+              core_ghash_aad_reg <= 0; core_data_in_reg <= 0;
+              core_ghash_pkt_val_reg <= 0;
+              got_data_reg <= 0; got_tag_reg <= 0; tag_match_reg <= 0;
+              core_soft_reset_reg <= 1;
+              busy_reg <= 1; zeroize_active_reg <= 1;
+              state_reg <= ST_MAINT_HOLD;
+            end
+          end else if (start_cmd) begin
+            enc_dec_reg <= PWDATA[1];
+            done_reg <= 0; tag_ok_reg <= 0;
+            len_error_reg <= 0; auth_fail_reg <= 0; overflow_reg <= 0;
+            got_data_reg <= len_reg == 0; got_tag_reg <= 0; tag_match_reg <= 0;
+            for (j=0; j<4; j=j+1) begin
+              payload_out_reg[j] <= 0; tag_out_reg[j] <= 0;
+              hdr_dbg_reg[j] <= len_reg <= 16 ? hdr_wire[127-j*32 -: 32] : 32'b0;
+            end
+            if (len_reg > 16) begin
+              done_reg <= 1; len_error_reg <= 1;
+              busy_reg <= 0; state_reg <= ST_IDLE;
+            end else begin
+              busy_reg <= 1;
+              core_mode_reg <= 0; core_enc_dec_reg <= PWDATA[1];
+              core_key_word_reg <= key256_wire; core_iv_reg <= iv_wire;
+              core_ghash_aad_reg <= hdr_wire; core_data_in_reg <= payload_in_wire;
+              core_ghash_pkt_val_reg <= 0;
+              state_reg <= ST_CORE_RESET;
+            end
           end
-          core_icb_stop_reg <= 1'b1;
-          state_reg <= ST_DONE_PULSE;
+        end
+      end else if (apb_write && programming_word) begin
+        if (busy_reg) busy_write_err_reg <= 1;
+        else begin
+          case (addr_word)
+            ADDR_KEY0: key_reg[0] <= PWDATA;
+            ADDR_KEY1: key_reg[1] <= PWDATA;
+            ADDR_KEY2: key_reg[2] <= PWDATA;
+            ADDR_KEY3: key_reg[3] <= PWDATA;
+            ADDR_NONCE_DIR: nonce_dir_reg <= PWDATA;
+            ADDR_SEQ_HI: seq_hi_reg <= PWDATA;
+            ADDR_SEQ_LO: seq_lo_reg <= PWDATA;
+            ADDR_LEN: len_reg <= PWDATA;
+            ADDR_PAYLOAD_IN0: payload_in_reg[0] <= PWDATA;
+            ADDR_PAYLOAD_IN1: payload_in_reg[1] <= PWDATA;
+            ADDR_PAYLOAD_IN2: payload_in_reg[2] <= PWDATA;
+            ADDR_PAYLOAD_IN3: payload_in_reg[3] <= PWDATA;
+            ADDR_TAG_IN0: tag_in_reg[0] <= PWDATA;
+            ADDR_TAG_IN1: tag_in_reg[1] <= PWDATA;
+            ADDR_TAG_IN2: tag_in_reg[2] <= PWDATA;
+            ADDR_TAG_IN3: tag_in_reg[3] <= PWDATA;
+            default: ;
+          endcase
         end
       end
     end
@@ -461,7 +494,7 @@ module apb_aes_gcm #(
         ADDR_NAME1:   PRDATA = CORE_NAME1;
         ADDR_VERSION: PRDATA = CORE_VERSION;
         ADDR_CTRL: PRDATA = {29'h0, 1'b0, enc_dec_reg, 1'b0};
-        ADDR_STATUS: PRDATA = {28'h0, error_reg, tag_ok_reg, done_reg, busy_reg};
+        ADDR_STATUS: PRDATA = status_wire;
 
         ADDR_KEY0: PRDATA = key_reg[0];
         ADDR_KEY1: PRDATA = key_reg[1];
