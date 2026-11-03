@@ -152,6 +152,8 @@ module AHB_VRAM_DUAL_BUFFER (
     reg operation_done_sticky;
     reg operation_abort_sticky;
     reg vsync_sticky;
+    reg [15:0] lock_loss_count;
+    reg is_cdc_sticky;
 
     wire [13:0] clear_addr;
     wire clear_we;
@@ -402,8 +404,6 @@ module AHB_VRAM_DUAL_BUFFER (
     (* async_reg = "true" *) reg diagnostic_capture_meta;
     (* async_reg = "true" *) reg diagnostic_capture_sync;
     reg diagnostic_high_seen;
-    reg [15:0] lock_loss_count;
-    reg is_cdc_sticky;
 
     // An asynchronously cleared one-bit mailbox. While armed its D feedback
     // holds a loss (zero) even after lock returns or HCLK pauses. Disarmed
