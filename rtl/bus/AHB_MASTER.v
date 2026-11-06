@@ -215,33 +215,35 @@ module AHB_Master_Interface (
     // 메모리 읽기/쓰기 요청이 있으면 NONSEQ(10), 없으면 IDLE(00)
     // EX-stage misalignment is handled by the CPU's existing causes 4/6.
     // It must not launch an AHB transfer that would later look like cause 5/7.
-    wire ex_address_aligned = (HSIZE == 3'b001) ? !EX_alu_result[0] :
-                              (HSIZE == 3'b010) ? (EX_alu_result[1:0] == 2'b00) : 1'b1;
-    assign HTRANS = ((EX_memory_read || EX_memory_write) && ex_address_aligned) ? 2'b10 : 2'b00;
-    assign HBURST = 3'b000; // Single Transfer
-
-    // RV32I LOAD funct3: LB/LH/LW/LBU/LHU; STORE: SB/SH/SW.
-    // Unsupported encodings deliberately use an invalid bus size so the
-    // fabric returns ERROR rather than silently accepting a word transfer.
+    // Predecode access size/alignment independently of late request eligibility.
+    // EA is the existing forwarded ALU result, including low-bit carry.
+    reg [2:0] load_size, store_size;
     always @(*) begin
-        if (EX_memory_read) begin
-            case (EX_funct3)
-                3'b000, 3'b100: HSIZE = 3'b000;
-                3'b001, 3'b101: HSIZE = 3'b001;
-                3'b010:         HSIZE = 3'b010;
-                default:        HSIZE = 3'b111;
-            endcase
-        end else if (EX_memory_write) begin
-            case (EX_funct3)
-                3'b000: HSIZE = 3'b000;
-                3'b001: HSIZE = 3'b001;
-                3'b010: HSIZE = 3'b010;
-                default: HSIZE = 3'b111;
-            endcase
-        end else begin
-            HSIZE = 3'b010;
-        end
+        case (EX_funct3)
+            3'b000, 3'b100: load_size = 3'b000;
+            3'b001, 3'b101: load_size = 3'b001;
+            3'b010:         load_size = 3'b010;
+            default:        load_size = 3'b111;
+        endcase
+        case (EX_funct3)
+            3'b000: store_size = 3'b000;
+            3'b001: store_size = 3'b001;
+            3'b010: store_size = 3'b010;
+            default: store_size = 3'b111;
+        endcase
+        if (EX_memory_read) HSIZE = load_size;
+        else if (EX_memory_write) HSIZE = store_size;
+        else HSIZE = 3'b010;
     end
+    wire load_aligned = (EX_funct3 == 3'b001 || EX_funct3 == 3'b101) ?
+                        !EX_alu_result[0] :
+                        (EX_funct3 == 3'b010) ? (EX_alu_result[1:0] == 2'b00) : 1'b1;
+    wire store_aligned = (EX_funct3 == 3'b001) ? !EX_alu_result[0] :
+                         (EX_funct3 == 3'b010) ? (EX_alu_result[1:0] == 2'b00) : 1'b1;
+    // Preserve read priority and invalid-encoding transfer behavior exactly.
+    assign HTRANS = (EX_memory_read ? load_aligned :
+                     EX_memory_write ? store_aligned : 1'b0) ? 2'b10 : 2'b00;
+    assign HBURST = 3'b000; // Single Transfer
 
 
 	 

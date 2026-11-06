@@ -8,7 +8,7 @@
 
 > **Phase 4A-3A reading rule:** Earlier “current baseline” descriptions of undriven `HSIZE` and unconsumed `HRESP` are pre-cleanup observations. The final Phase 4A-3A data-bus fault contract states the implemented scope; unrelated CPU cleanup remains open.
 
-> **Store payload/mask contract status:** Section 7.1 defines the approved A2 contract; its implementation and verification are pending. Existing response-qualified StoreAligner behavior is not evidence of A2 compliance. Historical observations do not override newer frozen fault contracts.
+> **Store payload/mask contract status:** Section 7.1 remains the approved A2 contract. The integrated CPU implements its response-independent MEM payload/mask path; Section 7.2 records bounded structural/simulation support and remaining limits. Historical observations do not override newer frozen fault contracts. C1a's actual combinational changes are described in Section 6.4 and [CPU structure](21_cpu_core.md#203-integrated-c1a-structure-and-preserved-ownership).
 
 ## 1. Purpose
 
@@ -147,6 +147,36 @@ HTRANS = IDLE
 
 `HADDR` may still reflect the current EX ALU result. Slaves/fabric shall qualify address interpretation with a valid transfer indication rather than treating every `HADDR` value as a transaction.
 
+### 6.4 Integrated C1a request and alignment structure
+
+The CPU top forms each exported request as:
+
+```text
+EX_memory_{read,write}_AHB = EX_valid && EX_memory_{read,write}
+                            && !EX_exc_valid && !EX_fault_raw && !mem_fault_now
+ex_fault_now = EX_valid && !EX_exc_valid && EX_fault_raw && !mem_fault_now
+mem_fault_now = bus_fault_final
+```
+
+Before C1a the request used `!ex_fault_now` instead of `!EX_fault_raw`. Under the existing outer valid/exception/final-fault guards these expressions are logically equivalent for Boolean inputs. The intermediate response-qualified predicate is removed from request eligibility, not from exception sequencing. `!mem_fault_now` still cancels younger EX requests on final MEM ERROR. This Boolean explanation does not assert all possible X-state equivalence.
+
+The master independently predecodes funct3 into `load_size`/`store_size` and `load_aligned`/`store_aligned` from the **existing** effective address, including low-bit carry. Previously request selection generated `HSIZE`, which fed `ex_address_aligned` before `HTRANS`. The integrated structure selects the appropriate predecoded alignment last; no new address adder, queue, pipeline register or latency is added.
+
+| Selection | `HSIZE` | Alignment condition for `HTRANS=NONSEQ` |
+|---|---|---|
+| Read funct3 `000/100` | `000` | any byte offset |
+| Read funct3 `001/101` | `001` | address[0]=0 |
+| Read funct3 `010` | `010` | address[1:0]=00 |
+| Write funct3 `000` | `000` | any byte offset |
+| Write funct3 `001` | `001` | address[0]=0 |
+| Write funct3 `010` | `010` | address[1:0]=00 |
+| Selected unsupported funct3 | `111` | master alignment predicate is true; invalid size is retained for rejection, not converted to a legal word |
+| Neither request | `010` | `HTRANS=IDLE` |
+
+Read has priority for size/alignment selection if both request inputs are asserted; `HWRITE` remains the write input directly. This preserves the master's defined input truth table, not permission for the CPU to issue a dual request. CPU legality/exception qualification is separate from the standalone master's invalid-encoding behavior. Valid misaligned halfword/word accesses are suppressed before a bus transfer and retain causes 4/6.
+
+Source: [CPU request qualification](../rtl/core/v/top/RV32I46F_5SP_MMIO.v), [active master](../rtl/bus/AHB_MASTER.v). EX address/control ownership and matching MEM payload ownership are unchanged; the detailed before/after ownership matrix is in [CPU core Section 20.3](21_cpu_core.md#203-integrated-c1a-structure-and-preserved-ownership).
+
 ## 7. Store Data Phase
 
 Store data is formed in the CPU MEM stage by `StoreAligner`, using:
@@ -182,9 +212,20 @@ EX owns the bus address/control phase; the matching MEM stage owns both HWDATA a
 
 CPU final-ERROR exception processing and younger-request cancellation remain response-qualified. Final ERROR does not require HWDATA or the mask to become zero. Slaves shall reject invalid transactions before side effects commit; response-independent data formation does not relax failed-store-zero-side-effect requirements. Preserve DMEM zero-wait/OKAY, fabric/default ERROR, slave acceptance, all lane encodings, partial writes and registered RAW bypass; this contract adds no APB latency, global-HREADY write gate or generic bus compliance claim.
 
-### 7.2 A2 Acceptance and Unverified Obligations
+### 7.2 A2 Acceptance and Bounded Verification Status
 
-Acceptance requires checking response independence of both outputs in the actual elaborated/optimized design with explicit sequential and blackbox boundaries; physical DMEM write-edge address/data/lane pairing; and stable payload/lanes during waits. Back-to-back stores and DMEM↔APB/VRAM/default transitions shall produce exactly one correctly addressed/lane-qualified write per accepted successful store and none for an unaccepted, cancelled or rejected store. Include first/final ERROR, partial-store RAW merge and recovery. These checks remain pending; a specification update or a saved-graph edge cut does not establish RTL correctness, whole-SoC SCC absence or fitted timing closure.
+Acceptance requires checking response independence of both outputs in the actual elaborated/optimized design with explicit sequential and blackbox boundaries; physical DMEM write-edge address/data/lane pairing; and stable payload/lanes during waits. Back-to-back stores and DMEM↔APB/VRAM/default transitions shall produce exactly one correctly addressed/lane-qualified write per accepted successful store and none for an unaccepted, cancelled or rejected store. Include first/final ERROR, partial-store RAW merge and recovery.
+
+**Implementation observation:** CPU `store_aligner.memory_write` is exactly `Q`; data and mask connect directly to `data_memory_read_data_AHB` and `CUSTOM_WRITE_MASK`, and the master passes both through. This path already existed before C1a. The load path remains final-fault-qualified; payload independence does not apply to all CPU controls.
+
+| Obligation | Existing integrated-source evidence / limit |
+|---|---|
+| Response-to-data/mask and SCC | Saved unoptimized/optimized graphs: no SCC and six response-to-output reachability checks negative, with seven explicit blackboxes. Isolated response-data/mask mutants are rejected. Not whole-SoC or vendor-netlist proof. |
+| Ownership / lanes / waits / faults | Before/after 22,000-cycle directed traces match after distinct source-role validation; per-transaction checker covers 22 physical stores, 18 bus errors, partial RAW and cross-slave activity. Isolated lane/address/owner mutants reject the intended defect. Hold checks cover 2169 pairs. Counts alone are not the oracle. |
+| Master decode / alignment | Separate actual compiler-execution records bind before/after/isolated-mutant roles; 4096 vectors each yield 0/0/512 oracle failures, with mutant checker/guard/parent rejecting. This is a finite standalone-master domain, not whole-CPU formal equivalence. |
+| Reset / integration | Natural reset/recovery and precise fault cause/PC checks, plus real AES-core integration, support exercised cases. Behavioral memory models do not prove vendor BRAM collision behavior or board reset safety. |
+
+These source-bound observations have bounded composite review support; public derivative packaging remains pending. They replace the blanket “all checks pending” description only for this sub-scope. They do not promote tracker requirements, close broader trap/ISA debt, establish universal SCC absence, fitted timing or external I/O/CDC/board acceptance. Run-specific records remain immutable outside this specification; a documentation change does not retroactively alter their source binding.
 
 ### 7.3 Future Shared-Buffer Interface (Non-Normative)
 
@@ -366,7 +407,7 @@ The pre-cleanup CPU could not distinguish OKAY from ERROR; the Phase 4A-3A CPU d
 
 Canonical unmapped-access behavior is specified in `memory_map.md`/`ahb_fabric.md` and verified in the Phase 4A-3A directed bus suite.
 
-Other precise-trap cases remain governed by the open `TRAP-002/003` cleanup items.
+Other precise-trap cases (`TRAP-002/003`) retain their existing requirement status in `baseline_cleanup.md`; this C1a description neither reopens previously reviewed scope nor closes unrelated obligations.
 
 ## 16. Reset Behavior
 
@@ -389,7 +430,7 @@ The following are baseline contract invariants:
 7. DMEM subword writes depend on the 4-bit custom write-mask sideband.
 8. Same-word store-to-load BRAM collision handling depends on the dedicated `oBRAM_HAZARD` sideband.
 9. `HREADY=0` freezes all pipeline stages and suppresses pipeline flush progression until the stall clears.
-10. The CPU does not consume `HRESP` in the baseline.
+10. The CPU consumes final ERROR `HRESP=01` with `HREADY=1` for its matching MEM owner; the combinational master itself has no `HRESP` input.
 11. Pre-cleanup `HSIZE` was undriven; Phase 4A-3A drives it deterministically for load/store bus transfers.
 12. The active interface contains no master-local buffering or multiple-outstanding transaction support.
 
@@ -434,8 +475,8 @@ Independent CPU/bus verification should cover at least:
 - full pipeline stability while `HREADY=0`,
 - simultaneous bus stall with branch/trap/load-use conditions,
 - APB-bridge wait-state transfer preservation,
-- proof that active baseline behavior does not depend on `HSIZE`,
-- checks that `HRESP` is currently not architecturally consumed.
+- deterministic `HSIZE` and invalid-size rejection, including standalone-master versus CPU legality qualification,
+- final `HRESP` consumption, precise cause/PC and failed-effect suppression.
 
 Any future fix to `HSIZE`, bus-error handling, or replacement of the custom sidebands shall update this specification before RTL implementation.
 

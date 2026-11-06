@@ -10,7 +10,9 @@
 
 > **Phase 4A-3A reading rule:** Earlier missing-access-fault descriptions reconstruct the pre-cleanup CPU. The final access-fault section records the verified load/store bus-fault sub-scope; it does not close general precise retirement or other `TRAP-003` dependencies.
 
-> **Store payload/mask contract status:** Section 20.1 specifies the approved A2 contract. Its RTL implementation and verification are pending; historical verified fault behavior does not establish A2 compliance or timing closure.
+> **Current C1a reading rule:** Sections 20.1 and 20.3 describe the integrated CPU/bus structure and bounded verification status. Earlier pre-cleanup decode/ISA/CSR/trap descriptions and the historical list in Section 27 do not override subsequent frozen contracts or the live requirement status in `baseline_cleanup.md`. C1a changes combinational topology, not the logical function or architectural contract.
+>
+> **Store payload/mask contract status:** The integrated implementation has the response-independent MEM payload/mask path required by Section 20.1. Source-bound simulation and structural checks support that sub-scope; public derivative evidence reconciliation and overall acceptance remain separate. This is not whole-SoC timing, vendor BRAM, CDC or board closure.
 
 ## 1. Purpose and Scope
 
@@ -134,7 +136,7 @@ PC / IMEM ------->| IF                        |
                   +---------------------------+
 ```
 
-There is no explicit per-stage architectural `valid` bit. Pipeline bubbles are represented primarily by a NOP instruction (`ADDI x0,x0,0`) plus zeroed control fields.
+The integrated pipeline carries `ID_valid`, `EX_valid`, `MEM_valid` and `WB_valid`, with separate exception/serialization metadata. Reset and flush clear validity; the NOP encoding and zeroed controls alone do not distinguish an architectural NOP from an invalid bubble. These validity mechanisms predate C1a.
 
 ---
 
@@ -433,8 +435,8 @@ The core detects:
 
 ```text
 oBRAM_HAZARD =
-    EX_memory_read &&
-    MEM_memory_write &&
+    EX_memory_read_AHB && MEM_valid &&
+    MEM_memory_write && !MEM_exc_valid &&
     (EX effective address[31:2] == MEM effective address[31:2])
 ```
 
@@ -456,18 +458,18 @@ The system-level `HazardUnit` determines asserted stall/flush requests.
 
 Taken branch/JAL/JALR flushes IF/ID and ID/EX once trap handling permits normal progression.
 
-### 14.2 Trap completion flush
+### 14.2 Active trap / CSR ownership
 
-`pth_done_flush` requests flush of all four pipeline registers.
+The CPU instantiates `WBServiceController`, with stage-owned exception metadata and a serialized CSR/MRET owner. Legacy `pth_done_flush`, `standby_mode`, `trap_done` and `csr_ready` inputs to `HazardUnit` are tied to inactive/ready constants. They do not control the integrated pipeline. An accepted trap redirect flushes IF/ID and MEM/WB; service hold freezes all stages. These mechanisms predate C1a.
 
-### 14.3 Trap standby / CSR stall
+### 14.3 Fault progression
 
-`standby_mode` stalls IF/ID and ID/EX while allowing older stages to drain. Outside standby, `!trap_done || !csr_ready` stalls all four stages.
+A final MEM fault flushes IF/ID, ID/EX and EX/MEM while preserving the incoming fault token in WB and the older WB completion. An EX fault flushes IF/ID and ID/EX. Exception metadata follows the same hold/flush decisions as its instruction token.
 
 ### 14.4 Bus-stall override — highest effective priority
 
 ```text
-if bus_stall_req:
+if bus_stall_req && !bus_fault_final:
     stall IF/ID, ID/EX, EX/MEM, MEM/WB
     clear every flush request
 ```
@@ -477,13 +479,13 @@ Therefore a bus wait freezes the complete pipeline and postpones branch/trap/loa
 ### 14.5 Effective priority summary
 
 ```text
-BUS STALL
+BUS WAIT (bus_stall_req && !bus_fault_final)
   -> full freeze, suppress all flushes
 
 otherwise:
-  trap/CSR standby and trap-controller progress
-  trap-completion flush
-  branch/jump flush
+  trap redirect > trap service hold > MEM fault > EX fault
+  EX branch/jump > ID fault > CSR front advance/hold
+  serialized-owner/pending-fault front hold
   load-use bubble
   normal pipeline advance
 ```
@@ -742,11 +744,11 @@ data_memory_read_data_AHB   // semantically HWDATA
 oBRAM_HAZARD
 ```
 
-Bus-interface quirks already owned by `cpu_interface.md` include:
+Current bus-interface details owned by [CPU interface](03_cpu_interface.md) include:
 
-- `EX_funct3_AHB` declared 32 bits despite three meaningful bits,
-- active `HSIZE` not driven,
-- CPU does not consume `HRESP`,
+- `EX_funct3_AHB` is 3 bits; the former 32-bit declaration is historical,
+- `HSIZE` is driven by separate load/store predecodes,
+- final fabric `HRESP`/`HREADY` reach the CPU directly, outside the combinational master,
 - project-specific custom store mask,
 - bus backpressure converted directly into full-pipeline stall.
 
@@ -758,7 +760,7 @@ Payload and lane intent are not write permission. The owning slave/fabric shall 
 
 Pre-bus misalignment detection/prevention and causes 4/6 retain priority over access faults. Existing CPU final-fault writeback suppression, exception/redirect ordering and request cancellation remain response-qualified; only StoreAligner payload/mask formation is response-independent. Final ERROR need not zero HWDATA or byte-lane intent. No new pipeline stage, slave latency, interrupt behavior or retirement policy is introduced.
 
-Acceptance remains pending for actual post-change response-to-HWDATA/mask and SCC checks, transaction/physical-write-edge ownership across waits and cross-slave ERROR, partial RAW/lane preservation, precise cause/PC/retirement, older-WB preservation, younger cancellation and reset/recovery. Existing fault evidence is not post-A2 verification and does not prove fitted timing closure.
+The integrated C1a sub-scope has bounded, source-bound structural and simulation support, summarized in Section 20.3 and [interface verification status](03_cpu_interface.md#72-a2-acceptance-and-bounded-verification-status). The acceptance obligations remain in force; their exercised cases are no longer described as wholly untested. Historical fault evidence alone is insufficient, and this status does not promote unrelated requirements or establish fitted timing closure.
 
 ### 20.2 Future CPU/DMA Commit Ownership (Non-Normative)
 
@@ -768,7 +770,39 @@ Address/data/WSTRB pairing, partial/same-address writes, collision/bypass, produ
 
 ---
 
-## 21. Current Supported / Incomplete ISA Contract
+### 20.3 Integrated C1a structure and preserved ownership
+
+This implementation description separates the two-file C1a delta from pre-existing A2 mechanisms. The functional requirements in Section 20.1 are unchanged.
+
+| Block / signal | Before C1a | Integrated C1a / preserved invariant |
+|---|---|---|
+| Master size/alignment | Request-qualified `HSIZE` mux feeds `ex_address_aligned`, then request/alignment produces `HTRANS` | `load_size`/`store_size` and `load_aligned`/`store_aligned` predecode funct3/address independently; request selection occurs last. Read priority and all size/alignment values are preserved. |
+| CPU EX bus eligibility | `!ex_fault_now`, where `ex_fault_now = EX_valid && !EX_exc_valid && EX_fault_raw && !mem_fault_now` | Uses `!EX_fault_raw` directly while retaining `EX_valid`, `!EX_exc_valid` and `!mem_fault_now`. This removes the redundant response-qualified intermediate from this cone; response qualification remains on request cancellation. |
+| MEM payload / lanes | Already `Q = MEM_valid && MEM_memory_write && !MEM_exc_valid` | Unchanged StoreAligner and direct output wiring. C1a did not introduce this A2 path or move store alignment to EX. |
+| Forwarding / load-use | MEM non-load over WB; separate store-data mux before EX/MEM; one-cycle load-use interlock | Unchanged; no new forwarding network, pipeline stage or same-cycle MEM-load bypass. |
+| Slave physical write / RAW | Registered DMEM address/write authority, live matching MEM data/mask, registered byte merge | Unchanged; current EX address can belong to the next transaction. |
+| Fault / reset / retirement | Valid and exception tokens, final ERROR, WB-owned service, reset clears transport validity | Unchanged; no ISA, CSR, latency, reset-memory-clear or exception-policy change. |
+
+```text
+EX forwarded operands -> ALU effective address ---------------------> HADDR
+EX funct3 -----------> load/store size + alignment predecode --+
+EX valid/op/exception + raw EX fault + MEM final fault --------+--> HSIZE/HTRANS
+EX forwarded store rs2 -> EX/MEM [hold/flush, valid, address, funct3]
+                                      |
+MEM Q + address[1:0] + funct3 + rs2 -> StoreAligner -> HWDATA + custom mask
+                                                        |
+accepted DMEM address/write -> addr_reg/write_en_reg ----+--> BRAM write edge
+fabric HRDATA -> LoadExtender -> MEM/WB -> WB forwarding / qualified commit
+fabric HRESP/HREADY -> CPU final-fault logic; HREADY -> master stall -> HazardUnit
+```
+
+The diagram's request path and MEM payload path are distinct. `HRESP` is not an input of `AHB_Master_Interface`; response-dependent exception, failed-load suppression and younger-request cancellation remain in CPU top. HWDATA and mask need not become zero on ERROR and do not grant write permission. During a wait the existing pipeline holds the matching payload and metadata; final ERROR completes the faulting owner and cancels younger work.
+
+Source mapping: [CPU top](../rtl/core/v/top/RV32I46F_5SP_MMIO.v) (`EX_memory_*_AHB`, `EX_fault_raw`, `mem_fault_now`, `store_aligner`, `ex_mem_register`); [master](../rtl/bus/AHB_MASTER.v) (`AHB_Master_Interface`); [StoreAligner](../rtl/core/v/mem_stage/StoreAligner.v); [forwarding](../rtl/core/v/hazard_forward/Forward_Unit.v); [hazard control](../rtl/core/v/hazard_forward/Hazard_Unit.v); [EX/MEM transport](../rtl/core/v/pipeline_regs/EX_MEM_Register.v); [DMEM edge/merge](../rtl/bus/AHB_MEMORY_SLAVE.v). The master uses the existing forwarded ALU result including low-bit carry, not an independently recomputed address.
+
+**Evidence boundary:** bounded before/after directed traces cover 22,000 cycles; separate master roles cover 4096 vectors each, with an isolated alignment mutant rejected in 512 cases. Saved unoptimized/optimized structural graphs check response-to-data/mask reachability and SCCs within explicit sequential/blackbox boundaries. These are supporting observations, not universal equivalence, whole-SoC SCC proof or original-root fitter signoff. The actual-core AES/fault integration evidence supports exercised integration behavior, not a new CPU feature. Public derivative packaging remains pending; run-specific provenance belongs outside this specification.
+
+## 21. Historical Supported / Incomplete ISA Description
 
 The datapath contains execution support for ordinary RV32I families, CSR read/modify/write forms, ECALL/EBREAK/MRET-related control behavior, and FENCE-family decode.
 
@@ -935,9 +969,9 @@ The frozen legacy PLIC snapshot is reference-only and shall not override this CP
 
 ---
 
-## 27. Baseline Invariants
+## 27. Historical Pre-cleanup Baseline Invariants
 
-Until cleanup implementation is verified, the following describe the **active baseline**, even where the approved target differs:
+This list records the **historical pre-cleanup baseline**, not the integrated C1a implementation. In particular items 9–19 must not be read as current defects or as a new C1a change; later frozen contracts, Section 20.3 and the live tracker govern current state.
 
 1. Single-issue five-stage RV32I-oriented pipeline.
 2. Branch prediction inactive.

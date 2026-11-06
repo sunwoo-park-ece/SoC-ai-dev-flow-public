@@ -6,7 +6,7 @@
 >
 > **상위 명세:** `soc_architecture.md`, `memory_map.md`.
 
-> **Store payload/mask 계약 상태:** 아래 응답 독립성은 승인된 A2 계약이며 구현과 검증은 미완료이다. 이 명세 갱신만으로 기존 RTL이 A2를 준수한다고 표현해서는 안 된다. 승인된 data-bus fault 계약으로 대체된 이전 구현 관찰은 역사적 기록으로 유지한다.
+> **Store payload/mask 계약 상태:** 통합 CPU는 승인된 A2 응답 독립적인 MEM payload/lane 경로를 구현한다. §7.4는 소스에 결부된 한정적 구현 관찰과 acceptance 의무·물리적 한계를 구분한다. 공개 derivative evidence packaging과 전체 acceptance는 별도이며 명세 수정 자체가 검증은 아니다.
 
 ## 1. 목적
 
@@ -147,7 +147,7 @@ HADDR[14:2]
 
 Write address는 AHB data phase에 맞추기 위해 capture된다.
 
-현재 top-level이 canonical 32 KiB보다 넓게 DMEM을 select하는 문제는 `memory_map.md`에 documented되어 있으며, 해당 alias는 두 번째 memory region처럼 사용하면 안 된다.
+통합 top-level은 유효한 transfer, 지원 size와 alignment로 qualify한 canonical 32 KiB만 선택한다. 과거 64 KiB decode/상단 절반 alias는 cleanup 전 기록이며 현재 상단 절반은 DMEM 대신 default ERROR responder로 전달된다. 두 번째 memory region을 배정하지 않는다. [Fabric decode](04_ahb_fabric.ko.md#4-address-phase-slave-decode)를 참조한다.
 
 ## 6. DMEM AHB-Side Timing
 
@@ -219,7 +219,15 @@ Aligned store data와 `CUSTOM_WRITE_MASK`는 모두 동일 MEM store의 적격�
 
 Stall 및 연속 SB/SH/SW transfer에서도 주소·payload·mask는 동일한 수락 store에 대응해야 한다. 부분 쓰기는 선택되지 않은 byte를 보존해야 한다. RAW bypass는 적격 edge에서 동일 store의 데이터·mask·hazard indication을 capture하고, 이 등록된 값과 BRAM 데이터를 byte 단위로 merge해야 한다. 이전 store의 mask나 다음 EX 주소로 현재 쓰기를 qualify해서는 안 된다. 기존 lane encoding, zero-wait DMEM timing, deterministic same-word bypass는 유지한다.
 
-Acceptance에는 실제 write-edge 주소·데이터·lane, 성공 store의 exactly-once 소유권, 거부·취소 transfer의 zero write, 연속 lane 변경, partial RAW merge, DMEM과 APB/VRAM/default 사이의 전환 및 wait와 두 ERROR phase를 확인해야 한다. 구조 검사는 sequential/blackbox 경계를 명시하고 response-to-data와 response-to-mask 의존성을 포함해야 한다. 이는 미검증 A2 의무이며 검증 완료 주장이 아니다.
+Acceptance에는 실제 write-edge 주소·데이터·lane, 성공 store의 exactly-once 소유권, 거부·취소 transfer의 zero write, 연속 lane 변경, partial RAW merge, DMEM과 APB/VRAM/default 사이의 전환 및 wait와 두 ERROR phase를 확인해야 한다. 구조 검사는 sequential/blackbox 경계를 명시하고 response-to-data와 response-to-mask 의존성을 포함해야 한다. 이 acceptance 의무는 유지하며 한정된 구현 관찰은 아래에 분리한다.
+
+### 7.4 한정된 구현 관찰과 한계
+
+통합 CPU는 StoreAligner 적격성을 정확히 `Q`에 연결하고 data/mask를 조합 master를 통해 직접 전달한다. 이 응답 독립 경로는 C1a 이전부터 존재했다. C1a는 master size/alignment predecode와 EX request eligibility를 재구성하며 memory stage, write gate 또는 새 lane encoding을 추가하지 않는다. [CPU 구조](21_cpu_core.ko.md#203-통합-c1a-구조와-유지되는-소유권)와 [interface 검증 상태](03_cpu_interface.ko.md#72-a2-acceptance와-한정된-검증-상태)를 참조한다.
+
+소스에 결부된 composite review는 실행된 transaction/write-edge ownership, partial RAW, held payload, reset/recovery case와 명시된 sequential/blackbox 경계의 저장된 structural graph 검사를 뒷받침한다. 별도의 유한한 master decode/alignment 근거가 이를 보충하며 physical memory edge나 whole-CPU equivalence를 독립적으로 증명하지 않는다. 과거 실행 record는 이후 문서 tree가 아니라 원래 입력에 결부된다.
+
+Portable behavioral memory 관찰은 vendor `DONT_CARE` collision 동작, fitted timing, CDC 또는 board/reset assurance를 종결하지 않는다. 요구되는 byte-merge 계약은 불변이다. 공개 derivative packaging과 전체 acceptance는 미완료이며 tracker 상태를 승격하지 않는다.
 
 ## 8. Load Extraction 및 Extension
 
@@ -262,6 +270,16 @@ Active CPU는 다음 back-to-back case를 감지한다.
 - 두 address가 같은 32-bit word를 가리킴.
 
 현재 구현은 address bit `[31:2]`를 비교한다.
+
+실제 sideband qualification은 다음과 같다.
+
+```text
+oBRAM_HAZARD = EX_memory_read_AHB && MEM_valid && MEM_memory_write
+               && !MEM_exc_valid
+               && (EX effective address[31:2] == MEM effective address[31:2])
+```
+
+`EX_memory_read_AHB`에는 CPU valid/exception/raw-EX-fault/final-MEM-fault guard가 이미 포함된다. 대응하는 store의 payload/mask는 MEM이 소유하며 sideband는 범용 AHB 쓰기 권한이 아니다.
 
 ### 10.2 Bypass가 필요한 이유
 
@@ -400,6 +418,8 @@ Baseline-compatible memory implementation은 최소 다음 항목을 검증해�
 - firmware image depth와 linker region이 physical memory capacity와 일치하는지.
 - startup `.bss` zeroing이 canonical DMEM을 넘지 않는지.
 
+이는 acceptance 요구사항이며 모든 case나 physical memory primitive가 증명되었다는 주장이 아니다. §7.4는 한정된 구현 부분 범위만 기록한다.
+
 ## 16. Baseline Memory-Subsystem Invariant
 
 다음은 baseline architectural invariant이다.
@@ -421,6 +441,11 @@ Baseline-compatible memory implementation은 최소 다음 항목을 검증해�
 ## 17. 관련 Specification
 
 이 문서는 다음 문서와 상호작용하거나 세부화된다.
+
+- [CPU microarchitecture와 source mapping](21_cpu_core.ko.md#203-통합-c1a-구조와-유지되는-소유권).
+- [CPU/AHB payload 소유권](03_cpu_interface.ko.md#71-승인된-a2-payloadmask-계약).
+- [통합 fabric decode](04_ahb_fabric.ko.md#4-address-phase-slave-decode).
+- 구현 anchor: [CPU StoreAligner/RAW wiring](../../rtl/core/v/top/RV32I46F_5SP_MMIO.v), [master passthrough](../../rtl/bus/AHB_MASTER.v), [DMEM captured write edge와 byte merge](../../rtl/bus/AHB_MEMORY_SLAVE.v), [top-level selection](../../rtl/soc/AMBA_SoC_TOP.v).
 
 - `memory_map.md` — canonical address allocation.
 - `cpu_interface.md` — CPU/AHB signal, custom write mask, stall, forwarding contract.

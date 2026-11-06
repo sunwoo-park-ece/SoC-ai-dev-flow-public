@@ -6,7 +6,7 @@
 >
 > **Parent specifications:** `soc_architecture.md`, `memory_map.md`.
 
-> **Store payload/mask contract status:** Response independence below is the approved A2 contract; implementation and verification are pending. Existing RTL shall not be described as A2-compliant on the basis of this specification update. Earlier implementation observations remain historical where superseded by the approved data-bus fault contracts.
+> **Store payload/mask contract status:** The integrated CPU implements the approved A2 response-independent MEM payload/lane path. Section 7.4 separates bounded, source-bound implementation observations from acceptance obligations and physical limits. Public derivative evidence packaging and overall acceptance remain separate; a specification edit alone is not verification.
 
 ## 1. Purpose
 
@@ -147,7 +147,7 @@ HADDR[14:2]
 
 for both read and write addressing, with the write address captured for the AHB data phase.
 
-The active top-level selects a broader physical decode window than the canonical 32 KiB range. That alias behavior is documented in `memory_map.md` and shall not be used as a second memory region.
+The integrated top-level selects only the canonical 32 KiB range, qualified by a valid transfer, supported size and alignment. The former 64 KiB decode/upper-half alias is historical pre-cleanup behavior; the upper half now reaches the default ERROR responder rather than DMEM. This does not allocate a second memory region; see [fabric decode](04_ahb_fabric.md#4-address-phase-slave-decode).
 
 ## 6. DMEM AHB-Side Timing
 
@@ -219,7 +219,15 @@ Both the aligned store data and `CUSTOM_WRITE_MASK` shall be generated from the 
 
 Address, payload and mask shall remain paired to the same accepted store across stalls and consecutive SB/SH/SW transfers. Partial writes shall preserve unstroked bytes. RAW bypass shall capture the matching store's data, mask and hazard indication at the qualified edge, and merge those registered values bytewise with BRAM data. A previous store's mask or the following EX address shall not qualify the current write. Existing lane encodings, zero-wait DMEM timing and deterministic same-word bypass are unchanged.
 
-Acceptance requires checking physical write-edge address/data/lanes and exactly-once ownership for successful stores, zero writes for rejected/cancelled transfers, back-to-back lane changes, partial RAW merge, and DMEM crossings with APB/VRAM/default responses including waits and both ERROR phases. Structural checks shall cover response-to-data and response-to-mask dependencies with explicit sequential/blackbox boundaries. These are unverified obligations of the A2 change, not claims of completed verification.
+Acceptance requires checking physical write-edge address/data/lanes and exactly-once ownership for successful stores, zero writes for rejected/cancelled transfers, back-to-back lane changes, partial RAW merge, and DMEM crossings with APB/VRAM/default responses including waits and both ERROR phases. Structural checks shall cover response-to-data and response-to-mask dependencies with explicit sequential/blackbox boundaries. These acceptance obligations remain in force; their bounded implementation observations are separated below.
+
+### 7.4 Bounded Implementation Observations and Limits
+
+The integrated CPU connects StoreAligner eligibility exactly to `Q`, and connects its data and mask directly through the combinational master. This response-independent path predates C1a. C1a restructures master size/alignment predecode and EX request eligibility; it does not add a memory stage, write gate or new lane encoding. See [CPU structure](21_cpu_core.md#203-integrated-c1a-structure-and-preserved-ownership) and [interface verification status](03_cpu_interface.md#72-a2-acceptance-and-bounded-verification-status).
+
+Source-bound composite review supports exercised transaction/write-edge ownership, partial RAW, held payload and reset/recovery cases, plus saved structural graph checks within explicit sequential/blackbox boundaries. Separate finite master decode/alignment evidence supplements those checks; it does not independently prove the physical memory edge or whole-CPU equivalence. Historical execution records remain bound to their original inputs, not a later documentation tree.
+
+Portable behavioral memory observations do not close vendor `DONT_CARE` collision behavior, fitted timing, CDC or board/reset assurance. The required byte-merge contract is unchanged. Public derivative packaging and overall acceptance remain pending; no tracker status is promoted here.
 
 ## 8. Load Extraction and Extension
 
@@ -262,6 +270,16 @@ The active CPU detects the back-to-back case in which:
 - both addresses refer to the same 32-bit word.
 
 The implemented condition compares address bits `[31:2]`.
+
+The actual sideband is qualified as:
+
+```text
+oBRAM_HAZARD = EX_memory_read_AHB && MEM_valid && MEM_memory_write
+               && !MEM_exc_valid
+               && (EX effective address[31:2] == MEM effective address[31:2])
+```
+
+`EX_memory_read_AHB` already includes CPU valid/exception/raw-EX-fault/final-MEM-fault guards. The matching store's payload/mask remains MEM-owned; the sideband is not generic AHB write permission.
 
 ### 10.2 Why Bypass Is Required
 
@@ -400,6 +418,8 @@ A baseline-compatible memory implementation should verify at minimum:
 - firmware image depths and linker regions remain consistent with physical memory capacities.
 - startup `.bss` zeroing does not overflow canonical DMEM.
 
+These are acceptance requirements, not an assertion that every case or physical memory primitive has been proven. Section 7.4 records only the bounded implemented sub-scope.
+
 ## 16. Baseline Memory-Subsystem Invariants
 
 The following are baseline architectural invariants:
@@ -421,6 +441,11 @@ The following are baseline architectural invariants:
 ## 17. Related Specifications
 
 This document is refined by or interacts with:
+
+- [CPU microarchitecture and source mapping](21_cpu_core.md#203-integrated-c1a-structure-and-preserved-ownership).
+- [CPU/AHB payload ownership](03_cpu_interface.md#71-approved-a2-payloadmask-contract).
+- [Integrated fabric decode](04_ahb_fabric.md#4-address-phase-slave-decode).
+- Implementation anchors: [CPU StoreAligner/RAW wiring](../rtl/core/v/top/RV32I46F_5SP_MMIO.v), [master passthrough](../rtl/bus/AHB_MASTER.v), [DMEM captured write edge and byte merge](../rtl/bus/AHB_MEMORY_SLAVE.v), [top-level selection](../rtl/soc/AMBA_SoC_TOP.v).
 
 - `memory_map.md` — canonical address allocation.
 - `cpu_interface.md` — CPU/AHB signals, custom write mask, stalls, forwarding contract.

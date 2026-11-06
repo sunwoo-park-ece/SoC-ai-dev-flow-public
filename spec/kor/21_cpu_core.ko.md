@@ -8,7 +8,9 @@
 
 > **Phase 4A-3A 읽기 규칙:** 앞의 access-fault 미구현 설명은 cleanup 전 CPU 기록이다. 마지막 access-fault 문단은 검증된 load/store bus-fault 부분만 현행으로 승격하며 일반 retirement와 전체 `TRAP-003` 완료를 뜻하지 않는다.
 
-> **Store payload/mask 계약 상태:** §20.1은 승인된 A2 계약이다. RTL 구현과 검증은 미완료이며 기존에 검증된 fault 동작이 A2 준수나 timing closure를 입증하지 않는다.
+> **현재 C1a 읽기 규칙:** §20.1과 §20.3은 통합된 CPU/bus 구조와 한정된 검증 상태를 설명한다. 앞의 cleanup 전 decode/ISA/CSR/trap 설명과 §27의 역사적 목록은 이후 동결 계약이나 `baseline_cleanup.md`의 실제 requirement 상태를 대체하지 않는다. C1a는 조합 회로 topology를 바꾸며 논리 기능이나 architectural contract를 바꾸지 않는다.
+>
+> **Store payload/mask 계약 상태:** 통합 구현에는 §20.1이 요구하는 응답 독립적인 MEM payload/mask 경로가 존재한다. 소스에 결부된 simulation과 구조 검사가 해당 부분 범위를 뒷받침하며 공개 derivative evidence 정합화와 전체 acceptance는 별도이다. Whole-SoC timing, vendor BRAM, CDC 또는 board 종결을 뜻하지 않는다.
 
 ## 1. 목적과 범위
 
@@ -65,7 +67,7 @@ External IRQ          active baseline에는 없음
 Privilege             partial machine-mode CSR/trap
 ```
 
-Pipeline에는 별도 architectural `valid` bit가 없다. Bubble은 주로 `ADDI x0,x0,0` NOP과 zero control signal로 표현된다.
+통합 pipeline은 `ID_valid`, `EX_valid`, `MEM_valid`, `WB_valid`와 별도 exception/serialization metadata를 전달한다. Reset과 flush는 validity를 clear한다. NOP encoding과 zero control만으로 architectural NOP과 invalid bubble을 구별할 수 없다. 이 validity 구조는 C1a 이전부터 존재했다.
 
 ---
 
@@ -306,9 +308,9 @@ CPU는:
 
 ```text
 oBRAM_HAZARD =
-  EX_memory_read &&
-  MEM_memory_write &&
-  (EX_addr[31:2] == MEM_addr[31:2])
+  EX_memory_read_AHB && MEM_valid &&
+  MEM_memory_write && !MEM_exc_valid &&
+  (EX effective address[31:2] == MEM effective address[31:2])
 ```
 
 를 생성한다.
@@ -325,20 +327,20 @@ Pipeline register 내부 기본 우선순위:
 reset > flush > capture-if-not-stalled
 ```
 
-HazardUnit system-level behavior:
+CPU는 `WBServiceController`, stage 소유 exception metadata, 직렬화된 CSR/MRET owner를 사용한다. HazardUnit의 legacy `pth_done_flush`, `standby_mode`, `trap_done`, `csr_ready` 입력은 inactive/ready 상수에 연결되어 통합 pipeline을 제어하지 않는다. 수락된 trap redirect는 IF/ID와 MEM/WB를 flush하며 service hold는 전체 stage를 정지시킨다. 이 구조는 C1a 이전부터 존재했다.
 
-- taken branch/JAL/JALR: IF/ID + ID/EX flush,
-- trap completion `pth_done_flush`: all pipeline flush,
-- standby mode: IF/ID + ID/EX stall, older stage drain,
-- `!trap_done || !csr_ready`: all-stage stall,
-- load-use: IF/ID stall + ID/EX bubble,
-- **bus stall: all-stage stall + 모든 flush 강제 0**.
+최종 MEM fault는 IF/ID, ID/EX, EX/MEM을 flush하며 WB로 들어가는 fault token과 더 오래된 WB 완료를 보존한다. EX fault는 IF/ID와 ID/EX를 flush한다. Exception metadata는 자신의 instruction token과 같은 hold/flush 결정을 따른다.
 
-Effective priority 핵심:
+`bus_stall_req && !bus_fault_final`이면 모든 stage를 정지시키고 모든 flush를 억제한다. Bus wait는 branch/trap/load-use 진행을 보류한다. Effective priority:
 
 ```text
-BUS STALL  -> full freeze, flush suppression
-그 외      -> trap/CSR control -> redirect/flush -> load-use -> normal
+BUS WAIT (bus_stall_req && !bus_fault_final)
+  -> full freeze, flush suppression
+그 외:
+  trap redirect > trap service hold > MEM fault > EX fault
+  EX branch/jump > ID fault > CSR front advance/hold
+  serialized-owner/pending-fault front hold
+  load-use bubble > normal pipeline advance
 ```
 
 ---
@@ -568,7 +570,7 @@ data_memory_read_data_AHB // HWDATA 의미
 oBRAM_HAZARD
 ```
 
-외부 master의 undriven HSIZE, HRESP 미사용, EX_funct3 width mismatch, bus-stall semantics는 `03_cpu_interface.md`가 상세 소유한다.
+현재 bus 세부는 [CPU interface](03_cpu_interface.ko.md)가 소유한다. `EX_funct3_AHB`는 3 bits이며 과거 32-bit 선언은 역사적 기록이다. `HSIZE`는 분리된 load/store predecode로 구동한다. Fabric `HRESP`/`HREADY`는 조합 master를 거치지 않고 CPU에 직접 전달된다. Custom store mask와 full-pipeline bus backpressure 규칙은 유지한다.
 
 ### 20.1 승인된 A2 CPU/Slave 책임
 
@@ -578,7 +580,7 @@ Payload와 lane 의도는 쓰기 권한이 아니다. 소유 slave/fabric은 자
 
 버스 요청 전 misalignment 검출·방지 및 cause 4/6의 access-fault 대비 우선순위를 유지한다. 기존 CPU final-fault writeback 억제, 예외·redirect 순서, request 취소는 계속 응답에 의해 qualify하며 StoreAligner payload/mask 생성만 응답 독립적으로 한다. 최종 ERROR에서 HWDATA나 byte-lane 의도를 0으로 만들 필요는 없다. 새로운 pipeline stage, slave latency, interrupt 동작 또는 retirement 정책은 도입하지 않는다.
 
-변경 후 실제 response-to-HWDATA/mask 및 SCC 검사, wait와 cross-slave ERROR에서의 transaction/physical-write-edge 소유권, partial RAW/lane 보존, 정확한 cause/PC/retirement, older-WB 보존, younger 취소, reset/recovery의 acceptance는 미완료이다. 기존 fault evidence는 post-A2 검증이 아니며 fitted timing closure를 증명하지 않는다.
+통합 C1a 부분 범위는 소스에 결부된 한정적 구조·simulation 근거를 가진다. §20.3과 [interface 검증 상태](03_cpu_interface.ko.md#72-a2-acceptance와-한정된-검증-상태)에 요약한다. Acceptance 의무는 유지되며 실행된 case를 전부 미검증으로 서술하지 않는다. 과거 fault evidence만으로는 충분하지 않으며 다른 requirement 승격이나 fitted timing closure를 뜻하지 않는다.
 
 ### 20.2 향후 CPU/DMA Commit 소유권 (비규범적)
 
@@ -588,7 +590,39 @@ Payload와 lane 의도는 쓰기 권한이 아니다. 소유 slave/fabric은 자
 
 ---
 
-## 21. ISA Support 표현 원칙
+### 20.3 통합 C1a 구조와 유지되는 소유권
+
+이 구현 설명은 두 파일의 C1a delta와 기존 A2 구조를 구분한다. §20.1의 기능 요구사항은 변하지 않는다.
+
+| Block / signal | C1a 이전 | 통합 C1a / 유지되는 invariant |
+|---|---|---|
+| Master size/alignment | Request-qualified `HSIZE` mux가 `ex_address_aligned`를 구동한 뒤 request/alignment로 `HTRANS` 생성 | `load_size`/`store_size`, `load_aligned`/`store_aligned`가 funct3/address를 독립적으로 predecode하고 마지막에 request를 선택한다. Read 우선순위와 모든 size/alignment 값을 보존한다. |
+| CPU EX bus eligibility | `!ex_fault_now`, 여기서 `ex_fault_now = EX_valid && !EX_exc_valid && EX_fault_raw && !mem_fault_now` | `!EX_fault_raw`를 직접 사용하며 `EX_valid`, `!EX_exc_valid`, `!mem_fault_now`를 유지한다. 해당 cone의 중복된 응답-qualified 중간 항을 제거하며 request 취소의 응답 qualification은 유지한다. |
+| MEM payload / lanes | 이미 `Q = MEM_valid && MEM_memory_write && !MEM_exc_valid` | StoreAligner와 직접 출력 연결은 불변이다. C1a가 A2 경로를 새로 도입하거나 store alignment를 EX로 옮기지 않았다. |
+| Forwarding / load-use | MEM non-load가 WB보다 우선; EX/MEM 전 별도 store-data mux; one-cycle load-use interlock | 불변이다. 새 forwarding network, pipeline stage 또는 same-cycle MEM-load bypass는 없다. |
+| Slave physical write / RAW | 등록된 DMEM 주소/쓰기 권한, 대응하는 live MEM data/mask, 등록된 byte merge | 불변이다. 현재 EX 주소는 다음 transaction에 속할 수 있다. |
+| Fault / reset / retirement | Valid/exception token, 최종 ERROR, WB 소유 service, reset의 transport validity clear | 불변이다. ISA, CSR, latency, reset-memory-clear 또는 exception policy 변경이 없다. |
+
+```text
+EX forwarded operands -> ALU effective address ---------------------> HADDR
+EX funct3 -----------> load/store size + alignment predecode --+
+EX valid/op/exception + raw EX fault + MEM final fault --------+--> HSIZE/HTRANS
+EX forwarded store rs2 -> EX/MEM [hold/flush, valid, address, funct3]
+                                      |
+MEM Q + address[1:0] + funct3 + rs2 -> StoreAligner -> HWDATA + custom mask
+                                                        |
+accepted DMEM address/write -> addr_reg/write_en_reg ----+--> BRAM write edge
+fabric HRDATA -> LoadExtender -> MEM/WB -> WB forwarding / qualified commit
+fabric HRESP/HREADY -> CPU final-fault logic; HREADY -> master stall -> HazardUnit
+```
+
+그림의 request 경로와 MEM payload 경로는 구별된다. `HRESP`는 `AHB_Master_Interface` 입력이 아니며 응답 종속 exception, 실패 load 억제, younger-request 취소는 CPU top에 남는다. ERROR에서 HWDATA/mask를 0으로 만들 필요는 없으며 이들은 쓰기 권한이 아니다. Wait 동안 기존 pipeline이 대응하는 payload/metadata를 hold한다. 최종 ERROR는 faulting owner를 완료하고 younger work를 취소한다.
+
+Source mapping: [CPU top](../../rtl/core/v/top/RV32I46F_5SP_MMIO.v)의 `EX_memory_*_AHB`, `EX_fault_raw`, `mem_fault_now`, `store_aligner`, `ex_mem_register`; [master](../../rtl/bus/AHB_MASTER.v)의 `AHB_Master_Interface`; [StoreAligner](../../rtl/core/v/mem_stage/StoreAligner.v); [forwarding](../../rtl/core/v/hazard_forward/Forward_Unit.v); [hazard control](../../rtl/core/v/hazard_forward/Hazard_Unit.v); [EX/MEM transport](../../rtl/core/v/pipeline_regs/EX_MEM_Register.v); [DMEM edge/merge](../../rtl/bus/AHB_MEMORY_SLAVE.v). Master는 low-bit carry를 포함한 기존 forwarded ALU result를 사용하며 주소를 별도로 재계산하지 않는다.
+
+**Evidence 경계:** 한정된 before/after directed trace는 22,000 cycles를 다루며 master 역할별 4096 vectors와 isolated alignment mutant의 512-case 거부를 포함한다. 저장된 unoptimized/optimized graph는 명시된 sequential/blackbox 경계 안에서 response-to-data/mask reachability와 SCC를 검사한다. 이는 universal equivalence, whole-SoC SCC 증명 또는 original-root fitter signoff가 아니다. 실제 AES core/fault 통합 근거는 실행된 통합 동작을 뒷받침하며 새 CPU 기능이 아니다. 공개 derivative packaging은 미완료이며 run별 provenance는 명세 밖에서 관리한다.
+
+## 21. 역사적 ISA Support 설명
 
 Datapath에는 일반적인 RV32I integer family와 CSR/system 일부가 구현되어 있다.
 
@@ -720,9 +754,9 @@ Legacy PLIC snapshot은 참고자료일 뿐 현재 core contract를 덮어쓰지
 
 ---
 
-## 27. Baseline Invariants
+## 27. 역사적 Pre-cleanup Baseline Invariants
 
-Cleanup 구현이 검증되기 전까지 아래는 **active baseline** 설명이다.
+아래 목록은 통합 C1a가 아닌 **역사적 pre-cleanup baseline** 기록이다. 특히 9–19번을 현재 결함이나 새로운 C1a 변경으로 해석해서는 안 된다. 이후 동결 계약, §20.3, 실제 tracker가 현재 상태를 규정한다.
 
 1. Single-issue 5-stage pipeline이다.
 2. Branch prediction은 inactive이다.

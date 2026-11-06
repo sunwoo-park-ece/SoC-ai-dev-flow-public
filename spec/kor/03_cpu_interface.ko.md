@@ -8,7 +8,7 @@
 
 > **Phase 4A-3A 읽기 규칙:** 앞의 `HSIZE` 미구동·`HRESP` 미소비를 ‘현재 baseline’으로 서술한 부분은 cleanup 전 기록이다. 아래 Phase 4A-3A data-bus fault 계약이 현행 구현 범위다. 기타 CPU cleanup은 열린 상태다.
 
-> **Store payload/mask 계약 상태:** §7.1은 승인된 A2 계약이며 구현과 검증은 미완료이다. 기존 응답 종속 StoreAligner 동작은 A2 준수 근거가 아니다. 역사적 관찰은 더 새로운 동결 fault 계약을 대체하지 않는다.
+> **Store payload/mask 계약 상태:** §7.1의 승인된 A2 계약은 유지한다. 통합 CPU는 응답 독립적인 MEM payload/mask 경로를 구현하며 §7.2는 한정된 구조·simulation 근거와 남은 한계를 기록한다. 역사적 관찰은 더 새로운 동결 fault 계약을 대체하지 않는다. 실제 C1a 조합 구조 변경은 §6.4와 [CPU 구조](21_cpu_core.ko.md#203-통합-c1a-구조와-유지되는-소유권)에 설명한다.
 
 ## 1. 목적
 
@@ -147,6 +147,36 @@ HTRANS = IDLE
 
 이때 `HADDR`는 현재 EX ALU result를 계속 반영할 수 있다. 따라서 slave/fabric은 단순히 `HADDR`만 보고 transaction으로 해석하면 안 되고 valid transfer indication과 함께 qualify해야 한다.
 
+### 6.4 통합 C1a Request와 Alignment 구조
+
+CPU top의 각 exported request는 다음과 같다.
+
+```text
+EX_memory_{read,write}_AHB = EX_valid && EX_memory_{read,write}
+                            && !EX_exc_valid && !EX_fault_raw && !mem_fault_now
+ex_fault_now = EX_valid && !EX_exc_valid && EX_fault_raw && !mem_fault_now
+mem_fault_now = bus_fault_final
+```
+
+C1a 이전 request는 `!EX_fault_raw` 대신 `!ex_fault_now`를 사용했다. 기존 바깥쪽 valid/exception/final-fault guard 아래에서 두 식은 Boolean 입력에 대해 논리적으로 동등하다. 응답-qualified 중간 predicate는 request eligibility에서 제거되며 exception sequencing에서는 유지된다. 최종 MEM ERROR에서 `!mem_fault_now`가 younger EX request를 계속 취소한다. 이 Boolean 설명은 모든 X-state equivalence를 주장하지 않는다.
+
+Master는 low-bit carry를 포함한 **기존** effective address와 funct3로 `load_size`/`store_size`, `load_aligned`/`store_aligned`를 독립적으로 predecode한다. 이전에는 request 선택으로 생성한 `HSIZE`가 `ex_address_aligned`를 거쳐 `HTRANS`에 도달했다. 통합 구조는 마지막에 대응하는 predecoded alignment를 선택한다. 새 address adder, queue, pipeline register 또는 latency를 추가하지 않는다.
+
+| 선택 | `HSIZE` | `HTRANS=NONSEQ`의 Alignment 조건 |
+|---|---|---|
+| Read funct3 `000/100` | `000` | 모든 byte offset |
+| Read funct3 `001/101` | `001` | address[0]=0 |
+| Read funct3 `010` | `010` | address[1:0]=00 |
+| Write funct3 `000` | `000` | 모든 byte offset |
+| Write funct3 `001` | `001` | address[0]=0 |
+| Write funct3 `010` | `010` | address[1:0]=00 |
+| 선택된 unsupported funct3 | `111` | master alignment predicate는 true; 거부를 위한 invalid size를 유지하며 legal word로 변환하지 않음 |
+| Request 없음 | `010` | `HTRANS=IDLE` |
+
+두 request 입력이 모두 asserted이면 size/alignment 선택은 read가 우선하며 `HWRITE`는 write 입력을 직접 따른다. 이는 master 입력 truth table 보존이지 CPU dual request 허용이 아니다. CPU legality/exception qualification과 standalone master의 invalid-encoding 동작은 별개다. 유효한 halfword/word의 misaligned access는 bus 전송 전에 억제하며 cause 4/6을 유지한다.
+
+Source: [CPU request qualification](../../rtl/core/v/top/RV32I46F_5SP_MMIO.v), [active master](../../rtl/bus/AHB_MASTER.v). EX 주소·제어와 대응하는 MEM payload 소유권은 불변이다. 상세 before/after 소유권 matrix는 [CPU core §20.3](21_cpu_core.ko.md#203-통합-c1a-구조와-유지되는-소유권)에 있다.
+
 ## 7. Store Data Phase
 
 Store data는 CPU MEM stage의 `StoreAligner`가 다음 정보를 사용해 생성한다.
@@ -182,9 +212,20 @@ EX는 bus 주소·제어 phase를 소유하고, 이에 대응하는 MEM stage는
 
 CPU의 최종 ERROR 예외 처리와 더 어린 request 취소는 계속 응답에 의해 qualify한다. 최종 ERROR에서 HWDATA나 mask를 0으로 만들 필요는 없다. Slave는 잘못된 트랜잭션의 부작용이 commit되기 전에 이를 거부해야 하며 응답 독립적인 데이터 생성이 failed-store-zero-side-effect 요구를 완화하지 않는다. DMEM zero-wait/OKAY, fabric/default ERROR, slave acceptance, 모든 lane encoding, 부분 쓰기, 등록된 RAW bypass를 유지한다. 이 계약은 APB latency, global-HREADY write gate, 범용 bus compliance 주장을 추가하지 않는다.
 
-### 7.2 A2 Acceptance와 미검증 의무
+### 7.2 A2 Acceptance와 한정된 검증 상태
 
-Acceptance에는 실제 elaborated/optimized design에서 sequential/blackbox 경계를 명시한 두 출력의 응답 독립성, 실제 DMEM write-edge 주소·데이터·lane pairing, wait 중 payload/lane 안정성 검사가 필요하다. 연속 store와 DMEM↔APB/VRAM/default 전환에서 수락된 성공 store마다 정확한 주소·lane의 쓰기가 한 번 발생하고, 미수락·취소·거부 store에서는 쓰기가 없어야 한다. 첫/최종 ERROR, partial-store RAW merge, recovery를 포함한다. 이 검사는 미완료이며 명세 갱신이나 저장된 graph의 edge 삭제는 RTL 정확성, whole-SoC SCC 부재 또는 fitted timing closure를 입증하지 않는다.
+Acceptance에는 실제 elaborated/optimized design에서 sequential/blackbox 경계를 명시한 두 출력의 응답 독립성, 실제 DMEM write-edge 주소·데이터·lane pairing, wait 중 payload/lane 안정성 검사가 필요하다. 연속 store와 DMEM↔APB/VRAM/default 전환에서 수락된 성공 store마다 정확한 주소·lane의 쓰기가 한 번 발생하고, 미수락·취소·거부 store에서는 쓰기가 없어야 한다. 첫/최종 ERROR, partial-store RAW merge, recovery를 포함한다.
+
+**구현 관찰:** CPU `store_aligner.memory_write`는 정확히 `Q`이며 data/mask는 `data_memory_read_data_AHB`, `CUSTOM_WRITE_MASK`에 직접 연결되고 master가 그대로 전달한다. 이 경로는 C1a 이전부터 존재했다. Load 경로의 final-fault qualification은 유지되며 payload 독립성이 모든 CPU 제어에 적용되는 것은 아니다.
+
+| 의무 | 기존 통합 소스 evidence / 한계 |
+|---|---|
+| Response-to-data/mask와 SCC | 저장된 unoptimized/optimized graph에서 SCC 없음, response-to-output reachability 여섯 검사는 negative이며 blackbox 일곱 개를 명시한다. Isolated response-data/mask mutant를 거부한다. Whole-SoC/vendor-netlist 증명이 아니다. |
+| Ownership / lanes / waits / faults | 서로 다른 source-role을 검증한 뒤 before/after 22,000-cycle directed trace가 일치한다. Transaction별 checker는 physical store 22개, bus error 18개, partial RAW, cross-slave activity를 다룬다. Isolated lane/address/owner mutant는 의도한 결함으로 거부된다. Hold 검사는 2169 pairs를 다룬다. Count만이 oracle인 것은 아니다. |
+| Master decode / alignment | 역할별 실제 compiler-execution record가 before/after/isolated-mutant를 결부한다. 각각 4096 vectors에서 oracle failure 0/0/512이며 mutant checker/guard/parent가 거부한다. 유한한 standalone-master domain이지 whole-CPU formal equivalence가 아니다. |
+| Reset / integration | 자연 reset/recovery, precise fault cause/PC 및 실제 AES-core 통합 검사가 실행된 case를 뒷받침한다. Behavioral memory model은 vendor BRAM collision 동작이나 board reset 안전을 입증하지 않는다. |
+
+이 소스에 결부된 관찰에는 한정된 composite review 근거가 있으며 공개 derivative packaging은 미완료이다. 해당 부분 범위에서만 ‘전부 미검증’ 설명을 대체한다. Tracker requirement 승격, 더 넓은 trap/ISA 의무 종결, universal SCC 부재, fitted timing, 외부 I/O/CDC/board acceptance를 뜻하지 않는다. Run별 record는 명세 밖에서 불변으로 보존하며 문서 수정으로 과거 source binding을 소급 변경하지 않는다.
 
 ### 7.3 향후 Shared-Buffer Interface (비규범적)
 
@@ -360,13 +401,11 @@ Store의 경우 `StoreAligner`가 잘못 정렬된 SH/SW lane 조합에 zero mas
 
 ## 15. Bus Response / Error Visibility
 
-SoC fabric에는 `HRESP` path가 있지만 active `AHB_Master_Interface`에는 **`HRESP` input이 없고**, CPU에도 bus-error indication이 전달되지 않는다.
+Cleanup 전에는 `AHB_Master_Interface`에 `HRESP` 입력이 없고 CPU에도 bus-error indication이 전달되지 않았다. Phase 4A-3A는 fabric의 선택된 `HRESP`를 CPU에 직접 연결해 최종 load/store ERROR를 처리한다. 조합 master 자체에는 계속 `HRESP` 입력이 없다.
 
-따라서 baseline CPU는 이 interface를 통해 OKAY response와 bus error를 architectural하게 구분할 수 없다.
+Cleanup 전 CPU는 OKAY/ERROR를 구별하지 못했지만 현재 CPU는 data-bus load/store fault를 구별한다. Unmapped access 정책은 `memory_map.md`/`ahb_fabric.md`의 계약과 Phase 4A-3A directed bus 근거가 소유한다.
 
-Unmapped access의 현재 동작은 `memory_map.md`/`ahb_fabric.md`에서 별도로 정의한다. SoC 내부에 `HRESP` net이 존재한다는 이유만으로 software가 robust access-fault behavior를 기대하면 안 된다.
-
-Architectural bus-error exception을 추가하려면 향후 specification과 CPU interface 변경이 필요하다.
+그 밖의 precise-trap case(`TRAP-002/003`)는 `baseline_cleanup.md`의 기존 상태를 유지한다. C1a 설명은 기존에 검토된 범위를 다시 열거나 무관한 의무를 종결하지 않는다.
 
 ## 16. Reset Behavior
 
@@ -389,7 +428,7 @@ Memory contents와 firmware image reset semantics는 `memory_subsystem.md`에서
 7. DMEM subword write는 4-bit custom write-mask sideband에 의존한다.
 8. Same-word store-to-load BRAM collision 처리는 dedicated `oBRAM_HAZARD` sideband에 의존한다.
 9. `HREADY=0`이면 모든 pipeline stage가 freeze되고 stall이 해제될 때까지 pipeline flush 진행도 억제된다.
-10. CPU는 baseline에서 `HRESP`를 소비하지 않는다.
+10. CPU는 대응하는 MEM owner의 최종 ERROR `HRESP=01`, `HREADY=1`을 소비한다. 조합 master 자체에는 `HRESP` 입력이 없다.
 11. Cleanup 전 `HSIZE`는 undriven이었으나 Phase 4A-3A에서 load/store 크기에 맞게 구동한다.
 12. Active interface에는 master-local buffering이나 multiple-outstanding transaction 지원이 없다.
 
@@ -434,8 +473,8 @@ Independent CPU/bus verification은 최소 다음 항목을 검증해야 한다.
 - `HREADY=0` 동안 full pipeline stability
 - bus stall과 branch/trap/load-use가 동시에 발생하는 경우
 - APB bridge wait-state 동안 transaction preservation
-- 현재 baseline behavior가 `HSIZE`에 의존하지 않는지 확인
-- `HRESP`가 현재 architectural하게 소비되지 않는지 확인
+- 결정적인 `HSIZE`와 invalid-size 거부; standalone master와 CPU legality qualification 구분
+- 최종 `HRESP` 소비, precise cause/PC, 실패 side-effect 억제
 
 향후 `HSIZE`, bus-error handling, custom sideband replacement를 변경하려면 RTL 구현 전에 이 specification을 먼저 업데이트해야 한다.
 

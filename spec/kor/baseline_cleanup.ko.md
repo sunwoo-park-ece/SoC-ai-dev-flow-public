@@ -64,6 +64,10 @@ VERIFIED    구현 + evidence review 완료
 DEFERRED    PLIC / AXI / optional future로 의도적으로 이동
 ```
 
+`BC` 항목은 specification owner의 명시적 결정과 문서화된 근거 없이 `DEFERRED`로 표시해서는 안 된다.
+
+축약표에서 생략된 Severity/Gate와 세부 Required outcome/Verification은 동일 ID의 English canonical tracker row 및 owning spec을 참조한다. ADC 6개 row의 생략된 metadata도 이 기준을 따르며, 표 축약은 요구사항이나 완료 조건의 면제를 뜻하지 않는다.
+
 ## 3. Cleanup Exit Gate
 
 다음을 모두 만족해야 cleanup milestone을 종료한다.
@@ -174,13 +178,13 @@ Phase F — regression / Quartus / board / report
 
 | ID | Sev | Gate | 현재 문제 | 필요한 결과 | 관련 spec | Verification | Status |
 |---|---|---|---|---|---|---|---|
-| `BUS-001` | High | BC | DMEM top decode 64 KiB vs canonical 32 KiB. | `0x1000_0000..0x1000_7FFF`만 decode. | `01_memory_map`, `02_memory_subsystem`, `04_ahb_fabric` | boundary/unmapped load/store | VERIFIED |
-| `BUS-002` | High | BC | CPU master `HSIZE` undriven. | byte=`000`, half=`001`, word=`010`. | `03_cpu_interface`, `04_ahb_fabric`, `21_cpu_core` | 모든 load/store waveform | VERIFIED |
-| `BUS-003` | Blocker | BC | unmapped/default zero/OKAY, CPU HRESP 미사용. | 승인된 A2: 2-cycle `HRESP=01` ERROR, APB default error, precise CPU load/store access fault 구현. | `03_cpu_interface`, `04_ahb_fabric`, `05_apb_subsystem`, `07_interrupt_architecture`, `21_cpu_core` | invalid DMEM/VGA/APB/reserved fault | VERIFIED |
-| `BUS-004` | Medium | BC | `HSEL_*` address-only decode. | valid-transfer qualify 또는 동등 안전성 증명. | `03_cpu_interface`, `04_ahb_fabric` | IDLE/back-to-back/wait | VERIFIED |
-| `CPU-001` | Medium | BC | `EX_funct3_AHB` width/naming 문제. | width/naming 정규화. | `03_cpu_interface`, `21_cpu_core` | lint + memory | OPEN |
+| `BUS-001` | High | BC | 과거 64 KiB DMEM decode 문제이며 검토된 canonical-range cleanup으로 제거됨. | `0x1000_0000..0x1000_7FFF`만 decode. | `01_memory_map`, `02_memory_subsystem`, `04_ahb_fabric` | boundary/unmapped load/store | VERIFIED |
+| `BUS-002` | High | BC | 과거 `HSIZE` 미구동 문제이며 활성 master는 기존 size mapping을 구동함. | byte=`000`, half=`001`, word=`010`. | `03_cpu_interface`, `04_ahb_fabric`, `21_cpu_core` | 모든 load/store waveform | VERIFIED |
+| `BUS-003` | Blocker | BC | 과거 default silent OKAY/CPU 응답 경로 부재이며 현행 frozen error 계약은 구현됨. | 승인된 A2: 2-cycle `HRESP=01` ERROR, APB default error, precise CPU load/store access fault 구현. | `03_cpu_interface`, `04_ahb_fabric`, `05_apb_subsystem`, `07_interrupt_architecture`, `21_cpu_core` | invalid DMEM/VGA/APB/reserved fault | VERIFIED |
+| `BUS-004` | Medium | BC | 과거 address-only select이며 현재 valid-transfer/final-error 취소를 포함함. | valid-transfer qualify 또는 동등 안전성 증명. | `03_cpu_interface`, `04_ahb_fabric` | IDLE/back-to-back/wait | VERIFIED |
+| `CPU-001` | Medium | BC | `EX_funct3_AHB`는 현재 3 bits이며 `data_memory_read_data_AHB`의 store-data 명명 문제는 남음. | width/naming 정규화. | `03_cpu_interface`, `21_cpu_core` | lint + memory | OPEN |
 | `CPU-002` | Medium | AXI | custom write mask/BRAM hazard가 CPU↔DMEM local sideband. | baseline에 containment; AXI generic semantics로 복사 금지. | `02_memory_subsystem`, `03_cpu_interface`, `21_cpu_core` | RAW + future AXI review | DEFERRED |
-| `BUS-005` | High | BC | stall/data-phase routing proof 부족. | delayed select/cross-slave wait 검증. | `03_cpu_interface`, `04_ahb_fabric`, `05_apb_subsystem`, `21_cpu_core` | wait-state tests | VERIFIED |
+| `BUS-005` | High | BC | 과거 wait/response 증거 공백이며 검토된 directed 소유권/wait 범위를 보존함. | delayed select/cross-slave wait 검증. | `03_cpu_interface`, `04_ahb_fabric`, `05_apb_subsystem`, `21_cpu_core` | wait-state tests | VERIFIED |
 
 ### 5.1 CPU Core Correctness
 
@@ -315,7 +319,7 @@ UART/LoRa, external-I/O electrical acceptance가 아니다. `UART-005`는 OPEN,
 | ID | Sev | Gate | 핵심 작업 | Status |
 |---|---|---|---|---|
 | `SPI-001` | High | BC | 16/56-bit bit/CS/sample timing regression | VERIFIED |
-| `SPI-002` | High | BC | 승인된 A6 PCLK-only clock-enable FSM, registered mode-3 SCLK; active SPI PLL 제거 | IN_PROGRESS |
+| `SPI-002` | High | BC | 승인된 A6 PCLK-only clock-enable FSM, registered mode-3 SCLK; active SPI PLL 제거; physical ADXL345 2 MHz mode-3 pin timing 및 16/56-bit/reset 근거의 잔여 closure 필요 | IN_PROGRESS |
 | `SPI-003` | Medium | OPT | generic SPI로 claim 금지 | DEFERRED |
 | `SPI-004` | Medium | OPT | transport/policy 분리 optional | OPEN |
 
@@ -394,11 +398,13 @@ P10-HEX 근거: 독립 APB 베이스라인(S0), CTRL RAZ/WI(S1), exact local off
 | `VER-003` | Blocker | BC | async clock/reset CDC regression | OPEN |
 | `VER-004` | Blocker | BC | fresh Quartus + TimeQuest | IN_PROGRESS |
 | `VER-005` | Blocker | BC | FPGA board acceptance | OPEN |
-| `VER-006` | High | BC | actual-core AES KAT evidence | OPEN |
-| `VER-007` | High | BC | source→ELF→MIF→SOF chain | OPEN |
+| `VER-006` | High | BC | actual-core AES-GCM KAT evidence; vectors/results tied to RTL commit | OPEN |
+| `VER-007` | High | BC | source→ELF→IMEM/DMEM MIF→SOF chain; reproducible artifact mapping | OPEN |
 | `VER-008` | Blocker | BC | `21_cpu_core` CPU regression: shift/JALR/legality/retire/trap/FENCE/CSR-ID/counter-write-ignore | VERIFIED |
-| `DOC-001` | High | BC | verified target text를 active로 승격 | OPEN |
+| `DOC-001` | High | BC | 검증 후 owning spec의 target text를 active로 승격하고 README/index 갱신; reviewed spec diff | OPEN |
 | `REPORT-001` | High | BC | cleanup milestone report | OPEN |
+
+통합 C1a 기능 review는 보존된 기존 회귀 Lane과 별도의 보정 exhaustive-master 근거를 결합한다. 이 한정된 근거만으로 repository-wide lint, CDC, physical, board 또는 source-commit provenance gate를 종결하지 않는다. Requirement 상태와 §3은 불변이며 sanitized public evidence 정합화는 미완료이다. 범위는 [CPU](21_cpu_core.ko.md)·[CPU Interface](03_cpu_interface.ko.md)·[Memory](02_memory_subsystem.ko.md)·[AHB](04_ahb_fabric.ko.md) 소유 계약을 참조한다.
 
 ## 20. Board Acceptance
 

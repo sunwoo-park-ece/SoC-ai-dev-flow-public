@@ -180,13 +180,13 @@ The CPU policy choices in `21_cpu_core.md` are no longer blocking architecture q
 
 | ID | Sev | Gate | Current issue | Required outcome | Dependent specs | Verification | Status |
 |---|---|---|---|---|---|---|---|
-| `BUS-001` | High | BC | DMEM top-level decode selects 64 KiB while canonical DMEM is 32 KiB. | Decode only `0x1000_0000..0x1000_7FFF`; remove upper alias. | `01_memory_map`, `02_memory_subsystem`, `04_ahb_fabric` | boundary/unmapped load/store tests | VERIFIED |
-| `BUS-002` | High | BC | CPU master leaves `HSIZE` undriven. | Generate byte=`000`, half=`001`, word=`010` deterministically. | `03_cpu_interface`, `04_ahb_fabric`, `21_cpu_core` | LB/LBU/LH/LHU/LW/SB/SH/SW waveform tests | VERIFIED |
-| `BUS-003` | Blocker | BC | Unmapped/default accesses silently complete zero/OKAY and CPU does not consume `HRESP`. | Implement frozen A2: 2-cycle `HRESP=01` ERROR, APB default error, and precise CPU load/store access faults. | `03_cpu_interface`, `04_ahb_fabric`, `05_apb_subsystem`, `07_interrupt_architecture`, `21_cpu_core` | invalid DMEM/VGA/APB/reserved access-fault tests | VERIFIED |
-| `BUS-004` | Medium | BC | Top `HSEL_*` decode is address-only and can assert while `HTRANS=IDLE`. | Qualify with a valid-transfer predicate or prove equivalent safe behavior. | `03_cpu_interface`, `04_ahb_fabric` | IDLE-address/back-to-back/wait tests | VERIFIED |
-| `CPU-001` | Medium | BC | `EX_funct3_AHB` width mismatch and misleading store-data naming. | Normalize width/naming without changing pipeline behavior. | `03_cpu_interface`, `21_cpu_core` | lint + memory regression | OPEN |
+| `BUS-001` | High | BC | Historical 64 KiB top-level DMEM decode (removed by the reviewed canonical-range cleanup). | Decode only `0x1000_0000..0x1000_7FFF`; remove upper alias. | `01_memory_map`, `02_memory_subsystem`, `04_ahb_fabric` | boundary/unmapped load/store tests | VERIFIED |
+| `BUS-002` | High | BC | Historical undriven `HSIZE`; the active master drives the existing size mapping. | Generate byte=`000`, half=`001`, word=`010` deterministically. | `03_cpu_interface`, `04_ahb_fabric`, `21_cpu_core` | LB/LBU/LH/LHU/LW/SB/SH/SW waveform tests | VERIFIED |
+| `BUS-003` | Blocker | BC | Historical silent default OKAY/missing CPU response path; the active frozen error contract is implemented. | Implement frozen A2: 2-cycle `HRESP=01` ERROR, APB default error, and precise CPU load/store access faults. | `03_cpu_interface`, `04_ahb_fabric`, `05_apb_subsystem`, `07_interrupt_architecture`, `21_cpu_core` | invalid DMEM/VGA/APB/reserved access-fault tests | VERIFIED |
+| `BUS-004` | Medium | BC | Historical address-only selects; active selection includes valid-transfer and final-error cancellation. | Qualify with a valid-transfer predicate or prove equivalent safe behavior. | `03_cpu_interface`, `04_ahb_fabric` | IDLE-address/back-to-back/wait tests | VERIFIED |
+| `CPU-001` | Medium | BC | `EX_funct3_AHB` is now 3 bits; misleading `data_memory_read_data_AHB` store-data naming remains. | Normalize width/naming without changing pipeline behavior. | `03_cpu_interface`, `21_cpu_core` | lint + memory regression | OPEN |
 | `CPU-002` | Medium | AXI | `CUSTOM_WRITE_MASK` / `oBRAM_HAZARD` are CPU↔DMEM implementation sidebands. | Contain them in baseline DMEM; do not copy them as generic AXI semantics. | `02_memory_subsystem`, `03_cpu_interface`, `21_cpu_core` | RAW bypass regression; AXI-stage review | DEFERRED |
-| `BUS-005` | High | BC | Stall/data-phase response routing lacks cleanup-grade directed evidence. | Prove delayed select retention and correct responses across waits and cross-slave transfers. | `03_cpu_interface`, `04_ahb_fabric`, `05_apb_subsystem`, `21_cpu_core` | MEM/APB/VGA cross-slave wait tests | VERIFIED |
+| `BUS-005` | High | BC | Historical wait/response evidence gap; reviewed directed ownership/wait scope is retained. | Prove delayed select retention and correct responses across waits and cross-slave transfers. | `03_cpu_interface`, `04_ahb_fabric`, `05_apb_subsystem`, `21_cpu_core` | MEM/APB/VGA cross-slave wait tests | VERIFIED |
 
 ### 5.1 CPU Core Correctness and Architectural Cleanup
 
@@ -412,6 +412,8 @@ P10-HEX evidence: standalone APB baseline (S0), CTRL RAZ/WI (S1), exact local of
 | `VER-008` | Blocker | BC | Dedicated CPU-core regression for new `21_cpu_core` contract. | shift/JALR/legality/retire/trap/FENCE/CSR-ID/counter-write-ignore deterministic pass logs | VERIFIED |
 | `DOC-001` | High | BC | After verification, promote target text to active behavior and update README/index. | reviewed spec diff | OPEN |
 | `REPORT-001` | High | BC | Create cleanup milestone report: changes, measurements, regressions, remaining deferred risks. | report/evidence record | OPEN |
+
+The integrated C1a functional review combines preserved original regression lanes with separate corrective exhaustive-master evidence. This bounded support does not by itself close repository-wide lint, CDC, physical, board or source-commit provenance gates. Requirement statuses and §3 remain unchanged; sanitized public evidence reconciliation remains pending. See the [CPU](21_cpu_core.md), [CPU Interface](03_cpu_interface.md), [Memory](02_memory_subsystem.md) and [AHB](04_ahb_fabric.md) owning contracts for scope.
 
 ## 20. Minimum Board-Acceptance Matrix
 

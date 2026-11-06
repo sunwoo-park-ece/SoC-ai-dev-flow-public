@@ -6,7 +6,7 @@
 >
 > **상위 명세:** `soc_architecture.md`, `memory_map.md`, `memory_subsystem.md`, `cpu_interface.md`.
 
-> **Phase 4A-3A 읽기 규칙:** 앞의 broad decode/zero-OKAY/미구동 `HSIZE` 설명은 cleanup 전 baseline 기록이다. 마지막 Phase 4A-3A 문단이 현행 버스 fault/decode/response 동작을 우선 규정하며 나머지 미래 기능은 그대로 열린 상태다.
+> **현재/역사적 읽기 규칙:** 아래 현행 구조는 기존 동결 Phase 4A-3A decode/error 계약을 구현한다. 과거 broad decode, unmapped silent OKAY, 미구동 `HSIZE`는 cleanup 전 기록이다. C1a는 CPU/master 조합 구조만 변경하며 주소·latency·exception 정책을 변경하지 않는다.
 
 ## 1. 목적
 
@@ -42,6 +42,8 @@ Baseline에는 system data-bus master가 정확히 하나만 존재한다.
                                       APB subsystem
 ```
 
+세 functional target 외에 invalid/unmapped transfer를 위한 top-level default ERROR responder가 존재한다. 새로운 software-addressable peripheral이 아니다.
+
 Baseline topology 특성:
 
 - CPU가 유일한 AHB-side master이다.
@@ -62,7 +64,7 @@ Baseline topology 특성:
 | `HADDR` | 32 | master -> fabric/slaves | Byte address |
 | `HWRITE` | 1 | master -> fabric/slaves | Read/write direction |
 | `HTRANS` | 2 | master -> fabric/slaves | Active CPU master에서는 `IDLE` 또는 `NONSEQ` |
-| `HSIZE` | 3 | master -> fabric/slaves | Wiring에는 존재하지만 active master에서 현재 정상 구동되지 않음 |
+| `HSIZE` | 3 | master -> fabric/slaves | Phase 4A-3A는 byte/halfword/word size를 구동하며 미구동 설명은 cleanup 전 기록 |
 | `HBURST` | 3 | master -> fabric | Active master에서 single transfer 상수 |
 | `HWDATA` | 32 | master -> slaves | Data phase에 정렬된 write data |
 | `HRDATA` | 32 | fabric -> master | 선택된 slave의 read data |
@@ -73,83 +75,47 @@ Baseline topology 특성:
 
 ## 4. Address-Phase Slave Decode
 
-현재 top-level decode는 `HADDR`만으로 조합적으로 생성된다.
+통합 top-level의 계산은 다음과 같다.
 
 ```verilog
-HSEL_MEM  = (HADDR[31:16] == 16'h1000);
-HSEL_VRAM = (HADDR[31:28] == 4'h2);
-HSEL_APB  = (HADDR[31:28] == 4'h4);
+error_response_final = HREADY && (HRESP == 2'b01);
+transfer_valid = HTRANS[1] && !error_response_final;
+HSEL_MEM = transfer_valid && size_supported && size_aligned &&
+           (HADDR[31:15] == 17'h02000);
+HSEL_VRAM = transfer_valid && (HADDR[31:17] == 15'h1000);
+HSEL_APB = transfer_valid && (HADDR[31:20] == 12'h400);
+HSEL_ERROR = transfer_valid && !(HSEL_MEM || HSEL_VRAM || HSEL_APB);
 ```
 
-따라서 physical decode window는 다음과 같다.
+`size_supported`는 `HSIZE=000/001/010`을 허용한다. `size_aligned`는 각각 모든 byte 주소, 짝수 halfword 주소, low2 bits가 0인 word 주소를 허용한다.
 
-| Select | RTL physical decode | Canonical architectural use |
+| Select | Routing window | Acceptance 경계 |
 |---|---|---|
-| `HSEL_MEM` | `0x1000_0000 - 0x1000_FFFF` | DMEM은 `0x1000_0000 - 0x1000_7FFF`만 canonical |
-| `HSEL_VRAM` | `0x2000_0000 - 0x2FFF_FFFF` | `memory_map.md`가 정의한 VGA/VRAM canonical window만 지원 |
-| `HSEL_APB` | `0x4000_0000 - 0x4FFF_FFFF` | Canonical APB slot `0x4000_xxxx - 0x4007_xxxx`만 지원 |
+| `HSEL_MEM` | `0x1000_0000 - 0x1000_7FFF` | 지원 size/alignment; 상단 alias 없음 |
+| `HSEL_VRAM` | `0x2000_0000 - 0x2001_FFFF` | VGA-local 전체 주소/size/direction/readiness 검사 |
+| `HSEL_APB` | `0x4000_0000 - 0x400F_FFFF` | Bridge canonical offset/slot/aligned-word 검사; slot 10..15 reserved |
+| `HSEL_ERROR` | 나머지 유효 address/size 조합 | Two-cycle ERROR, slave side effect 없음 |
 
-Software-visible canonical address map의 authoritative source는 `memory_map.md`이다. 넓은 physical decode window 전체를 software allocation으로 해석해서는 안 된다.
+Routing aperture 전체가 software에 배정되는 것은 아니다. 수락되는 window/register 의미는 기존 [memory map](01_memory_map.ko.md), [VGA](08_vga.ko.md), [APB](05_apb_subsystem.ko.md) 계약이 소유한다.
 
-### 4.1 Decode는 `HTRANS`로 Qualification하지 않음
+### 4.1 Transfer Qualification과 Cancellation
 
-`HSEL_MEM`, `HSEL_VRAM`, `HSEL_APB`는 address bit에만 의존하며 top level에서 `HTRANS`와 gate되지 않는다.
-
-따라서:
-
-- `HTRANS=IDLE`이어도 address region에 따라 top-level select가 high일 수 있다.
-- 실제 transfer validity는 각 slave 또는 bridge 내부에서 판단한다.
-- invalid/idle transfer 중의 response data는 architectural meaning이 없다.
-
-향후 cleanup에서 valid-transfer predicate로 select를 qualification할 수 있지만 현재 baseline은 그렇지 않다.
+Top-level select는 `transfer_valid`를 포함한다. `HTRANS=IDLE`은 새 owner를 선택하지 않는다. 최종 ERROR는 모든 slave에서 다음 주소를 취소한다. CPU의 bus 전 misalignment cause 4/6은 fabric 거부와 별개이다. C1a predecode와 EX eligibility는 [CPU interface](03_cpu_interface.ko.md#64-통합-c1a-request와-alignment-구조)에 정의한다.
 
 ## 5. Address Phase에서 Data Phase로의 Selection
 
-AHB는 address/data가 pipeline된 구조이므로 top-level은 address-phase slave selection을 저장해 다음 data phase에서 사용한다.
+`HSEL_MEM_d`, `HSEL_VRAM_d`, `HSEL_APB_d`, `HSEL_ERROR_d`는 response routing을 위한 수락된 주소 phase owner를 보존한다. Reset은 네 register를 모두 clear한다. `HREADY=1`에서 다음 selection을 capture하되 최종 ERROR는 모두 clear하고 다음 주소를 취소한다. `HREADY=0`에서는 이 owner register들이 hold한다.
 
 ```text
-Address phase                    Data phase
--------------                    ----------
-HADDR -> HSEL_MEM  -----------+-> HSEL_MEM_d
-HADDR -> HSEL_VRAM -----------+-> HSEL_VRAM_d
-HADDR -> HSEL_APB  -----------+-> HSEL_APB_d
+qualified address selection -> HSEL_{MEM,VRAM,APB,ERROR}_d -> response mux
+HSEL_ERROR_d + default_error_final -----------------------> ERROR phase
 ```
 
-현재 사용되는 register:
-
-```verilog
-HSEL_MEM_d
-HSEL_VRAM_d
-HSEL_APB_d
-```
-
-Reset 시 모두 0이며 현재 system `HREADY`가 high일 때만 갱신된다.
-
-개념적으로:
-
-```verilog
-if (!HRESETn) begin
-    HSEL_MEM_d  <= 0;
-    HSEL_VRAM_d <= 0;
-    HSEL_APB_d  <= 0;
-end else if (HREADY) begin
-    HSEL_MEM_d  <= HSEL_MEM;
-    HSEL_VRAM_d <= HSEL_VRAM;
-    HSEL_APB_d  <= HSEL_APB;
-end
-```
+`default_error_final`은 별도 response-progress state이다. Reset은 이를 clear하며 `HSEL_ERROR_d && !default_error_final`이면 `HREADY=0`이어도 다음 edge에서 set한다. 그 외 `HREADY=1`이면 clear한다. 이 구조로 첫 ERROR가 최종 ERROR로 진행한다. HREADY-only owner-update 규칙을 전체 fabric state로 일반화해서는 안 된다.
 
 ### 5.1 Wait-State Retention Requirement
 
-`HREADY=0`이면 data-phase select register는 이전 값을 유지해야 한다.
-
-이는 현재 완료 중인 slave가 transfer가 끝날 때까지 다음 response source로 유지되어야 하기 때문이다.
-
-- `HRDATA`
-- `HREADY`
-- `HRESP`
-
-Stall 중에 data-phase select가 새로운 address를 따라가면 response routing이 잘못된 slave로 바뀔 수 있다.
+`HREADY=0` 동안 owner select는 이전 값을 유지하여 `HRDATA`, `HREADY`, `HRESP`가 완료 중인 transaction에서 계속 routing되게 해야 한다. Hold 동안 더 새로운 주소를 따라가서는 안 된다.
 
 ## 6. Data-Phase Response Multiplexing
 
@@ -170,6 +136,7 @@ else                -> 0x0000_0000
 if HSEL_MEM_d       -> HREADY_MEM
 else if HSEL_VRAM_d -> HREADY_VRAM
 else if HSEL_APB_d  -> HREADY_APB
+else if HSEL_ERROR_d -> default_error_final
 else                -> 1
 ```
 
@@ -179,10 +146,11 @@ else                -> 1
 if HSEL_MEM_d       -> HRESP_MEM
 else if HSEL_VRAM_d -> HRESP_VRAM
 else if HSEL_APB_d  -> HRESP_APB
+else if HSEL_ERROR_d -> 2'b01
 else                -> 2'b00
 ```
 
-물리적인 mux priority는 `MEM > VRAM > APB`지만 현재 address decode상 세 region은 서로 배타적이므로 이 priority는 arbitration mechanism이 아니다.
+물리적인 mux priority는 `MEM > VRAM > APB > ERROR`지만 현재 address decode상 세 region은 서로 배타적이므로 이 priority는 arbitration mechanism이 아니다.
 
 ## 7. Slave Response Characteristics
 
@@ -199,38 +167,17 @@ Synchronous BRAM을 AHB pipeline에 맞춰 통합했기 때문에 추가 AHB wai
 
 ### 7.2 VGA / VRAM
 
-`AHB_VRAM_DUAL_BUFFER` 역시:
+성공한 지원 VGA transfer는 추가 AHB wait가 없다(`HREADY_VRAM=1`, `HRESP_VRAM=00`). 거부된 access/domain/busy/commit-time 조건은 첫 ERROR(`HREADY_VRAM=0`, `HRESP_VRAM=01`)와 최종 ERROR(`HREADY_VRAM=1`, `HRESP_VRAM=01`)를 발생시킨다.
 
-```text
-HREADY_VRAM = 1
-HRESP_VRAM  = 2'b00
-```
-
-을 제공한다.
-
-따라서 내부에 별도의 VGA pixel-clock domain이 있어도 CPU bus 관점에서는 zero-wait AHB-side target이다.
+주소 수락만으로 framebuffer 쓰기를 허용하지 않는다. Slave는 commit에서 capture된 owner를 재검증하고 거부된 side effect를 억제하며 global completion으로 hold 중 중복 쓰기를 방지한다. Framebuffer/status/control 의미는 [VGA](08_vga.ko.md)가 소유한다. CDC 또는 board signoff가 아니다.
 
 ### 7.3 AHB-to-APB Bridge
 
-APB path는 `HREADY_APB`를 low로 만들 수 있다.
+Bridge에는 `IDLE`, `SETUP`, `ACCESS`, `ERROR_FINAL` state가 있다. SETUP은 peripheral이 항상 ready여도 ready를 low로 유지한다. 유효하고 성공한 ACCESS는 PREADY로 완료하며 그 외에는 wait를 계속한다. Invalid size/alignment/canonical offset은 실제 peripheral PSEL 전에 거부한다. 완료된 PSLVERR도 AHB ERROR로 전파한다.
 
-Bridge state:
+첫 ERROR는 ACCESS에서 발생한다(`HRESP_APB=01`, `HREADY_APB=0`). ERROR_FINAL은 `HRESP_APB=01`, `HREADY_APB=1`을 반환하고 다음 주소를 수락하지 않는다. 성공한 완료는 다음 주소를 capture하고 SETUP으로 진행할 수 있다. 대응하는 MEM store data를 capture하며 APB control은 wait 동안 안정적으로 유지한다.
 
-```text
-IDLE -> SETUP -> ACCESS
-```
-
-AHB-side behavior:
-
-- `IDLE`: `HREADY_APB = 1`
-- `SETUP`: `HREADY_APB = 0`
-- `ACCESS`: `HREADY_APB = PREADY`
-
-따라서 선택된 APB peripheral 자체가 `PREADY=1`을 계속 내더라도 APB transaction은 bridge의 SETUP phase 때문에 back-pressure를 만든다.
-
-CPU는 top-level `HREADY=0`을 `bus_stall_req=1`로 받아 `cpu_interface.md`에 정의된 대로 전체 pipeline을 freeze한다.
-
-APB timing의 상세 contract는 `apb_subsystem.md`가 소유한다.
+Aligned word access는 slot 0..9의 기존 canonical offset을 사용하고 slot 10..15는 reserved이다. APB byte strobe나 모든 RO/WO direction mismatch를 ERROR로 바꾸는 정책을 추가하지 않는다. 세부 timing/offset/side-effect 의미는 [APB](05_apb_subsystem.ko.md)가 소유한다.
 
 ## 8. Back-Pressure Propagation
 
@@ -257,77 +204,43 @@ selected slave / APB bridge
 freeze IF/ID, ID/EX, EX/MEM, MEM/WB
 ```
 
+최종 ERROR는 completion edge이다. CPU는 대응하는 MEM fault를 소비하고 younger request를 취소한다. HRESP/HREADY는 master 밖의 CPU fault logic에도 직접 연결된다. [CPU control](21_cpu_core.ko.md#14-stall--flush-priority)을 참조한다.
+
 Transaction retry buffer나 독립 bus queue는 없다. Wait state 중 correctness는 CPU pipeline을 freeze하고 `HREADY`가 다시 high가 될 때까지 data-phase slave selection을 보존하는 데 의존한다.
 
 ## 9. Unmapped Access Behavior
 
-Delayed select가 하나도 active가 아니면 현재 top-level은:
+`HSEL_ERROR_d`가 소유한 transfer는 두 response cycle 모두 `HRDATA=0`, `HRESP=01`이며 `HREADY=0` 다음 `HREADY=1`을 반환한다. 최종 ERROR는 다음 주소를 취소하며 functional slave는 거부된 transfer의 side effect를 commit해서는 안 된다.
 
-```text
-HRDATA = 0x0000_0000
-HREADY = 1
-HRESP  = 2'b00
-```
-
-을 반환한다.
-
-즉 어떤 top-level slave에도 매핑되지 않은 access가 bus error 없이 조용히 완료된다.
-
-Architectural consequence:
-
-- unmapped read는 0을 반환한 것처럼 보일 수 있다.
-- unmapped write는 사실상 버려진다.
-- active CPU는 이를 정상 transaction과 구분할 수 없다.
-- software는 이 동작에 의존해서는 안 된다.
-
-승인된 A2는 strict access-fault semantics를 주장하기 전에 explicit default-slave/error behavior 구현을 요구한다. 현행 RTL은 미구현이다.
+Data-phase owner가 없을 때 idle mux 기본값은 `HRDATA=0`, `HREADY=1`, `HRESP=00`이다. 이 idle 값은 unmapped transaction의 수락이 아니다. 과거 cleanup 전 unmapped zero/OKAY 완료는 아래 동결 최종 계약으로 대체되었다.
 
 ## 10. `HRESP` Limitation
 
-현재 세 AHB-side target은 모두 `2'b00` (`OKAY`)을 반환하며, active `AHB_Master_Interface`는 `HRESP` 자체를 입력으로 받지 않는다.
+과거 CPU-visible error 부재는 기존 load/store fault 계약 범위에서 해결되었다. 조합 `AHB_Master_Interface` 자체에는 계속 `HRESP` 입력이 없으며 SoC가 fabric HRESP/HREADY를 CPU `HRESP_FROM_AHB`/`HREADY_FROM_AHB`에 직접 연결한다.
 
-따라서 baseline에는 **CPU-visible bus-error path가 없다.**
-
-이는 승인된 cleanup target이 아닌 현행 implementation limitation이다. A2는 data-bus fault를 synchronous CPU load/store access-fault로 동결했고 이후 AXI error policy는 별도 단계다.
+최종 ERROR는 대응하는 유효 MEM load/store owner에 속하며 cause 5/7과 정확한 faulting PC를 발생시킨다. 실패 side effect/retirement와 younger request는 억제하고 더 오래된 성공 WB owner는 보존한다. 기존 bus 전 cause 4/6의 우선순위는 유지한다. [CPU fault boundary](03_cpu_interface.ko.md#15-bus-response--error-visibility)를 참조한다. Instruction-fetch fault나 새 exception 정책은 정의하지 않는다.
 
 ## 11. `HSIZE` Limitation
 
-Top-level은 `HSIZE`를 DMEM slave에 연결하지만 active CPU master는 현재 `HSIZE`를 선언만 하고 실제 값을 구동하지 않는다.
+HSIZE는 byte `000`, halfword `001`, word `010`으로 구동한다. Master는 invalid `111`과 inactive default `010`을 유지한다. C1a는 request 선택 전에 load/store size와 forwarded-effective-address alignment를 독립적으로 predecode하며 read 우선순위와 기존 truth table을 보존한다.
 
-현재 기능이 동작하는 이유:
-
-- DMEM store byte lane은 `CUSTOM_WRITE_MASK_OUT`으로 제어된다.
-- DMEM load extraction은 CPU 내부에서 수행된다.
-- APB bridge는 `HSIZE`를 사용하지 않는다.
-- VGA slave는 `HSIZE`를 사용하지 않는다.
-
-따라서 baseline slave behavior는 `HSIZE`에 의존해서는 안 된다.
-
-Interconnect를 clean standard AHB-Lite implementation으로 취급하기 전 byte/halfword/word access에 대해 정상 `HSIZE` generation을 복구하고 검증해야 한다.
+Fabric size/alignment는 DMEM 선택을 qualify하며 APB와 VGA는 aligned word access를 검증한다. DMEM byte enable은 여전히 CUSTOM_WRITE_MASK_OUT에서 오고 CPU LoadExtender가 반환 load를 해석한다. 정의된 HSIZE와 DMEM-local mask는 공존하며 범용 AHB/AXI strobe나 complete AMBA compliance를 뜻하지 않는다. 과거 미구동 size는 역사적 기록이다.
 
 ## 12. Physical Decode Aliases
 
-현재 fabric에는 canonical map보다 넓은 decode로 인한 physical alias가 존재한다.
+과거 cleanup 전 decode는 64 KiB DMEM과 전체 `0x2xxx_xxxx`/`0x4xxx_xxxx` region에 걸쳐 alias를 노출했다. §4 routing과 local validation이 그 관찰을 대체한다.
 
 ### 12.1 DMEM Alias
 
-Top-level은 `0x1000_xxxx` 64 KiB를 선택하지만 physical DMEM은 32 KiB이고 `HADDR[14:2]`만 index한다.
-
-따라서 physical decode 상단 절반은 하단 32 KiB로 alias될 수 있다.
-
-Architectural address는 `0x1000_0000 - 0x1000_7FFF`뿐이다.
+`0x1000_8000..0x1000_FFFF`는 RAM의 두 번째 mapping이 아니라 default ERROR로 전달된다. Canonical DMEM은 `0x1000_0000..0x1000_7FFF`를 유지한다.
 
 ### 12.2 VGA / VRAM Alias
 
-Top-level은 전체 `0x2xxx_xxxx` region을 선택하지만 VGA subsystem은 framebuffer와 control/status window를 위해 lower address bit만 decode한다.
-
-Canonical VGA window 밖의 repeated/mirrored behavior는 architectural feature가 아니다.
+VGA aperture는 `0x2000_0000..0x2000_95FF`의 aligned word framebuffer write, `0x2001_0000`의 status, `0x2001_0004`의 write control을 기존 readiness/direction 의미로 local validate한다. 그 밖의 offset/size나 거부된 operation은 local ERROR를 발생시킨다. Aperture는 mirrored framebuffer 배정이 아니다.
 
 ### 12.3 APB Alias
 
-Top-level은 전체 `0x4xxx_xxxx` region을 선택한다. 이후 AHB-to-APB bridge는 주로 `addr[19:16]`으로 8개 peripheral 중 하나를 고르므로 ignored upper-middle bit가 다른 주소에서도 canonical APB slot pattern이 반복될 수 있다.
-
-Software가 사용 가능한 주소는 canonical `0x4000_xxxx - 0x4007_xxxx` slot뿐이다.
+`0x4000_0000..0x400F_FFFF`만 bridge로 routing되며 peripheral 선택 전에 full offset과 구현된 slot을 검증한다. Slot 0..9는 기존 register 계약을 유지하고 10..15는 reserved/error이다. 더 높은 alias는 bridge를 선택하지 않는다. 주소 배정이나 wrong-direction 정책 변경은 없다.
 
 ## 13. Arbitration
 
@@ -346,10 +259,10 @@ DMA engine 또는 다른 bus master가 추가되면 이 조건은 바뀐다. 향
 
 - `HSEL_MEM_d` clear
 - `HSEL_VRAM_d` clear
-- `HSEL_APB_d` clear
+- `HSEL_APB_d`, `HSEL_ERROR_d`, `default_error_final` clear
 - 각 slave/bridge도 integration에 따라 동일 active-low system reset을 받음
 
-Reset release 직후 valid transfer의 address phase가 받아들여지기 전에는 default response path가 선택된다.
+Reset release 직후 valid transfer의 address phase가 받아들여지기 전에는 idle top-level response path(no valid owner)가 선택된다.
 
 ```text
 HRDATA = 0
@@ -371,15 +284,15 @@ Transfer type       : active CPU master에서 IDLE / NONSEQ
 Burst mode          : single transfer only
 Back-pressure       : HREADY
 Response routing    : delayed HSEL 기반 mux
-Error propagation   : CPU-visible하지 않음
+Error propagation   : two-cycle ERROR, direct CPU load/store fault path
 Byte write control  : project-specific DMEM sideband
 ```
 
-Undriven `HSIZE`, ignored `HRESP`, custom DMEM sideband, broad non-canonical decode가 존재하므로 이 문서는 의도적으로 **AHB-style**, **AHB-Lite-derived**라는 표현을 사용하고 full protocol compliance를 주장하지 않는다.
+정의된 HSIZE, 명시적 error, local validation은 custom DMEM sideband 및 pipeline 결합과 공존한다. **AHB-style**, **AHB-Lite-derived** 표현을 유지하며 full protocol compliance를 주장하지 않는다.
 
 ## 16. Major Feature Integration 전 Baseline Cleanup Target
 
-Specification reconstruction이 끝난 뒤 PLIC/AXI 구현을 시작하기 전에 별도의 baseline-cleanup pass에서 다음을 처리한다.
+아래 목록은 역사적 cleanup requirement이며 통합 구현에 모든 구조가 아직 없다는 주장이 아니다.
 
 1. DMEM decode를 canonical 32 KiB range로 축소
 2. VGA/VRAM decode를 canonical window로 축소
@@ -390,7 +303,7 @@ Specification reconstruction이 끝난 뒤 PLIC/AXI 구현을 시작하기 전�
 7. `cpu_interface.md`에 기록된 legacy signal naming/width inconsistency 정리
 8. unmapped/boundary/back-to-back/wait-state directed verification 추가
 
-위 항목은 **이미 구현된 동작이 아니라 cleanup requirement**이다.
+현행 구조는 앞 절에 설명하며 [baseline cleanup](baseline_cleanup.ko.md)이 requirement 상태를 소유한다. 이 목록은 tracker 상태를 승격하거나 naming/physical 등 무관한 의무를 종결하지 않는다.
 
 ## 17. Required Verification Properties
 
@@ -401,15 +314,19 @@ Reconstructed baseline fabric 검증에서 최소한 다음을 확인해야 한�
 - data-phase response routing이 이전에 accepted된 address-phase selection을 사용하는지
 - `HREADY=0` 동안 `HSEL_*_d`가 유지되는지
 - APB bridge stall이 full CPU pipeline stall로 전파되는지
-- DMEM/VGA zero-wait response가 불필요한 bus stall을 만들지 않는지
+- DMEM과 성공한 지원 VGA transfer는 wait를 추가하지 않고 거부된 VGA transfer는 요구된 ERROR phase를 사용하는지
 - 서로 다른 slave로 연속 transfer할 때 각 data-phase response가 올바른 slave에서 오는지
 - cleanup 전 unmapped zero/ready/OKAY는 과거 동작이며 Phase 4A-3A에서는 2-cycle ERROR를 확인하는지
 - canonical firmware test가 physical alias에 의존하지 않는지
-- cleanup 이후 undefined `HSIZE` 의존성이 남아 있지 않은지
+- 정의된 HSIZE/invalid size, alignment, 첫/최종 ERROR, physical side-effect 억제, next-address 취소가 소유 계약과 일치하는지
+
+소스에 결부된 composite review는 실행된 CPU/SoC/negative case와 유한한 master decode/alignment 검사를 뒷받침한다. Universal equivalence, whole-SoC SCC 부재, vendor BRAM collision, fitted timing, CDC 또는 board acceptance가 아니다. 별도의 targeted compiler-provenance 근거는 과거 record를 다시 쓰지 않고 보충한다. [CPU 한정 상태](03_cpu_interface.ko.md#72-a2-acceptance와-한정된-검증-상태)와 [memory 한계](02_memory_subsystem.ko.md#74-한정된-구현-관찰과-한계)를 참조한다. 공개 derivative packaging은 미완료이다.
 
 ## 18. Related Sources
 
 Active implementation source:
+
+- [Top-level decode/owner/mux](../../rtl/soc/AMBA_SoC_TOP.v), [master predecode](../../rtl/bus/AHB_MASTER.v), [DMEM edge](../../rtl/bus/AHB_MEMORY_SLAVE.v), [APB validation/error](../../rtl/bus/AHB_APB_bridge.v), [VGA acceptance/commit](../../rtl/video/vram/pre_fetch_AHB_VRAM_DUAL_BUFFER.v).
 
 - `rtl/soc/AMBA_SoC_TOP.v`
 - `rtl/bus/AHB_MASTER.v`
@@ -430,20 +347,20 @@ Related specification:
 
 ## 19. Baseline Fabric Invariants
 
-후속 승인된 specification이 명시적으로 변경하기 전까지 reconstructed baseline contract는 다음과 같다.
+현행 invariant는 기존 동결 decode/error 계약을 보존한다.
 
 1. CPU가 유일한 active system data-bus master이다.
-2. Active fabric에는 DMEM, VGA/VRAM, AHB-to-APB의 세 top-level target이 있다.
-3. Address-phase slave selection은 `HADDR`에서 생성되고 data phase까지 보존된다.
-4. Data-phase select state는 `HREADY=1`일 때만 전진한다.
-5. `HRDATA`, `HREADY`, `HRESP`는 delayed slave select로 mux된다.
-6. DMEM과 VGA/VRAM은 zero-wait AHB-side slave이다.
+2. 세 functional target은 DMEM, VGA/VRAM, AHB-to-APB이며 default ERROR responder가 추가로 있다.
+3. Selection은 transfer validity/final-error 취소를 포함하며 routing aperture는 software 배정이 아니다.
+4. Owner select는 HREADY=0에서 hold, HREADY=1에서 advance, 최종 ERROR에서 clear한다. 별도 default_error_final은 ready가 low인 첫 ERROR를 진행시킨다.
+5. HRDATA/HREADY/HRESP는 default ERROR를 포함한 capture된 owner에서 routing한다.
+6. DMEM과 성공한 지원 VGA transfer는 wait를 추가하지 않으며 거부된 VGA transfer는 two-cycle ERROR이다.
 7. APB transaction은 bridge를 통해 CPU를 stall시킬 수 있다.
-8. Unmapped access는 현재 zero data, ready high, OKAY response로 완료된다.
-9. Baseline에는 CPU-visible bus-error mechanism이 없다.
-10. 넓은 physical decode alias는 implementation artifact이지 architectural address allocation이 아니다.
-11. `HSIZE`는 현재 reliable signal이 아니며 baseline slave behavior가 이를 요구해서는 안 된다.
-12. Baseline fabric에는 AHB arbiter, DMA master, PLIC slave, cache, external memory master가 없다.
+8. Invalid/unmapped transaction은 two-cycle ERROR이며 owner 없는 IDLE 기본값은 transaction success가 아니다.
+9. 최종 load/store ERROR는 기존 precise cause/PC/failed-effect 규칙을 적용해 대응하는 MEM owner의 CPU에 전달된다.
+10. 과거 broad alias는 지원되는 architectural 배정이 아니다.
+11. 정의된 HSIZE는 validation에 참여하며 DMEM byte enable은 대응하는 MEM의 비표준 mask이고 쓰기 권한이 아니다.
+12. AHB arbiter, DMA master, PLIC slave, cache, external memory master를 도입하지 않는다.
 
 ## Phase 4A-2 승인된 decode/error 계약 (Phase 4A-3A 버스 부분 구현)
 

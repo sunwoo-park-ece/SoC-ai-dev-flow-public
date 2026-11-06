@@ -6,7 +6,7 @@
 >
 > **Parent specifications:** `soc_architecture.md`, `memory_map.md`, `memory_subsystem.md`, `cpu_interface.md`.
 
-> **Phase 4A-3A reading rule:** Earlier broad-decode/zero-OKAY and undriven-`HSIZE` passages reconstruct the pre-cleanup baseline. The final Phase 4A-3A section supersedes those passages for active bus fault, decode, and response behavior; other future features are unchanged.
+> **Current / historical reading rule:** The active structure implements the existing frozen Phase 4A-3A decode/error contract. Former broad decode, silent unmapped OKAY and undriven `HSIZE` are historical pre-cleanup observations. C1a changes only CPU/master combinational structure; no address, latency or exception policy changes here.
 
 ## 1. Purpose
 
@@ -42,6 +42,8 @@ The baseline has exactly one system data-bus master.
                                       APB subsystem
 ```
 
+The three functional targets also have a top-level default ERROR responder for invalid/unmapped transfers. It is not a new software-addressable peripheral.
+
 Baseline topology properties:
 
 - The CPU is the only AHB-side master.
@@ -73,85 +75,47 @@ Project-specific DMEM sidebands such as `CUSTOM_WRITE_MASK_OUT` and `BRAM_HAZARD
 
 ## 4. Address-Phase Slave Decode
 
-The active top-level decode is purely combinational from `HADDR`:
+The integrated top-level computes:
 
 ```verilog
-HSEL_MEM  = (HADDR[31:16] == 16'h1000);
-HSEL_VRAM = (HADDR[31:28] == 4'h2);
-HSEL_APB  = (HADDR[31:28] == 4'h4);
+error_response_final = HREADY && (HRESP == 2'b01);
+transfer_valid = HTRANS[1] && !error_response_final;
+HSEL_MEM = transfer_valid && size_supported && size_aligned &&
+           (HADDR[31:15] == 17'h02000);
+HSEL_VRAM = transfer_valid && (HADDR[31:17] == 15'h1000);
+HSEL_APB = transfer_valid && (HADDR[31:20] == 12'h400);
+HSEL_ERROR = transfer_valid && !(HSEL_MEM || HSEL_VRAM || HSEL_APB);
 ```
 
-Therefore the physical decode windows are:
+`size_supported` accepts `HSIZE=000/001/010`; `size_aligned` accepts any byte address, an even halfword address, or a word address with low two bits zero, respectively.
 
-| Select | RTL physical decode | Canonical architectural use |
+| Select | Routing window | Acceptance boundary |
 |---|---|---|
-| `HSEL_MEM` | `0x1000_0000 - 0x1000_FFFF` | DMEM only at `0x1000_0000 - 0x1000_7FFF` |
-| `HSEL_VRAM` | `0x2000_0000 - 0x2FFF_FFFF` | Canonical VGA/VRAM windows defined by `memory_map.md` |
-| `HSEL_APB` | `0x4000_0000 - 0x4FFF_FFFF` | Canonical APB slots `0x4000_xxxx - 0x4007_xxxx` |
+| `HSEL_MEM` | `0x1000_0000 - 0x1000_7FFF` | Supported size and alignment; no upper alias |
+| `HSEL_VRAM` | `0x2000_0000 - 0x2001_FFFF` | VGA-local full address/size/direction/readiness checks |
+| `HSEL_APB` | `0x4000_0000 - 0x400F_FFFF` | Bridge canonical offset/slot/aligned-word checks; slots 10..15 reserved |
+| `HSEL_ERROR` | Remaining valid address/size combinations | Two-cycle ERROR, no slave side effect |
 
-The canonical software-visible address map is defined only by `memory_map.md`. Broad physical decode shall not be interpreted as allocating the entire physical decode window to software.
+A routing aperture does not allocate all bytes to software. Accepted windows/register semantics remain in the [memory map](01_memory_map.md), [VGA](08_vga.md) and [APB](05_apb_subsystem.md) contracts.
 
-### 4.1 Decode Is Not Qualified by `HTRANS`
+### 4.1 Transfer Qualification and Cancellation
 
-`HSEL_MEM`, `HSEL_VRAM`, and `HSEL_APB` depend only on address bits. They are not gated with `HTRANS` at the top level.
-
-Consequently:
-
-- the top-level select may indicate an address region even while `HTRANS=IDLE`,
-- transfer validity is checked inside each slave or bridge,
-- response data during an invalid/idle transfer is not architecturally meaningful.
-
-Future cleanup may qualify selection with a valid transfer predicate, but the active baseline does not.
+Top-level selects include `transfer_valid`; `HTRANS=IDLE` does not select a new owner. Final ERROR cancels the following address at every slave. CPU pre-bus misalignment causes 4/6 remain separate from fabric rejection. C1a predecode and EX eligibility are described in [CPU interface](03_cpu_interface.md#64-integrated-c1a-request-and-alignment-structure).
 
 ## 5. Address Phase to Data Phase Selection
 
-AHB uses a pipelined address/data relationship. The top-level therefore stores the address-phase slave selection for use during the following data phase:
+`HSEL_MEM_d`, `HSEL_VRAM_d`, `HSEL_APB_d` and `HSEL_ERROR_d` retain the accepted address-phase owner for response routing. Reset clears all four. They capture next selection on `HREADY=1`, except final ERROR clears them and cancels the next address. On `HREADY=0` these owner registers hold.
 
 ```text
-Address phase                    Data phase
--------------                    ----------
-HADDR -> HSEL_MEM  -----------+-> HSEL_MEM_d
-HADDR -> HSEL_VRAM -----------+-> HSEL_VRAM_d
-HADDR -> HSEL_APB  -----------+-> HSEL_APB_d
+qualified address selection -> HSEL_{MEM,VRAM,APB,ERROR}_d -> response mux
+HSEL_ERROR_d + default_error_final -----------------------> ERROR phase
 ```
 
-The active registers are:
-
-```verilog
-HSEL_MEM_d
-HSEL_VRAM_d
-HSEL_APB_d
-```
-
-They reset to zero and are updated only when the current system `HREADY` is high.
-
-Conceptually:
-
-```verilog
-if (!HRESETn) begin
-    HSEL_MEM_d  <= 0;
-    HSEL_VRAM_d <= 0;
-    HSEL_APB_d  <= 0;
-end else if (HREADY) begin
-    HSEL_MEM_d  <= HSEL_MEM;
-    HSEL_VRAM_d <= HSEL_VRAM;
-    HSEL_APB_d  <= HSEL_APB;
-end
-```
+`default_error_final` is separate response-progress state: reset clears it; `HSEL_ERROR_d && !default_error_final` sets it on the next edge even while `HREADY=0`; otherwise `HREADY=1` clears it. This progresses first ERROR to final ERROR. The HREADY-only owner-update rule shall not be generalized to all fabric state.
 
 ### 5.1 Wait-State Retention Requirement
 
-When `HREADY=0`, the data-phase select registers shall retain their previous value.
-
-This is required because the slave currently completing the data phase must remain selected for:
-
-- `HRDATA`
-- `HREADY`
-- `HRESP`
-
-until that transfer completes.
-
-If the data-phase select were allowed to follow a newer address while the current transfer was stalled, response routing could switch to the wrong slave.
+While `HREADY=0`, owner selects retain their previous value so `HRDATA`, `HREADY` and `HRESP` remain routed from the completing transaction. They must not follow a newer address during the hold.
 
 ## 6. Data-Phase Response Multiplexing
 
@@ -172,6 +136,7 @@ else                -> 0x0000_0000
 if HSEL_MEM_d       -> HREADY_MEM
 else if HSEL_VRAM_d -> HREADY_VRAM
 else if HSEL_APB_d  -> HREADY_APB
+else if HSEL_ERROR_d -> default_error_final
 else                -> 1
 ```
 
@@ -181,10 +146,11 @@ else                -> 1
 if HSEL_MEM_d       -> HRESP_MEM
 else if HSEL_VRAM_d -> HRESP_VRAM
 else if HSEL_APB_d  -> HRESP_APB
+else if HSEL_ERROR_d -> 2'b01
 else                -> 2'b00
 ```
 
-The mux priority is physically `MEM > VRAM > APB`, but the three top-level address regions are mutually exclusive under the current decode, so priority is not an intended arbitration mechanism.
+The mux priority is physically `MEM > VRAM > APB > ERROR`, but the three top-level address regions are mutually exclusive under the current decode, so priority is not an intended arbitration mechanism.
 
 ## 7. Slave Response Characteristics
 
@@ -201,36 +167,17 @@ The synchronous BRAM is integrated so that no additional AHB wait state is inser
 
 ### 7.2 VGA / VRAM
 
-`AHB_VRAM_DUAL_BUFFER` currently provides:
+Successful supported VGA transfers add no AHB wait (`HREADY_VRAM=1`, `HRESP_VRAM=00`). Rejected access/domain/busy/commit-time conditions instead produce first ERROR (`HREADY_VRAM=0`, `HRESP_VRAM=01`) and final ERROR (`HREADY_VRAM=1`, `HRESP_VRAM=01`).
 
-```text
-HREADY_VRAM = 1
-HRESP_VRAM  = 2'b00
-```
-
-The VGA subsystem is therefore a zero-wait AHB-side target from the CPU bus perspective, even though it contains a separate VGA pixel-clock domain internally.
+Address acceptance alone does not authorize a framebuffer write. The slave revalidates the captured owner at commit, suppresses rejected side effects and uses global completion to prevent duplicate writes during holds. [VGA](08_vga.md) owns framebuffer/status/control semantics. This is not CDC or board signoff.
 
 ### 7.3 AHB-to-APB Bridge
 
-The APB path may deassert `HREADY_APB`.
+The bridge has `IDLE`, `SETUP`, `ACCESS` and `ERROR_FINAL` states. SETUP holds ready low even for an always-ready peripheral. A valid successful ACCESS completes with PREADY; otherwise the wait continues. Invalid size/alignment/canonical offset is rejected before real peripheral PSEL. Completed PSLVERR also becomes AHB ERROR.
 
-The bridge states are:
+First ERROR occurs in ACCESS (`HRESP_APB=01`, `HREADY_APB=0`); ERROR_FINAL returns `HRESP_APB=01`, `HREADY_APB=1` and accepts no next address. Successful completion may capture the next address and proceed to SETUP. Matching MEM store data is captured, and APB controls remain stable through waits.
 
-```text
-IDLE -> SETUP -> ACCESS
-```
-
-At the AHB side:
-
-- `IDLE`: `HREADY_APB = 1`
-- `SETUP`: `HREADY_APB = 0`
-- `ACCESS`: `HREADY_APB = PREADY`
-
-Therefore an APB transaction introduces bridge-controlled back-pressure even when the selected APB peripheral itself keeps `PREADY=1`.
-
-The CPU observes the resulting top-level `HREADY=0` as `bus_stall_req=1` and freezes the complete pipeline as defined in `cpu_interface.md`.
-
-Detailed APB timing is owned by `apb_subsystem.md`.
+Aligned word accesses use existing canonical offsets in slots 0..9; slots 10..15 are reserved. This adds no APB byte strobes or blanket RO/WO direction-error policy. [APB](05_apb_subsystem.md) owns detailed timing/offset/side-effect semantics.
 
 ## 8. Back-Pressure Propagation
 
@@ -257,75 +204,43 @@ selected slave / APB bridge
 freeze IF/ID, ID/EX, EX/MEM, MEM/WB
 ```
 
+Final ERROR is a completion edge: the CPU consumes the matching MEM fault and cancels younger requests. HRESP/HREADY also connect directly to CPU fault logic outside the master; see [CPU control](21_cpu_core.md#14-pipeline-stall-and-flush-semantics).
+
 There is no transaction retry buffer or independent bus queue. Correctness during a wait state depends on freezing the CPU pipeline and preserving the data-phase slave selection until `HREADY` returns high.
 
 ## 9. Unmapped Access Behavior
 
-If none of the delayed selects is active, the current top-level returns:
+A transfer owned by `HSEL_ERROR_d` returns `HRDATA=0`, `HRESP=01` in both response cycles, with `HREADY=0` then `HREADY=1`. Final ERROR cancels the next address and no functional slave may commit a side effect for the rejected transfer.
 
-```text
-HRDATA = 0x0000_0000
-HREADY = 1
-HRESP  = 2'b00
-```
-
-Thus an access that reaches no recognized top-level slave completes silently rather than reporting a bus error.
-
-Architectural consequences:
-
-- unmapped reads may appear to return zero,
-- unmapped writes are effectively discarded,
-- the active CPU cannot distinguish this from a successful transaction,
-- software shall not use this behavior as a feature.
-
-Frozen A2 requires explicit default-slave/error behavior before strict access-fault semantics can be claimed; current RTL does not yet implement it.
+With no data-phase owner, idle mux defaults are instead `HRDATA=0`, `HREADY=1`, `HRESP=00`. These idle values do not acknowledge an unmapped transaction. Historical pre-cleanup unmapped zero/OKAY completion is superseded by the frozen final contract below.
 
 ## 10. `HRESP` Limitation
 
-All three active top-level AHB-side targets currently return `2'b00` (`OKAY`). In addition, the active `AHB_Master_Interface` does not consume `HRESP` at all.
+The former CPU-visible error limitation is resolved for the existing load/store fault contract. The combinational `AHB_Master_Interface` still has no `HRESP` input; the SoC connects fabric HRESP/HREADY directly to CPU `HRESP_FROM_AHB`/`HREADY_FROM_AHB`.
 
-Therefore the baseline provides **no CPU-visible bus-error path**.
-
-This is an implementation limitation, not the approved cleanup target. Frozen A2 makes data-bus faults synchronous CPU load/store access-fault exceptions; future AXI replacement remains a separate architecture stage.
+Final ERROR belongs to the matching valid MEM load/store owner and generates cause 5/7 with precise faulting PC. Failed effects/retirement and younger requests are suppressed; older successful WB ownership is preserved. Existing pre-bus causes 4/6 retain priority. See [CPU fault boundary](03_cpu_interface.md#15-bus-response--error-visibility). No instruction-fetch fault or new exception policy is defined.
 
 ## 11. `HSIZE` Limitation
 
-The top-level distributes `HSIZE` to the DMEM slave, but the active CPU master currently declares `HSIZE` without driving it.
+HSIZE is driven for byte `000`, halfword `001` and word `010`; the master retains invalid `111` and inactive default `010`. C1a independently predecodes load/store size and forwarded-effective-address alignment before request selection, preserving read priority and the existing truth table.
 
-Current functionality survives because:
-
-- DMEM store byte lanes are controlled through `CUSTOM_WRITE_MASK_OUT`,
-- DMEM load extraction is performed inside the CPU,
-- the APB bridge does not consume `HSIZE`,
-- the VGA slave does not consume `HSIZE`.
-
-Consequently, no baseline slave behavior shall depend on `HSIZE`.
-
-Before the interconnect is treated as a clean standard AHB-Lite implementation, `HSIZE` generation shall be repaired and verified for byte, halfword, and word accesses.
+Fabric size/alignment qualifies DMEM selection; APB and VGA validate aligned word accesses. DMEM byte enables still come from CUSTOM_WRITE_MASK_OUT and CPU LoadExtender interprets returned loads. Defined HSIZE and the DMEM-local mask coexist; neither implies generic AHB/AXI strobes or complete AMBA compliance. The former undriven size is historical.
 
 ## 12. Physical Decode Aliases
 
-The active fabric contains broad decode that creates physical aliases beyond the canonical map.
+Historical pre-cleanup decode covered 64 KiB DMEM and the entire `0x2xxx_xxxx`/`0x4xxx_xxxx` regions, exposing aliases. Section 4 routing and local validation supersede those observations.
 
 ### 12.1 DMEM Alias
 
-Top-level decode selects 64 KiB at `0x1000_xxxx`, while the physical DMEM contains only 32 KiB and indexes `HADDR[14:2]`.
-
-Therefore the upper half of the physical decode can alias the lower 32 KiB.
-
-Only `0x1000_0000 - 0x1000_7FFF` is architectural.
+`0x1000_8000..0x1000_FFFF` reaches default ERROR, not a second mapping of RAM. Canonical DMEM remains `0x1000_0000..0x1000_7FFF`.
 
 ### 12.2 VGA / VRAM Alias
 
-The top-level selects the entire `0x2xxx_xxxx` region, while the VGA subsystem decodes only lower address bits for its framebuffer and control/status windows.
-
-Repeated/mirrored behavior outside the canonical VGA windows is not architectural.
+The VGA aperture is locally validated for aligned word framebuffer writes at `0x2000_0000..0x2000_95FF`, status at `0x2001_0000`, and write control at `0x2001_0004`, with existing readiness/direction semantics. Other offsets/sizes or rejected operations produce local ERROR. The aperture is not a mirrored framebuffer allocation.
 
 ### 12.3 APB Alias
 
-The top-level selects the entire `0x4xxx_xxxx` region. The AHB-to-APB bridge then chooses one of eight peripherals primarily from `addr[19:16]`, so the canonical APB slot pattern may repeat for addresses that differ in ignored upper-middle bits.
-
-Only the canonical `0x4000_xxxx - 0x4007_xxxx` slots are supported software addresses.
+Only `0x4000_0000..0x400F_FFFF` routes to the bridge, which validates full offset and implemented slot before peripheral selection. Slots 0..9 retain existing register contracts; 10..15 are reserved/error. Higher aliases do not select the bridge. No address allocation or wrong-direction policy changes.
 
 ## 13. Arbitration
 
@@ -344,10 +259,10 @@ On `HRESETn=0`:
 
 - `HSEL_MEM_d` is cleared,
 - `HSEL_VRAM_d` is cleared,
-- `HSEL_APB_d` is cleared,
+- `HSEL_APB_d`, `HSEL_ERROR_d` and `default_error_final` are cleared,
 - individual slaves/bridge receive the same active-low system reset according to their integration.
 
-After reset release and before a valid transfer completes its address phase, the default top-level response path is therefore selected:
+After reset release and before a valid transfer completes its address phase, the idle top-level response path (no valid owner) is therefore selected:
 
 ```text
 HRDATA = 0
@@ -369,15 +284,15 @@ Transfer type       : IDLE / NONSEQ from active CPU master
 Burst mode          : single transfer only
 Back-pressure       : HREADY
 Response routing    : delayed HSEL-based mux
-Error propagation   : not CPU-visible
+Error propagation   : two-cycle ERROR, direct CPU load/store fault path
 Byte write control  : project-specific DMEM sideband
 ```
 
-Because of the undriven `HSIZE`, ignored `HRESP`, custom DMEM sideband, and broad non-canonical decode, this document intentionally uses the terms **AHB-style** and **AHB-Lite-derived** rather than claiming full protocol compliance.
+Defined HSIZE, explicit errors and local validation coexist with the custom DMEM sideband and pipeline coupling. The terms **AHB-style** and **AHB-Lite-derived** remain; full protocol compliance is not claimed.
 
 ## 16. Baseline Cleanup Targets Before Major Feature Integration
 
-The following issues are intentionally recorded for a dedicated baseline-cleanup pass after specification reconstruction and before PLIC/AXI implementation begins:
+The following list records historical cleanup requirements, not a claim that the integrated implementation still lacks every mechanism:
 
 1. tighten DMEM decode to the canonical 32 KiB range,
 2. tighten VGA/VRAM decode to canonical windows,
@@ -388,7 +303,7 @@ The following issues are intentionally recorded for a dedicated baseline-cleanup
 7. clean legacy signal naming/width inconsistencies documented in `cpu_interface.md`,
 8. add directed verification for unmapped, boundary, back-to-back, and wait-state accesses.
 
-These are **cleanup requirements**, not descriptions of behavior already implemented.
+Current mechanisms are described above; [baseline cleanup](baseline_cleanup.md) owns requirement status. This list neither promotes tracker status nor closes naming, physical or other unrelated debt.
 
 ## 17. Required Verification Properties
 
@@ -399,15 +314,19 @@ At minimum, verification of the reconstructed baseline fabric shall check:
 - data-phase response routing uses the previous accepted address-phase selection,
 - `HSEL_*_d` remains stable while `HREADY=0`,
 - APB bridge stalls propagate into full CPU pipeline stall,
-- DMEM and VGA zero-wait responses do not introduce extra bus stalls,
+- DMEM and successful supported VGA transfers add no wait, while rejected VGA transfers use the required ERROR phases,
 - consecutive transfers to different slaves return data from the correct data-phase slave,
 - pre-cleanup unmapped zero/ready/OKAY behavior is historical; Phase 4A-3A tests require two-cycle ERROR,
 - physical alias behavior is not used by canonical firmware tests,
-- future cleanup tests detect any remaining dependence on undefined `HSIZE`.
+- defined HSIZE/invalid size, alignment, first/final ERROR, physical side-effect suppression and next-address cancellation agree with the owning contracts.
+
+Source-bound composite review supports exercised CPU/SoC/negative cases and finite master decode/alignment checks. This is not universal equivalence, whole-SoC SCC absence, vendor BRAM collision, fitted timing, CDC or board acceptance. Separate targeted compiler-provenance evidence supplements rather than rewrites historical records. See [CPU bounded status](03_cpu_interface.md#72-a2-acceptance-and-bounded-verification-status) and [memory limits](02_memory_subsystem.md#74-bounded-implementation-observations-and-limits). Public derivative packaging remains pending.
 
 ## 18. Related Sources
 
 Active implementation sources:
+
+- [Top-level decode/owner/mux](../rtl/soc/AMBA_SoC_TOP.v), [master predecode](../rtl/bus/AHB_MASTER.v), [DMEM edge](../rtl/bus/AHB_MEMORY_SLAVE.v), [APB validation/error](../rtl/bus/AHB_APB_bridge.v), [VGA acceptance/commit](../rtl/video/vram/pre_fetch_AHB_VRAM_DUAL_BUFFER.v).
 
 - `rtl/soc/AMBA_SoC_TOP.v`
 - `rtl/bus/AHB_MASTER.v`
@@ -428,20 +347,20 @@ Legacy PLIC snapshots under `verification/legacy/` are not authoritative for the
 
 ## 19. Baseline Fabric Invariants
 
-Unless a later approved specification explicitly changes them, the reconstructed baseline contract is:
+The active invariants preserve the existing frozen decode/error contract:
 
 1. The CPU is the only active system data-bus master.
-2. The active fabric has three top-level targets: DMEM, VGA/VRAM, and AHB-to-APB.
-3. Address-phase slave selection is derived from `HADDR` and retained into the data phase.
-4. Data-phase select state advances only when `HREADY=1`.
-5. `HRDATA`, `HREADY`, and `HRESP` are multiplexed using delayed slave selects.
-6. DMEM and VGA/VRAM are zero-wait AHB-side slaves.
+2. The three functional targets are DMEM, VGA/VRAM and AHB-to-APB, plus a default ERROR responder.
+3. Selection includes transfer validity/final-error cancellation; routing apertures are not software allocations.
+4. Owner selects hold on HREADY=0, advance on HREADY=1 and clear on final ERROR. Separate default_error_final progresses first ERROR while ready is low.
+5. HRDATA/HREADY/HRESP route from the captured owner, including default ERROR.
+6. DMEM and successful supported VGA transfers add no wait; rejected VGA transfers use two-cycle ERROR.
 7. APB transactions may stall the CPU through the bridge.
-8. Unmapped accesses currently complete with zero data, ready high, and OKAY response.
-9. No CPU-visible bus-error mechanism exists in the baseline.
-10. Broad physical decode aliases are implementation artifacts, not architectural address allocations.
-11. `HSIZE` is not currently a reliable signal and shall not be required by baseline slave behavior.
-12. No AHB arbiter, DMA master, PLIC slave, cache, or external memory master is part of this baseline fabric.
+8. Invalid/unmapped transactions produce two-cycle ERROR; ownerless IDLE defaults are not transaction success.
+9. Final load/store ERROR reaches the CPU for its matching MEM owner with existing precise cause/PC/failed-effect rules.
+10. Historical broad aliases are not supported architectural allocations.
+11. Defined HSIZE participates in validation; DMEM byte enables remain the nonstandard matching MEM mask, not write permission.
+12. No AHB arbiter, DMA master, PLIC slave, cache or external memory master is introduced.
 
 ## Phase 4A-2 Approved Decode/Error Contract (active Phase 4A-3A bus scope)
 

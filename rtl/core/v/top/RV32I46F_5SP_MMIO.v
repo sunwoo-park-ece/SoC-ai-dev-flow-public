@@ -1090,10 +1090,10 @@ module RV32I46F5SPMMIO(
 
 	 
 	 	assign EX_memory_read_AHB  = EX_valid && EX_memory_read &&
-                                     !EX_exc_valid && !ex_fault_now &&
+                                     !EX_exc_valid && !EX_fault_raw &&
                                      !mem_fault_now;
 		assign EX_memory_write_AHB = EX_valid && EX_memory_write &&
-                                     !EX_exc_valid && !ex_fault_now &&
+                                     !EX_exc_valid && !EX_fault_raw &&
                                      !mem_fault_now;
 	    assign EX_alu_result_AHB       = alu_result;
 	    assign EX_funct3_AHB           = EX_funct3;
