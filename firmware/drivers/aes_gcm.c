@@ -72,12 +72,6 @@ void aes_gcm_start_decrypt(uint32_t len)
     mmio_write32(AES_GCM_BASE + AES_CTRL, AES_CTRL_START | AES_CTRL_DECRYPT);
 }
 
-void aes_gcm_wait_done(void)
-{
-    while ((aes_gcm_status() & AES_STATUS_DONE) == 0u) {
-    }
-}
-
 /* Trusted v2 path. Legacy helpers above deliberately retain their old ABI. */
 static uint32_t v2_recovery;
 

@@ -98,6 +98,5 @@ uint32_t aes_gcm_status(void);
 void aes_gcm_clear_status(void);
 void aes_gcm_start_encrypt(uint32_t len);
 void aes_gcm_start_decrypt(uint32_t len);
-void aes_gcm_wait_done(void);
 
 #endif
