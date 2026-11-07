@@ -597,3 +597,7 @@ FW/Protocol은 Encryption `(Key, IV)` 유일성, Sequence Persistence 및 Replay
 
 - [AES English canonical](../14_aes_gcm.md), [Firmware companion](19_firmware_contract.ko.md), [APB subsystem](../05_apb_subsystem.md), [Memory Map](../01_memory_map.md), [Tracker](../baseline_cleanup.md).
 - 구현/검증은 P13-02 RTL, P13-03 FW, P13-04 Actual-core independent DV 및 Latency, P13-05 CPU E2E 후속 단계에서 별도 수행한다.
+
+### D08 보증 상태 (비규범적)
+
+통합 실제 코어에서 성공과 동시에 발생하는 overflow 및 늦은 결과 억제는 **NOT_PROVEN / BLOCK_FOR_PROMOTION**이다. §24.4 요구사항은 면제되지 않는다. 합법 자극 시험은 수정하지 않은 wrapper와 실제 VHDL 14개 유닛을 사용했으며 자연 overflow는 관찰되지 않았다. 하위 32비트 카운터는 1로 재로드하며 한 epoch에서 4,294,967,294회 증가해야 all-ones에 도달한다. 정상 통합 연산은 일찍 종료된다. epoch를 지속하는 알려진 합법 자극이 없으며 보편적인 liveness 또는 도달 불가능성은 증명되지 않았다. 별도 callback fixture와 실제 ICB 단독 경계 검증은 통합 우선순위를 증명하지 않는다. #65 완료 시 Owner 장시간 실행은 NOT_RUN이었다. [D08 runbook](../../verification/directed/p13_aes_rtl/P13_08_D08_OWNER_MANUAL_RUN.md)을 참고한다.

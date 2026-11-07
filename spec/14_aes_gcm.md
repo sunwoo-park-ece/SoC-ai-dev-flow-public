@@ -725,3 +725,7 @@ Requirement `AES-001` remains `VERIFIED` **only** for the previously approved ac
 - Owning companion: [Korean AES specification](kor/14_aes_gcm.ko.md); firmware API/ownership target: [firmware contract](19_firmware_contract.md).
 - Cross-owned read-only references: [APB subsystem](05_apb_subsystem.md), [memory map](01_memory_map.md), [SoC Health](22_soc_health_firmware.md), [baseline cleanup tracker](baseline_cleanup.md).
 - P13-02 implements wrapper/core integration and the register/terminal behavior; P13-03 implements firmware API; P13-04 provides actual-core independent DV and measured latency; P13-05 provides SoC CPU E2E. Target specification does not constitute implementation acceptance or verification evidence.
+
+### D08 assurance status (non-normative)
+
+Integrated actual-core overflow concurrent with success and late-result suppression remain **NOT_PROVEN / BLOCK_FOR_PROMOTION**, without waiver of §25.4. Legal wrapper tests used the unmodified wrapper and 14 real VHDL units. No natural overflow was observed. The low 32-bit counter reloads one and needs 4,294,967,294 increments in one epoch to reach all ones. Legal integrated transactions normally finish early; no known legal stimulus sustains that epoch and universal liveness/unreachability is unproved. Separate callback fixture and standalone real ICB boundary work do not establish integrated priority. Owner long run was NOT_RUN at #65 completion. See the [D08 runbook](../verification/directed/p13_aes_rtl/P13_08_D08_OWNER_MANUAL_RUN.md).
