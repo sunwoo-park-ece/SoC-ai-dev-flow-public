@@ -328,11 +328,11 @@ UART/LoRa, external-I/O electrical acceptance가 아니다. `UART-005`는 OPEN,
 | ID | Sev | Gate | 핵심 작업 | Status |
 |---|---|---|---|---|
 | `AES-001` | Blocker | BC | actual VHDL core KAT | VERIFIED |
-| `AES-002` | High | BC | LEN>16 reject | OPEN |
-| `AES-003` | High | BC | byte/word ordering freeze | OPEN |
-| `AES-004` | High | BC | auth 성공 전 plaintext release 금지 | OPEN |
-| `AES-005` | High | BC | key zeroization policy | OPEN |
-| `AES-006` | Medium | BC | BUSY mutation / CLR_STATUS semantics | OPEN |
+| `AES-002` | High | BC | LEN>16 reject | VERIFIED |
+| `AES-003` | High | BC | byte/word ordering freeze | VERIFIED |
+| `AES-004` | High | BC | auth 성공 전 plaintext release 금지 | VERIFIED |
+| `AES-005` | High | BC | key zeroization policy | VERIFIED |
+| `AES-006` | Medium | BC | BUSY mutation / CLR_STATUS semantics | VERIFIED |
 | `AES-007` | Medium | BC | alias + timeout | OPEN |
 | `AES-IRQ` | Medium | PLIC | IRQ | DEFERRED |
 | `AES-DMA` | Medium | AXI | streaming/DMA | DEFERRED |
@@ -398,7 +398,7 @@ P10-HEX 근거: 독립 APB 베이스라인(S0), CTRL RAZ/WI(S1), exact local off
 | `VER-003` | Blocker | BC | async clock/reset CDC regression | OPEN |
 | `VER-004` | Blocker | BC | fresh Quartus + TimeQuest | IN_PROGRESS |
 | `VER-005` | Blocker | BC | FPGA board acceptance | OPEN |
-| `VER-006` | High | BC | actual-core AES-GCM KAT evidence; vectors/results tied to RTL commit | OPEN |
+| `VER-006` | High | BC | actual-core AES-GCM KAT evidence; vectors/results tied to RTL commit | VERIFIED |
 | `VER-007` | High | BC | source→ELF→IMEM/DMEM MIF→SOF chain; reproducible artifact mapping | OPEN |
 | `VER-008` | Blocker | BC | `21_cpu_core` CPU regression: shift/JALR/legality/retire/trap/FENCE/CSR-ID/counter-write-ignore | VERIFIED |
 | `DOC-001` | High | BC | 검증 후 owning spec의 target text를 active로 승격하고 README/index 갱신; reviewed spec diff | OPEN |
@@ -592,3 +592,9 @@ MAX 10 ADC 및 조이스틱 서브시스템 클린업 범위는 RTL, 펌웨어, 
 5. **문서 및 추적성:** P11 정규 규격서([`spec/15_adc_joystick.md`](../15_adc_joystick.md), [`spec/19_firmware_contract.md`](../19_firmware_contract.md), [`spec/22_soc_health_firmware.md`](../22_soc_health_firmware.md), [`spec/timing_constraints.md`](../timing_constraints.md)) 및 공개 증적 보고서([`reports/evidence/P11_ADC_C4D_TIMING_REGRESSION_ROOT_CAUSE_REPORT.md`](../../reports/evidence/P11_ADC_C4D_TIMING_REGRESSION_ROOT_CAUSE_REPORT.md), [`reports/evidence/P11_ADC_FINAL_DOCUMENTATION_RECONCILIATION.md`](../../reports/evidence/P11_ADC_FINAL_DOCUMENTATION_RECONCILIATION.md)) 완벽 동기화.
 
 이를 통해 `ADC-001..006`, `CDC-003`, `FW-009`, 그리고 `APB-005`의 ADC slot-5 하위 범위가 `VERIFIED`로 종결됨. 외부 I/O 타이밍/전기적 서명(`STA-002`), 베이스라인 타이밍 여유 최적화 및 전체 SoC 물리 클로저는 미종결 상태를 유지함.
+
+### P13-08 AES 증거 메모 (PENDING_REVIEW)
+
+로컬 소스 `2e706e690c4dd8ed6f951c7bb5f587109463b074`에 대한 비규범적 조정 제안이다. Issue #65 권한에 따라 AES-002/003/004/005/006 및 VER-006을 아래 범위에 한해 VERIFIED로 조정했다. AES-001 VERIFIED는 과거 실제 코어 KAT 6건에만 적용한다. AES-002/003/004/005/006 및 VER-006은 각각 전체 폭 LEN, 독립 바이트 순서 검증, 신뢰 호출자 인증, 기능적 zeroize, 시뮬레이션 BUSY/CTRL 동작, 소스가 확인된 실제 코어 KAT에 대한 검증 범위다. AES-007은 레거시 무한 대기 API를 별도로 검토할 때까지 OPEN이다. 현재 CPU/AHB/APB 증거는 지향성 오류 케이스 16건과 정상 대조군을 포함하며, 로컬 정확 디코드와 신뢰 API의 D11 타임아웃 증거도 있다. Phase08 전체 수락은 독립 검토 및 Owner 결정 대기다.
+
+FW-010은 의존성 및 D08 판정이 확정될 때까지 OPEN이다. 실제 ICB 오버플로와 뒤늦은 성공 동작(AES-AC-08)은 NOT_PROVEN이며 승격 보류다. 격리된 fixture로 이 증거 공백을 해소할 수 없다. 과거 SOF 및 보드 증거는 이전 드라이버에 해당하므로 VER-007은 OPEN이다. APB-005와 FW-002에는 AES 증거만 기록하며 공유 상태는 각각 IN_PROGRESS와 OPEN으로 유지한다. 물리 BUSY는 NOT_TESTABLE, STA-002는 BLOCKED, CDC-001은 OPEN, 외부 I/O 타이밍은 UNPROVEN, Health AES는 EXCLUDED_PENDING_CLEANUP, Clean Baseline은 NOT_RELEASED다.

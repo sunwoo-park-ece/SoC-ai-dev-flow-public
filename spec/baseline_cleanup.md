@@ -337,11 +337,11 @@ Phase 4A-GSENSOR evidence (private local evidence archive): the **G-sensor inter
 | ID | Sev | Gate | Current issue | Required outcome | Dependent specs | Verification | Status |
 |---|---|---|---|---|---|---|---|
 | `AES-001` | Blocker | BC | Reference/APB models do not prove actual VHDL core correctness. | Run fresh actual-wrapper/core AES-128-GCM KATs using independent trusted vectors. | `14_aes_gcm` | encrypt/decrypt empty/partial/full KAT | VERIFIED |
-| `AES-002` | High | BC | `LEN>16` is not safely rejected. | Deterministically reject values outside 0..16. | `14_aes_gcm`, `19_firmware_contract` | 0/1/15/16/17/65535 | OPEN |
-| `AES-003` | High | BC | Byte/word ordering can silently break interoperability. | Freeze KEY/IV/AAD/payload/tag ordering with independent vectors. | `14_aes_gcm` | byte-array↔MMIO KAT | OPEN |
-| `AES-004` | High | BC | Decrypt plaintext can exist before authentication succeeds. | Driver releases plaintext only after DONE && TAG_OK && !ERROR. | `14_aes_gcm`, `19_firmware_contract` | wrong-tag negative test | OPEN |
-| `AES-005` | High | BC | Key remains readable/stored; no zeroize policy. | Define/implement explicit zeroization appropriate to this accelerator; never claim secure vault behavior. | `14_aes_gcm`, `19_firmware_contract` | zeroize/readback/reset tests | OPEN |
-| `AES-006` | Medium | BC | Inputs can mutate while BUSY; CLR_STATUS also changes retained ENC_DEC. | Freeze BUSY-write policy and separate status clear from direction state. | `14_aes_gcm` | mutation/CTRL tests | OPEN |
+| `AES-002` | High | BC | `LEN>16` is not safely rejected. | Deterministically reject values outside 0..16. | `14_aes_gcm`, `19_firmware_contract` | 0/1/15/16/17/65535 | VERIFIED |
+| `AES-003` | High | BC | Byte/word ordering can silently break interoperability. | Freeze KEY/IV/AAD/payload/tag ordering with independent vectors. | `14_aes_gcm` | byte-array↔MMIO KAT | VERIFIED |
+| `AES-004` | High | BC | Decrypt plaintext can exist before authentication succeeds. | Driver releases plaintext only after DONE && TAG_OK && !ERROR. | `14_aes_gcm`, `19_firmware_contract` | wrong-tag negative test | VERIFIED |
+| `AES-005` | High | BC | Key remains readable/stored; no zeroize policy. | Define/implement explicit zeroization appropriate to this accelerator; never claim secure vault behavior. | `14_aes_gcm`, `19_firmware_contract` | zeroize/readback/reset tests | VERIFIED |
+| `AES-006` | Medium | BC | Inputs can mutate while BUSY; CLR_STATUS also changes retained ENC_DEC. | Freeze BUSY-write policy and separate status clear from direction state. | `14_aes_gcm` | mutation/CTRL tests | VERIFIED |
 | `AES-007` | Medium | BC | Register alias + unbounded completion helper. | Apply `APB-005` and firmware timeout hardening. | `14_aes_gcm`, `19_firmware_contract` | alias + timeout injection | OPEN |
 | `AES-IRQ` | Medium | PLIC | No completion/error IRQ contract. | Define only if desired in PLIC stage. | future PLIC | PLIC-stage | DEFERRED |
 | `AES-DMA` | Medium | AXI | Current accelerator is one 128-bit register window. | Define streaming/DMA independently in future AXI/DMA work. | future AXI/DMA | later | DEFERRED |
@@ -407,7 +407,7 @@ P10-HEX evidence: standalone APB baseline (S0), CTRL RAZ/WI (S1), exact local of
 | `VER-003` | Blocker | BC | Async-clock/reset tests for VGA, G-sensor, ADC CDC fixes. | CDC assertions/TB pass | OPEN |
 | `VER-004` | Blocker | BC | Fresh Quartus 19.1 build + generated-clock/uncertainty TimeQuest review. | compile/timing/warning-triage evidence | IN_PROGRESS |
 | `VER-005` | Blocker | BC | FPGA board acceptance for cleaned board-facing blocks. | board checklist tied to SOF/source commit | OPEN |
-| `VER-006` | High | BC | Preserve actual-core AES-GCM KAT evidence. | vectors/results tied to RTL commit | OPEN |
+| `VER-006` | High | BC | Preserve actual-core AES-GCM KAT evidence. | vectors/results tied to RTL commit | VERIFIED |
 | `VER-007` | High | BC | Preserve source→ELF→IMEM/DMEM MIF→SOF artifact chain. | reproducible artifact mapping | OPEN |
 | `VER-008` | Blocker | BC | Dedicated CPU-core regression for new `21_cpu_core` contract. | shift/JALR/legality/retire/trap/FENCE/CSR-ID/counter-write-ignore deterministic pass logs | VERIFIED |
 | `DOC-001` | High | BC | After verification, promote target text to active behavior and update README/index. | reviewed spec diff | OPEN |
@@ -657,3 +657,9 @@ The MAX 10 ADC and Joystick Subsystem cleanup scope is **VERIFIED** across RTL, 
 5. **Documentation & Traceability:** P11 canonical specifications ([`spec/15_adc_joystick.md`](15_adc_joystick.md), [`spec/19_firmware_contract.md`](19_firmware_contract.md), [`spec/22_soc_health_firmware.md`](22_soc_health_firmware.md), [`spec/timing_constraints.md`](timing_constraints.md)) and public evidence reports ([`reports/evidence/P11_ADC_C4D_TIMING_REGRESSION_ROOT_CAUSE_REPORT.md`](../reports/evidence/P11_ADC_C4D_TIMING_REGRESSION_ROOT_CAUSE_REPORT.md), [`reports/evidence/P11_ADC_FINAL_DOCUMENTATION_RECONCILIATION.md`](../reports/evidence/P11_ADC_FINAL_DOCUMENTATION_RECONCILIATION.md)) are fully reconciled.
 
 This closes `ADC-001..006`, `CDC-003`, `FW-009`, and the ADC slot-5 sub-scope of `APB-005` as `VERIFIED`. External I/O timing/electrical sign-off (`STA-002`), baseline timing margin optimization, and whole-SoC physical closure remain open.
+
+### P13-08 AES evidence note (PENDING_REVIEW)
+
+Non-normative reconciliation proposal for local source `2e706e690c4dd8ed6f951c7bb5f587109463b074`. Issue #65 authorizes the bounded VERIFIED dispositions for AES-002/003/004/005/006 and VER-006 below. Retain AES-001 VERIFIED only for the historical six actual-core KATs. AES-002/003/004/005/006 and VER-006 are evidenced for full-width LEN, independent byte ordering, trusted caller authentication, functional zeroization, simulated BUSY/CTRL behavior and source-bound actual-core KATs respectively. AES-007 stays OPEN pending separate legacy unbounded API disposition: current CPU/AHB/APB evidence covers 16 directed fault cases and a legal control, alongside exact local decode and trusted D11 timeout evidence. Phase08 acceptance remains pending independent review and Owner decision.
+
+FW-010 stays OPEN pending dependency and D08 disposition. Genuine ICB overflow and late-success behavior (AES-AC-08) remain NOT_PROVEN and blocked for promotion; the isolated fixture does not close that gap. VER-007 stays OPEN: the historical SOF and board evidence belong to the old driver. Record only AES evidence for APB-005 and FW-002; shared statuses stay IN_PROGRESS and OPEN respectively. Physical BUSY is NOT_TESTABLE, STA-002 BLOCKED, CDC-001 OPEN, external I/O timing UNPROVEN, Health AES EXCLUDED_PENDING_CLEANUP and Clean Baseline NOT_RELEASED.
