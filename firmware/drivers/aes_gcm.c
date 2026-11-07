@@ -183,8 +183,8 @@ aes_gcm_v2_result_t aes_gcm_v2_transact(
     for (i = 0u; i < r->len; ++i) r->output[i] = 0u;
     if (r->mode == AES_GCM_V2_ENCRYPT)
         for (i = 0u; i < 16u; ++i) r->tag_out[i] = 0u;
-    if (v2_recovery) return AES_GCM_V2_RECOVERY_REQUIRED;
     if (!r->poll_budget) return AES_GCM_V2_TIMEOUT;
+    if (v2_recovery) return AES_GCM_V2_RECOVERY_REQUIRED;
     if (mmio_read32(AES_GCM_BASE + AES_VERSION) != AES_VERSION_V2)
         return AES_GCM_V2_HW_CORE_ERROR;
     s = v2_status(d);

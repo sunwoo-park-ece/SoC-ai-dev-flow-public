@@ -183,9 +183,29 @@ static void blocked(void)
     unsigned n=events;
     memset(output+1,0xcc,16); memset(out_tag+1,0xcc,16);
     check(call()==AES_GCM_V2_RECOVERY_REQUIRED,"LATCH_BLOCKS_REENTRY");
-    check(events==n && diag.recovery_required==1,"LATCH_ZERO_MMIO");
+    check(events==n && diag.recovery_required==1 && diag.last_status==0 &&
+          diag.completed_status_polls==0 && diag.start_issued==0,"LATCH_ZERO_MMIO");
     check(aes_gcm_v2_acknowledge_external_reset(&diag)==AES_GCM_V2_RECOVERY_REQUIRED,"ACK_NO_RESET_PROOF");
     check(events==n && diag.recovery_required==1,"ACK_PRESERVES_LATCH");
+}
+static void invalid_zero_budget(unsigned expected_recovery)
+{
+    unsigned n=events, i;
+    uint32_t len=request.len;
+    aes_gcm_v2_diagnostic_t probe;
+    check(request.poll_budget==0,"INVALID_ZERO_BUDGET_SETUP");
+    memset(output,0xcc,sizeof(output));
+    memset(out_tag,0xcc,sizeof(out_tag));
+    request.len=17;
+    check(aes_gcm_v2_transact(&request,&diag)==AES_GCM_V2_INVALID_ARG,"INVALID_ZERO_BUDGET_PRIORITY");
+    request.len=len;
+    check(events==n,"INVALID_ZERO_BUDGET_NO_MMIO");
+    for(i=0;i<sizeof(output);++i)
+        check(output[i]==0xcc && out_tag[i]==0xcc,"INVALID_ZERO_BUDGET_OUTPUT_UNTOUCHED");
+    check(aes_gcm_v2_acknowledge_external_reset(&probe)==
+          (expected_recovery?AES_GCM_V2_RECOVERY_REQUIRED:AES_GCM_V2_OK),
+          "INVALID_ZERO_BUDGET_RECOVERY_RESULT");
+    check(probe.recovery_required==expected_recovery && events==n,"INVALID_ZERO_BUDGET_RECOVERY_UNCHANGED");
 }
 static void invalid(unsigned sub)
 {
@@ -230,7 +250,10 @@ static void run(unsigned group,unsigned sub)
     }
     if(group==3) {
         request.poll_budget=0; check(call()==AES_GCM_V2_TIMEOUT,"ZERO_BUDGET_TIMEOUT");
-        check(events==0 && diag.last_status==0 && !diag.recovery_required,"ZERO_BUDGET_NO_LATCH"); return;
+        check(events==0 && diag.last_status==0 && diag.completed_status_polls==0 &&
+              diag.start_issued==0 && !diag.recovery_required,"ZERO_BUDGET_NO_LATCH");
+        invalid_zero_budget(0);
+        return;
     }
     if(group==4) {
         request.poll_budget= sub==0?1:4; done_at=sub==0?1:(sub==1?4:2);
@@ -292,9 +315,14 @@ static void run(unsigned group,unsigned sub)
         done_at=0; check(call()==AES_GCM_V2_TIMEOUT,"POST_START_TIMEOUT");
         check(polls==4 && diag.last_status==1 && diag.recovery_required,"TIMEOUT_LATCH");
         n=events;
-        /* Invalid parameters retain priority even with latch. */
-        request.len=17; check(aes_gcm_v2_transact(&request,&diag)==AES_GCM_V2_INVALID_ARG,"LATCH_INVALID_PRIORITY"); request.len=16;
-        request.poll_budget=0; blocked(); check(events==n,"NO_TIMEOUT_EXTRA_READ");
+        request.poll_budget=0;
+        invalid_zero_budget(1);
+        check(call()==AES_GCM_V2_TIMEOUT,"LATCHED_ZERO_BUDGET_TIMEOUT");
+        check(events==n && diag.last_status==0 && diag.completed_status_polls==0 &&
+              diag.start_issued==0,"LATCHED_ZERO_BUDGET_NO_ACTIVITY");
+        check(diag.recovery_required==1,"LATCHED_ZERO_BUDGET_RECOVERY_DIAG");
+        request.poll_budget=4;
+        blocked();
         /* Raw status/clear/idle observation cannot release software latch. */
         starts=0; pre=0; initial=0; after_clear=0;
         (void)aes_gcm_status(); aes_gcm_clear_status();
