@@ -1,0 +1,129 @@
+{
+  "schema_version": "1.0",
+  "evidence_id": "CPU-AHB-C1A-EV-01",
+  "title": "CPU/AHB ownership and reset evidence",
+  "status": "PASS_BOUNDED",
+  "review_status": "PENDING_REVIEW",
+  "evidence_date": "2026-11-07",
+  "verified_source_revision": {
+    "repository": "https://github.com/sunwoo-park-ece/SoC-ai-dev-flow-public",
+    "commit": "c7c607353ab3dadbb0bebbc6d5e178dfbccea286"
+  },
+  "requirements": [
+    "BUS-002",
+    "BUS-003",
+    "BUS-004",
+    "BUS-005"
+  ],
+  "run": {
+    "id": "P13-06R-20261106T221244Z",
+    "operator": "OWNER",
+    "scope": "suite, hold and natural reset",
+    "runner_exit": {
+      "suite": 0,
+      "hold": 0,
+      "reset": 0
+    },
+    "tee_exit": {
+      "suite": 0,
+      "hold": 0,
+      "reset": 0
+    },
+    "output_inventory_sha256": "cd9cf8a9dde8514f26947c29978d935828b8d7655e0c5ca2491361a84a072faf",
+    "inventory_note": "Post-run checksums; not a signed seal. Compiler command records are runner-captured."
+  },
+  "oracle": "Independent instruction/register/byte-memory interpreter and observed bus/write effects; structural graph checks within model boundaries.",
+  "inputs": {
+    "manifest": "reports/evidence/cpu-ahb-c1a/source_hashes.sha256",
+    "count": 93,
+    "scope": "Portable current-source inputs; historical unavailable runner assets, isolated generated mutants and local tool binaries excluded."
+  },
+  "criteria": [
+    {
+      "id": "CPU-AHB-01",
+      "check": "Transaction ownership, physical writes, error and architectural effects",
+      "result": "PASS_BOUNDED",
+      "checker": "verification/independent/p12a5_hclk_loop/check.py",
+      "target_exit": 0,
+      "leaf_exit": 0,
+      "guard_exit": 0,
+      "parent_exit": 0,
+      "counterexamples": [
+        "WRITE_LANES",
+        "WRITE_ADDRESS",
+        "WRITE_OWNER"
+      ],
+      "coverage": {
+        "retirements": 336,
+        "requests": 67,
+        "physical_writes": 15,
+        "traps": 18,
+        "bus_errors": 11,
+        "uart_wait_cycles": 2168,
+        "cross_slave_transition_pairs": 16
+      }
+    },
+    {
+      "id": "CPU-AHB-02",
+      "check": "Response reachability and SCC at model boundaries",
+      "result": "PASS_BOUNDED",
+      "checker": "verification/independent/p12a5_hclk_loop/structural.py",
+      "target_exit": 0,
+      "leaf_exit": 0,
+      "guard_exit": 0,
+      "parent_exit": 0,
+      "counterexamples": [
+        "STRUCT_RESPONSE_DATA",
+        "STRUCT_RESPONSE_MASK"
+      ]
+    },
+    {
+      "id": "CPU-AHB-03",
+      "check": "Held address and control during waits",
+      "result": "PASS_BOUNDED",
+      "checker": "verification/independent/p12a5_hclk_loop/audit.py",
+      "held_pairs": 2169,
+      "counterexamples": [
+        "AHB_HOLD"
+      ]
+    },
+    {
+      "id": "CPU-AHB-04",
+      "check": "Memory retention and cancellation in exercised reset scenario",
+      "result": "PASS_BOUNDED",
+      "checker": "verification/independent/p12a5_hclk_loop/reset.py",
+      "counterexamples": [
+        "RESET_MEMORY"
+      ]
+    }
+  ],
+  "sensitivity": {
+    "golden": "PASS",
+    "isolated_source_mutants": 5,
+    "observation_fixtures": 2,
+    "expected_rejections": "Observed with intended semantic assertions; not production DUT failures."
+  },
+  "not_run": [
+    "Actual-core CPU-to-SoC AES end-to-end in this run",
+    "Exhaustive standalone master domain in this run",
+    "Natural AES overflow",
+    "Fresh source-snapshot fitter and timing analysis",
+    "External IO timing",
+    "CDC sign-off",
+    "Board acceptance",
+    "Same-runtime reset ACK proof"
+  ],
+  "limitations": [
+    "No full SoC, AHB or ISA compliance claim.",
+    "Graphs and memory observations are bounded by blackbox and model assumptions.",
+    "No portable reproduction procedure is approved.",
+    "Historical evidence is not represented as a current-source execution."
+  ],
+  "sanitization": {
+    "repository_relative_manifest": true,
+    "raw_logs_included": false,
+    "licensed_vendor_payload_included": false,
+    "absolute_paths_included": false,
+    "private_issue_history_included": false
+  }
+}

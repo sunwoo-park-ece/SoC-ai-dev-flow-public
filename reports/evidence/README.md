@@ -7,6 +7,7 @@
 | `P08B-G0-EV-01` | firmware trap endpoint | STOP | historical source snapshot | [Gate 0](p08b_gate0/summary.md) |
 | `P11-ADC-C4D-EV-01` | 50 MHz Fmax regression root-cause analysis | PASS | `P11_ADC_C4B_STEP1_OWNER_20260926T163016Z` | [P11 ADC C4-D timing root-cause report](P11_ADC_C4D_TIMING_REGRESSION_ROOT_CAUSE_REPORT.md) |
 | `P11-ADC-FINAL-DOC-EV-01` | P11 ADC canonical documentation reconciliation & closure readiness | PASS | `P11-ADC-Cleanup` working tree | [P11 ADC final documentation reconciliation report](P11_ADC_FINAL_DOCUMENTATION_RECONCILIATION.md) |
+| `CPU-AHB-C1A-EV-01` | `BUS-002/003/004/005` exercised CPU/AHB scope | PASS_BOUNDED; PENDING_REVIEW | `c7c607353ab3dadbb0bebbc6d5e178dfbccea286` | [CPU/AHB ownership and reset](cpu-ahb-c1a/summary.md) |
 
 
 
