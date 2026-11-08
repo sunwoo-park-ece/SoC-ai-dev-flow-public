@@ -58,9 +58,10 @@ SECTIONS
         __bss_end = .;
     } > DMEM
 
-     /* 스택 포인터: RAM의 맨 끝 -4 */
-    . = ORIGIN(DMEM) + LENGTH(DMEM) - 4;
-    __stack_top = .;
+    /* Empty downward-growing stack: exclusive DMEM end, no allocated bytes. */
+    __stack_top = ORIGIN(DMEM) + LENGTH(DMEM);
+    ASSERT((__stack_top & 0xF) == 0,
+           "RV32 ILP32 initial stack must be 16-byte aligned")
 
     /DISCARD/ :
     {
