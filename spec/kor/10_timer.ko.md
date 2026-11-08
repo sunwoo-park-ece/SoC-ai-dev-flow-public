@@ -8,6 +8,14 @@
 >
 > **상위 명세:** `soc_architecture.md`, `memory_map.md`, `apb_subsystem.md`, `reset_clock.md`, `interrupt_architecture.md`.
 
+## 현행 Legacy 계약과 보증 범위
+
+P06B §21이 현행 A5다. START는 COMPARE 후 CTRL[0]=1을 쓰며 COUNT/READY를 초기화하고 active_compare를 latch한다. N=0은 START edge에서, N>0은 이후 N번째 counting edge에서 COUNT=N, READY=1, RUNNING=0으로 완료한다. STOP은 COUNT/READY를 보존하고 RELOAD는 COUNT/READY/RUNNING을 지우며 둘 다 같은 edge counting을 억제한다. COMPARE write는 다음 START에만 반영된다. READY W1C는 재시작하지 않고 terminal set이 W1C보다 우선한다. P14는 미사용 timer_wait_ready 선언/정의를 제거했으며 timer_status는 finite/nonblocking polling에 남아 있다. Global FW-002는 OPEN이다. IRQ, mtime/mtimecmp, IPI, ACLINT 동작은 없다.
+
+기존 requirement/AC ID와 동결 의도를 유지한다. 아래 현행 계약과 충돌하는 cleanup 전 설명은 역사적 기록이며 새 구현 요구가 아니다. 상태는 읽기 전용 tracker의 기존 수용 범위를 인용하며 이 정합화로 승격하지 않는다.
+
+추적: [APB_TIMER.v](../../rtl/peripherals/APB_TIMER.v); [timer.c](../../firmware/drivers/timer.c); [timer.h](../../firmware/include/timer.h); [tb_p06b_timer.sv](../../verification/directed/timer/tb_p06b_timer.sv).
+
 ## 1. 목적
 
 이 문서는 active FPGA baseline의 APB timer peripheral을 정의한다. 주요 범위는 다음과 같다.
@@ -86,6 +94,8 @@ RTL은 `PADDR[3:0]`만 decode하므로 register bank가 selected APB slot 내부
 
 ## 4. Register Semantics
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 ### 4.1 TIMER_CTRL — `+0x00`
 
 ```text
@@ -146,6 +156,8 @@ Bit 0에 1을 write하면 READY가 clear된다.
 
 ## 5. Core Counter State Machine
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 실제 핵심 동작은 다음과 같다.
 
 ```text
@@ -184,6 +196,8 @@ ENABLE이 여전히 1이면 다시 Counting
 ```
 
 ## 6. 정확한 Compare Timing
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 ### 6.1 COUNT=0 fresh start
 
@@ -252,6 +266,8 @@ terminal_time = (COMPARE + 1) / 50,000,000 seconds
 
 ## 7. READY Stop / Re-Arm
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 Terminal event 시:
 
 ```text
@@ -283,6 +299,8 @@ terminal
 
 ## 8. Firmware Start / Restart 규칙
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 현재 driver:
 
 ```c
@@ -309,6 +327,8 @@ Benchmark firmware는 이 때문에 별도 reset/re-arm sequence를 사용한다
 
 ## 9. Disable Same-Edge Quirk
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 `TIMER_CTRL.ENABLE=0` write는 이후 cycle부터 timer를 disable한다.
 
 하지만 counter update와 APB register write가 같은 sequential always block 안에 있으므로 해당 edge의 counter logic은 old enable 값을 사용한다.
@@ -322,6 +342,8 @@ Software는 ENABLE=0 write가 pre-write COUNT를 atomic하게 그대로 freeze�
 
 ## 10. Running 중 Compare Update
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 COMPARE write는 COUNT를 reset하지 않는다.
 
 새 COMPARE가 current COUNT보다 크면 새 compare까지 계속 count한다.
@@ -333,6 +355,8 @@ COMPARE write와 같은 edge의 timer logic은 old compare를 보고, 새 compar
 **Baseline firmware rule:** 의도된 동작이 아니라면 active interval 중 COMPARE 변경을 피한다.
 
 ## 11. W1C Race Behavior
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 READY generation과 STATUS W1C write는 같은 sequential process에서 처리된다.
 
@@ -368,6 +392,8 @@ TIMER_STATUS.READY polling
 - enable/reset behavior
 
 ## 13. Baseline Firmware의 Long-Running Counter 사용
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 최종 baseline application은 timer를 장시간 cycle counter처럼 사용한다.
 
@@ -459,6 +485,8 @@ COMPARE가 reset value 0인 상태에서 ENABLE만 1로 만들면 첫 active tim
 
 ## 17. Non-Architectural Debug Output
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 RTL에는:
 
 ```text
@@ -472,6 +500,8 @@ counter_debug = counter[31:22]
 따라서 software/board I/O/verification architectural contract가 아니다.
 
 ## 18. Verification Requirements
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 Baseline timer directed verification은 최소 다음을 확인해야 한다.
 
@@ -493,6 +523,8 @@ Baseline timer directed verification은 최소 다음을 확인해야 한다.
 16. active timer IRQ 부재
 
 ## 19. Baseline Cleanup Targets Before Major Feature Integration
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 ### TIMER-CLEANUP-01 — Interval semantics 정리
 
@@ -536,6 +568,8 @@ Cycle-accurate compare timing, re-arm, disable, update, W1C race, boundary, futu
 
 ## 20. Baseline Invariants
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 1. Timer base는 `0x4002_0000`이다.
 2. APB slot은 `PSEL[2]`다.
 3. Baseline PCLK는 50 MHz다.
@@ -553,6 +587,8 @@ Cycle-accurate compare timing, re-arm, disable, update, W1C race, boundary, futu
 15. `timer_delay_cycles()`는 APB timer가 아니라 software delay helper다.
 
 ## Phase 4A-2 승인된 one-shot 목표 (현행 RTL 아님)
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 A5 reset은 `COUNT=COMPARE=RUNNING=READY=0`. START는 COUNT/READY를 지우고 programmed COMPARE를 active_compare에 latch한다. N=0은 START commit edge에 완료; N>=1은 다음 PCLK이 counting edge #1이고 #N에서 COUNT=N, READY=1, RUNNING=0으로 완료한다. Running 중 START는 새 interval로 restart한다. STOP은 완료 event 없이 정지하고 COUNT/READY를 보존한다. RELOAD는 COUNT/READY/RUNNING을 0으로 한다. Running 중 COMPARE write는 다음 START에만 적용된다. READY는 sticky, W1C는 READY만 지우며 terminal event와 동시라면 set 우선이다. W1C 자동 restart/periodic mode 없음. FW `timer_start(N)`은 COMPARE=N 후 START한다. 현행 COMPARE+1은 baseline 한정이다.
 

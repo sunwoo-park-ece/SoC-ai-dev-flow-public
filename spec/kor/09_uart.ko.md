@@ -15,6 +15,14 @@
 > source/build의 PC/LoRa physical acceptance가 없는 `UART-005`는 `OPEN`,
 > `UART-006`은 optional/OPEN, UART IRQ는 DEFERRED를 유지한다.
 
+## 현행 Legacy 계약과 보증 범위
+
+두 UART의 현행 계약은 P07B §20이다. 8-N-1 LSB first, TX FIFO 없음, 16-byte RX FIFO이며 DATA/STATUS/CONTROL/BAUD는 +0x00/04/08/0c다. Busy DATA write는 기다리며 completing ACCESS에서 한 번 commit한다. CONTROL storage에는 활성 IRQ/제어 효과가 없다. RX_ERROR는 framing/overflow sticky이며 STATUS[2] W1C보다 새 오류 set이 우선한다. Empty read는 pop 없이 0이다. BAUD reset=434, 수용 범위=217..65535, TX/RX는 각각 frame별 divisor를 latch한다. LoRa AUX는 동기화 HIGH=READY status이고 hardware TX를 gate하지 않는다. UART-001..004의 digital 수용은 UART-005 physical PC/LoRa나 IRQ routing 종결이 아니다.
+
+기존 requirement/AC ID와 동결 의도를 유지한다. 아래 현행 계약과 충돌하는 cleanup 전 설명은 역사적 기록이며 새 구현 요구가 아니다. 상태는 읽기 전용 tracker의 기존 수용 범위를 인용하며 이 정합화로 승격하지 않는다.
+
+추적: [APB_UART_LORA_RT.v](../../rtl/peripherals/APB_UART_LORA_RT.v); [APB_UART_RT.v](../../rtl/peripherals/APB_UART_RT.v); [uart.c](../../firmware/drivers/uart.c); [lora_uart.c](../../firmware/drivers/lora_uart.c); [tb_p07b_uart_direct.sv](../../verification/directed/uart/tb_p07b_uart_direct.sv).
+
 ## 1. 목적
 
 이 문서는 active FPGA baseline의 두 APB UART peripheral을 정의한다.
@@ -563,9 +571,13 @@ firmware/drivers/lora_uart.c
 
 ## Phase 4A-2 승인된 UART 목표 (현행 RTL 아님)
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 A4에서 busy `UART_DATA` APB write는 정확히 한 byte를 수락해 한 frame을 시작할 때까지 `PREADY=0`이며 silent drop 금지다. `TX_READY`는 지금 즉시 DATA write 수락 가능을 뜻하고 수락 edge에 false가 된다. 다른 register는 단순 TX busy 때문에 stall하지 않는다. UART 전용 hardware timeout은 없으므로 모든 지원 설정은 TX forward progress를 보장해야 한다. `UART_BAUD`는 rate enum이 아닌 divisor: nominal baud=50 MHz/BAUD_DIV, default=434(~115200). 표준 rate만 hardware whitelist하지 않는다. FW preset은 9600/19200/38400/57600/115200/230400이고 peer 오차가 허용되면 다른 안전한 rate도 가능하다. Divisor 0 또는 unsafe 값은 active가 될 수 없다. 현행 TX/RX counter·start sampling·input sync만으로 최소 수치를 신뢰성 있게 정할 수 없어 `MIN_SAFE_BAUD_DIV = unresolved implementation constraint`이다. 구현 검증 전 실제 안전 범위를 도출해야 하며 FW는 bounded TX_READY polling을 사용한다. STA-002는 UART pin 전압/standard/drive/load/peer timing을 담당하고 async RX에 가짜 synchronous input delay를 부여하지 않는다.
 
 ## Phase 4A-P05A 승인 LoRa AUX Contract — 구현 목표
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 Project interface에서 E220-900T22D AUX는 module-to-FPGA asynchronous **level-status** 신호다. `HIGH = READY`, `LOW = NOT READY`이며 현재 synchronized HIGH이면 다음 UART-side write/transmission을 허용한다. Ready는 edge event가 아니고 rising 이후 valid window 또는 post-rising UART delay 요구사항도 없다. 이 계약을 위해 AUX edge detector, pulse stretcher, minimum-high counter 또는 delay counter를 추가하지 않는다.
 

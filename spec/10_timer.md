@@ -8,6 +8,14 @@
 >
 > **Parent specifications:** `soc_architecture.md`, `memory_map.md`, `apb_subsystem.md`, `reset_clock.md`, `interrupt_architecture.md`.
 
+## Current Legacy contract and assurance boundary
+
+P06B §21 is active A5: START writes COMPARE then CTRL[0]=1, resets COUNT/READY and latches active_compare. N=0 completes at START; N>0 completes on the Nth subsequent counting edge with COUNT=N, READY=1, RUNNING=0. STOP preserves COUNT/READY; RELOAD clears COUNT/READY/RUNNING; either suppresses same-edge counting. COMPARE writes affect only the next START. READY W1C does not restart and terminal set wins over W1C. P14 removed the unused timer_wait_ready declaration/definition; timer_status remains available for finite/nonblocking polling. FW-002 remains OPEN globally. No IRQ, mtime/mtimecmp, IPI or ACLINT behavior exists.
+
+Existing requirement/AC IDs and frozen intent are preserved. Pre-cleanup descriptions that conflict with this current contract are historical, not new implementation requirements. Status cites the existing accepted scope in the read-only tracker; this reconciliation does not promote it.
+
+Traceability: [APB_TIMER.v](../rtl/peripherals/APB_TIMER.v); [timer.c](../firmware/drivers/timer.c); [timer.h](../firmware/include/timer.h); [tb_p06b_timer.sv](../verification/directed/timer/tb_p06b_timer.sv).
+
 ## 1. Purpose
 
 This document defines the active APB timer peripheral in the FPGA baseline. It specifies:
@@ -86,6 +94,8 @@ The RTL decodes `PADDR[3:0]`, so these four registers physically repeat every 16
 
 ## 4. Register Semantics
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 ### 4.1 TIMER_CTRL — `+0x00`
 
 Read value:
@@ -150,6 +160,8 @@ There is no interrupt side effect associated with READY in the active baseline.
 
 ## 5. Core Counter State Machine
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 The effective timer behavior is:
 
 ```text
@@ -190,6 +202,8 @@ Counting again if ENABLE remains 1
 ```
 
 ## 6. Exact Compare Timing
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 ### 6.1 Baseline start from COUNT = 0
 
@@ -262,6 +276,8 @@ The first active count evaluation occurs on the following PCLK edge.
 
 ## 7. READY Stop and Re-Arm Behavior
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 When the terminal condition is reached:
 
 ```text
@@ -301,6 +317,8 @@ The re-arm operation does not require rewriting ENABLE.
 
 ## 8. Firmware Start / Restart Requirements
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 The baseline driver currently provides:
 
 ```c
@@ -329,6 +347,8 @@ The benchmark firmware contains an explicit reset/re-arm sequence for this reaso
 
 ## 9. Disable Semantics and Same-Edge Quirk
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 An APB write of:
 
 ```text
@@ -352,6 +372,8 @@ This behavior is especially relevant to cycle-measurement code and should be cle
 
 ## 10. Compare Update While Running
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 Because writing `TIMER_COMPARE` does not reset COUNT:
 
 ### New compare greater than current count
@@ -373,6 +395,8 @@ The compare value written on an APB edge becomes effective for subsequent timer 
 **Baseline firmware rule:** do not modify COMPARE during an active interval unless this behavior is intentional.
 
 ## 11. W1C Race Behavior
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 READY generation and APB STATUS writes are implemented in the same sequential process.
 
@@ -408,6 +432,8 @@ The legacy PLIC candidate shall not be treated as defining current timer interru
 - enable/reset semantics.
 
 ## 13. Free-Running-Counter Use in Baseline Firmware
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 The final baseline application uses the timer approximately as a long-running cycle counter:
 
@@ -501,6 +527,8 @@ Firmware should normally program COMPARE before asserting ENABLE.
 
 ## 17. Non-Architectural Debug Output
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 The timer RTL exposes:
 
 ```text
@@ -514,6 +542,8 @@ The active `AMBA_SoC_TOP` instance leaves this output unconnected.
 It is therefore not part of the architectural software, board-I/O, or verification contract.
 
 ## 18. Verification Requirements
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 Directed verification for the baseline timer should cover at minimum:
 
@@ -537,6 +567,8 @@ Directed verification for the baseline timer should cover at minimum:
 Cleanup verification shall prove frozen A5 one-shot START/STOP/RELOAD/READY semantics rather than preserving accidental RTL behavior; timer IRQ is still outside this baseline target.
 
 ## 19. Baseline Cleanup Targets Before Major Feature Integration
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 The following items shall be carried into the consolidated baseline cleanup document before PLIC/AXI work is treated as the next stable architecture stage.
 
@@ -582,6 +614,8 @@ Add deterministic RTL tests for cycle-accurate compare timing, re-arm, disable, 
 
 ## 20. Baseline Invariants
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 Unless a later approved specification changes the architecture:
 
 1. Timer base address is `0x4002_0000`.
@@ -601,6 +635,8 @@ Unless a later approved specification changes the architecture:
 15. `timer_delay_cycles()` is a software delay helper, not the APB timer engine.
 
 ## Phase 4A-2 Approved One-Shot Target (not active RTL)
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 A5 defines reset `COUNT=COMPARE=RUNNING=READY=0`. START clears COUNT/READY and latches programmed COMPARE as `active_compare`; N=0 completes on the START commit edge, otherwise edge #1 is the following PCLK edge and edge #N completes with `COUNT=N, READY=1, RUNNING=0`. START while running restarts. STOP halts without terminal completion and preserves COUNT/READY. RELOAD clears COUNT/READY/RUNNING. A COMPARE write during a run affects only the next START. READY is sticky; W1C clears only READY, and a simultaneous terminal event wins over W1C. No automatic restart or periodic mode. Firmware `timer_start(N)` writes COMPARE=N then START for a fresh interval. Existing `COMPARE+1` behavior is current-only.
 

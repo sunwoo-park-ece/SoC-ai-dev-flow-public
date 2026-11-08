@@ -2,6 +2,14 @@
 
 > **상태:** 현재 DE10-Lite 공개 후보의 baseline 타이밍 계약. [영문 정본](../timing_constraints.md)이 우선이며 이 문서는 의미를 맞춘 한국어 동반 문서다. 보드 전체 타이밍 sign-off를 주장하지 않는다. 클록/리셋 구조는 [06_reset_clock.ko.md](06_reset_clock.ko.md)에, milestone별 측정 이력과 fitted 원시 근거는 공개 spec 밖에 보관한다.
 
+## 현행 계약과 source/evidence 경계
+
+현행 public SDC는 clk 20.000 ns와 PLL clock/uncertainty derivation을 정의하며 external I/O delay를 만들어 넣지 않는다. Nonnegative setup/hold와 zero endpoint TNS라는 수용 조건은 유지한다. 과거 WNS/Fmax는 해당 fit의 정확한 source/constraint/binding/FW image에만 속하며 이전 P05/P11/P12/P13 fit 하나가 현재 35e4633 source qualification은 아니다. 특히 P14는 synthesizable LoadExtender RTL을 변경했지만 새 vendor fit은 실행하지 않았다.
+
+P11 C4-D는 당시 HREADY loop를 진단했고 후속 P12 fitted evidence는 해당 Health image에서 exported combinational SCC 0과 positive internal timing을 확인했다. 어느 것도 현재 source RDC/CDC, edge-near M9K atomicity, external I/O closure를 증명하지 않는다. STA-001 IN_PROGRESS, STA-002 BLOCKED를 유지하며 clock progress/exception 적용성/primitive 가정을 명시한다. 과거 “final P14” timing queue는 역사적 계획이며 selective P14 cleanup 완료가 아니다.
+
+추적: [de10_lite.sdc](../../fpga/quartus/constraints/de10_lite.sdc); [P11_ADC_C4D_TIMING_REGRESSION_ROOT_CAUSE_REPORT.md](../../reports/evidence/P11_ADC_C4D_TIMING_REGRESSION_ROOT_CAUSE_REPORT.md); [summary.md](../../reports/evidence/cpu-ahb-c1a/summary.md).
+
 ## 1. 범위
 
 현재 **50 MHz baseline**의 클록, 시간 관계, setup/hold 합격 기준, 예외, 증거와 재빌드 판정을 규정한다. 내부 STA와 외부 I/O, CDC, 보드 특성 평가를 분리한다. 이 문서 자체는 SDC/QSF 변경, 예외 추가, 빌드 또는 target-SoC 주파수 상향을 승인하지 않는다.
@@ -84,7 +92,7 @@ STA는 명시된 PVT/제약의 모델 기반 worst-case 판단이다. 특정 조
 
 ## 20. 현재 열린 타이밍 범위
 
-P05C fitted reset/clock checkpoint는 **현재 내부 constraint 범위에서 PASS**다. Multicorner worst setup `+0.558 ns`, hold `+0.111 ns`, recovery `+11.334 ns`, removal `+0.478 ns`, design-wide TNS `0`이며 의도한 내부 clock은 모두 constrained이고 G-sensor 내부 generated clock은 없다. `STA-001`은 최종 P14 frozen-source multicorner, exception/CDC, multi-seed/stability 검토까지 IN_PROGRESS를 유지한다. 외부 I/O timing/electrical 및 ADC/VGA board 영향은 **NOT CLOSED**(`STA-002` BLOCKED)이며 P05C에도 input port 32개/경로 55개와 output port 87개/경로 2,146개가 unconstrained다. 이는 reset row closure 및 release 승인과 별개이며 변화하는 상세 margin은 local STA status history에서 관리한다.
+STA-001은 IN_PROGRESS, STA-002는 BLOCKED다. P05C reset/clock internal timing, P11 ADC C4 fit, P12 G14 Health fit, P13 fit은 서로 다른 과거 checkpoint이며 margin/unconstrained-port count/exception/image identity를 교환할 수 없다. P14 selective cleanup은 vendor refit을 하지 않았다. 관측 WNS/TNS/Fmax와 warning은 각 exact source-bound report를 따른다. Current main의 external I/O timing, physical CDC/RDC, full release sign-off를 주장하지 않는다. 과거 “final P14” review는 역사적 계획이다.
 
 ## 21. 향후 target-SoC 타이밍 재검토
 
@@ -92,13 +100,5 @@ PLIC, AXI, DMA, SDRAM 또는 주파수 상향은 구조/CDC/제약 재평가, so
 
 ## 22. P11-ADC C4-D 타이밍 Regression 원인 분석 추적성
 
-과거 베이스라인(53.93 MHz, +1.458 ns 여유) 대비 C4-B 구현(50.35 MHz, +0.140 ns 여유) 사이의 50 MHz Fmax regression은 P11C-C4-D 마일스톤 하에서 원인 분석이 완료되었다. 상세 근거 보고서는 다음 위치에 기록되어 있다:
-- [`../reports/evidence/P11_ADC_C4D_TIMING_REGRESSION_ROOT_CAUSE_REPORT.md`](../reports/evidence/P11_ADC_C4D_TIMING_REGRESSION_ROOT_CAUSE_REPORT.md)
-
-추적성 요약:
-1. **Fmax regression 원인 조사 완료**: 주 타이밍 limiter는 `HREADY` 상의 153-노드 조합 논리 루프(TimeQuest Warning 332081/332125, +4.064 ns 루프 패널티)와 `u_bridge|addr_reg`에서 `U_VRAM` 블록 RAM에 이르는 비파이프라인 서브시스템 횡단 캐스케이드로 확인되었다. P11 ADC 서브시스템 자체의 직접 타이밍 영향은 0이다(25 MHz 생성 클록 도메인 셋업 여유 +18.238 ns, 10 MHz 코어 클록 MPW 여유 +44.575 ns).
-2. **증거 보고서 경로**: `reports/evidence/P11_ADC_C4D_TIMING_REGRESSION_ROOT_CAUSE_REPORT.md`.
-3. **P11 C4-D에서 타이밍 최적화 미수행**: 합성 RTL, SDC 제약, QSF 설정, 배치 시드, 클록 트리는 일체 수정하지 않았다.
-4. **P11 기능 및 물리 수용 유지**: 양의 셋업 마진(+0.140 ns WNS, 0.000 TNS, +0.082 ns hold WNS), 167 kHz 물리 ADC 샘플링 케이던스, 100% 테스트벤치/텔레메트리 PASS는 온전히 유효하다.
-5. **향후 타이밍 closure는 베이스라인 정리 완료 후로 유예**: `HREADY` 루프 제거, VRAM write enable 분리, APB 브리지 ready 파이프라인 등의 구조 개선은 향후 베이스라인 정리 작업으로 유예된다.
+P11 C4-D report는 해당 source의 153-node HREADY loop, +4.064 ns loop-breaking penalty와 ADC-specific critical-path 평가를 기록한다. 이는 역사적 결과이며 현재 RTL에 loop가 남았다는 뜻이 아니다. 후속 P12 fit은 해당 Health image의 exported combinational SCC 0을 보고했고 P13/P14는 CPU path를 추가 변경했다. 과거 loop penalty를 산술 차감하거나 과거 Fmax를 현재 system 성능 보장으로 사용하지 않는다. [P11 분석](../../reports/evidence/P11_ADC_C4D_TIMING_REGRESSION_ROOT_CAUSE_REPORT.md)을 참조하며 이후 source-bound fit 원시는 기존 custody에 남는다. 이 정합화는 timing optimization, 새 STA process, constraint exception을 수행하지 않는다.
 

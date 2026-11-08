@@ -8,7 +8,16 @@
 >
 > **CPU 상세 microarchitecture:** `cpu_core.md`.
 
-> **Phase 4A-3A 읽기 규칙:** 앞의 bus-fault 미구현 설명은 cleanup 전 기록이다. 마지막 fault/IRQ 문단은 검증된 data-bus access-fault 부분만 현행으로 승격한다. Illegal-instruction, branch alignment, PLIC는 여전히 열린 상태다.
+
+## 현행 Legacy 계약과 보증 범위
+
+수용된 synchronous 계약은 taken branch/JAL/JALR target misalignment cause 0(JALR bit 0 선제거), 거부 instruction/CSR encoding cause 2, mtvec로 가는 EBREAK cause 3, bus issue 전 load/store misalignment 4/6, final data-bus ERROR 5/7, ECALL 11을 포함한다. Fault PC는 해당 instruction token과 이동하며 앞선 성공 WB는 retire할 수 있고 younger effect는 억제된다. `mepc` 저장/readback의 bit 1:0은 0이며 MRET는 +4 없이 정확한 값으로 한 번 return한다.
+
+Machine ID는 mvendorid/marchid/mimpid/mhartid 순서로 0/0/0x0001_0000/0, mstatus=0x0000_1800, misa=0x4000_0100이다. 네 machine counter는 수용된 project read-only/write-ignore subset이다. Instruction-fetch access-fault 계약, mie/mip, functional MIE/MPIE, PLIC/ACLINT, CPU external IRQ path는 추가하지 않는다. gpio_irq/sw_irq는 local wire이고 Timer/UART/AES는 polling-only다. TRAP-001..004 수용은 기존 대표 interaction 범위이며 exhaustive Cartesian proof가 아니다.
+
+기존 requirement/AC ID와 동결 의도를 유지한다. 아래 현행 계약과 충돌하는 cleanup 전 설명은 역사적 기록이며 새 구현 요구가 아니다. 상태는 읽기 전용 tracker의 기존 수용 범위를 인용하며 이 정합화로 승격하지 않는다.
+
+추적: [trap.vh](../../rtl/core/vh/trap.vh); [Exception_Detector.v](../../rtl/core/v/mem_stage/Exception_Detector.v); [CSR_File.v](../../rtl/core/v/id_stage/CSR_File.v); [tb_trap_isa_closure.sv](../../verification/directed/cpu/tb_trap_isa_closure.sv); [tb_trap_precision_interaction.sv](../../verification/directed/cpu/tb_trap_precision_interaction.sv).
 
 ## 1. 목적
 
@@ -62,81 +71,33 @@ TrapController
 
 ## 4. Exception Detector
 
-ID/EX/MEM stage candidate의 combinational priority:
-
-```text
-MEM > EX > ID
-```
-
-선택 결과는 `trapped`, `trap_status[2:0]`로 register된 뒤 trap path로 전달된다.
-
-Bus/CSR/load-use/control-flow stall과 동시에 발생했을 때 precise `mepc` ownership은 cleanup verification 대상이며 상세 내용은 `21_cpu_core.md`가 소유한다.
+현행 detector는 source-stage ID/EX fault-valid/cause를 출력한다. Validity/cause와 fault PC는 해당 instruction token을 따라 precise service 경계로 이동한다. 앞선 MEM fault는 younger EX/ID보다 우선하고 더 앞선 성공 WB effect는 유지된다. 등록된 trapped/trap_status diagnostic은 token ownership의 대체물이 아니다. TRAP-002 대표 wait/CSR/load-use/redirect interaction 증거는 수용됐지만 모든 조합을 증명한 것은 아니다.
 
 ## 5. 현재 Trap/Event Code
 
-| Code | 이름 | Active baseline 의미 |
-|---|---|---|
-| `000` | `TRAP_NONE` | 없음 |
-| `001` | `TRAP_EBREAK` | EBREAK |
-| `010` | `TRAP_ECALL` | ECALL |
-| `011` | `TRAP_MISALIGNED_INSTRUCTION` | instruction-address misalignment |
-| `100` | `TRAP_MRET` | MRET control event |
-| `101` | `TRAP_FENCEI` | symbol만 존재, active detector path 없음 |
-| `110` | `TRAP_MISALIGNED_STORE` | store misalignment |
-| `111` | `TRAP_MISALIGNED_LOAD` | load misalignment |
+현행 `trap.vh`의 internal event code는 4-bit이며 mcause encoding 자체가 아니다.
 
-`TRAP_MRET`은 exception cause가 아니다. `TRAP_FENCEI`도 symbol이 존재한다는 이유로 active architectural trap으로 취급하지 않는다.
+| Internal 4-bit code | Name | Architectural role |
+|---|---|---|
+| `0000` | TRAP_NONE | no trap |
+| `0001` | TRAP_EBREAK | mcause=3 |
+| `0010` | TRAP_ECALL | mcause=11 |
+| `0011` | TRAP_MISALIGNED_INSTRUCTION | mcause=0 |
+| `0100` | TRAP_MRET | return control, not exception cause |
+| `0101` | TRAP_FENCEI | dormant symbol, no trap/cache-clean action |
+| `0110` | TRAP_MISALIGNED_STORE | mcause=6 |
+| `0111` | TRAP_MISALIGNED_LOAD | mcause=4 |
+| `1000` | TRAP_LOAD_ACCESS_FAULT | mcause=5 |
+| `1001` | TRAP_STORE_ACCESS_FAULT | mcause=7 |
+| `1010` | TRAP_ILLEGAL_INSTRUCTION | mcause=2 |
 
 ## 6. 현재 Synchronous Exception
 
-### ECALL
-
-```text
-mcause = 11
-```
-
-ECALL 전용 standby/drain 후 `mtvec`로 진입한다.
-
-### EBREAK — active baseline
-
-```text
-mcause = 3
-```
-
-이지만 active controller는 일반 exception처럼 `mtvec`로 vectoring하지 않고 project-local `debug_mode`를 사용한다. 이는 baseline behavior일 뿐 complete RISC-V Debug implementation이 아니다.
-
-### Misaligned load/store
-
-```text
-LH/LHU : address[0] == 0 필요
-LW     : address[1:0] == 00 필요
-SH     : address[0] == 0 필요
-SW     : address[1:0] == 00 필요
-
-load cause  = 4
-store cause = 6
-```
-
-### Instruction-address misalignment
-
-JAL/JALR target에 대해 IALIGN=32 검사를 수행하고 cause 0을 사용한다. Branch-target 검사 코드는 inactive이므로 active baseline에서 branch misalignment coverage는 불완전하다.
-
-JALR은 cleanup에서 `(rs1 + imm) & ~1`을 적용한 뒤 alignment를 검사한다.
+현행 synchronous cause는 instruction target misalignment 0, illegal instruction/CSR 2, breakpoint 3, load misalignment 4, load access fault 5, store misalignment 6, store access fault 7, M-mode ECALL 11이다. EBREAK는 일반 precise mtvec entry를 따른다. JALR는 bit 0을 지운 뒤 IALIGN=32를 검사하며 taken branch/JAL/JALR misaligned target은 fault다. Load/store misalignment는 bus issue 전이고 completing data-bus ERROR는 해당 valid MEM instruction이 소유한다. 실패 side effect와 retirement는 억제된다. Interrupt entry를 의미하지 않는다.
 
 ## 7. Active Baseline에 없는 Exception
 
-현재 없거나 불완전:
-
-- illegal instruction (`mcause=2`),
-- instruction access fault,
-- load access fault,
-- store/AMO access fault,
-- normal breakpoint -> `mtvec`,
-- taken branch misalignment,
-- bus error -> exception,
-- deterministic illegal CSR handling.
-
-이는 장기 target이 아니라 cleanup 대상이다.
+Instruction-fetch access fault와 complete privileged exception/interrupt architecture는 구현된 계약이 아니다. Illegal/CSR, taken-branch, breakpoint, data-bus fault가 없다는 과거 목록은 수용된 Phase 4A-3B/3B3R/3B-CLOSE로 대체됐다. Full privileged compliance를 주장하지 않는다.
 
 ## 8. CSR Baseline / Cleanup Policy
 
@@ -160,21 +121,14 @@ JALR은 cleanup에서 `(rs1 + imm) & ~1`을 적용한 뒤 alignment를 검사한
 
 ### 8.2 승인된 Machine ID cleanup 값
 
-| CSR | Address | Cleanup target |
+승인된 cleanup identity는 CPU-006 범위에서 구현·수용됐다. 할당된 nonzero vendor/architecture ID를 주장하지 않으며 hart 0 하나뿐이다.
+
+| CSR | Address | Current readback |
 |---|---:|---:|
-| `mvendorid` | `0xF11` | `0x0000_0000` |
-| `marchid` | `0xF12` | `0x0000_0000` |
-| `mimpid` | `0xF13` | `0x0001_0000` |
-| `mhartid` | `0xF14` | `0x0000_0000` |
-
-의미:
-
-- `mvendorid=0`: 별도 JEDEC vendor ID를 주장하지 않음.
-- `marchid=0`: 임의의 globally allocated nonzero architecture ID를 주장하지 않음.
-- `mimpid=0x0001_0000`: cleanup CPU implementation revision 1.0.0.
-- `mhartid=0`: 현재 single-hart SoC의 hart 0.
-
-Active RTL은 아직 inherited 값을 사용하므로 cleanup 구현/검증 후에만 이 값이 active contract가 된다.
+| mvendorid | `0xF11` | `0x0000_0000` |
+| marchid | `0xF12` | `0x0000_0000` |
+| mimpid | `0xF13` | `0x0001_0000` |
+| mhartid | `0xF14` | `0x0000_0000` |
 
 ### 8.3 Machine counter policy
 
@@ -198,6 +152,8 @@ trap   -> 이 project-RO counter CSR에 write했다는 이유만으로 trap 발�
 
 ## 9. Trap Entry
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 일반 synchronous exception의 개념적 sequence:
 
 ```text
@@ -213,6 +169,8 @@ Cycle count 자체보다 precise PC/cause와 stall interaction이 architectural 
 
 ## 10. ECALL Drain
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 ```text
 MEM_STANDBY
  -> WB_STANDBY
@@ -223,6 +181,8 @@ MEM_STANDBY
 Cleanup에서는 APB wait, bus stall, CSR stall, load-use hazard, simultaneous redirect 상황에서도 precise `mepc`를 검증한다.
 
 ## 11. MRET
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 ### Active baseline
 
@@ -249,6 +209,8 @@ MRET은 **architecturally 저장·정규화된 `mepc`의 정확한 값**으로 �
 **Phase 4A-3B3R 구현 상태:** 정규화 저장/읽기, 정확한 MRET 이동 및 일회 은퇴가 CPU/storage 지향 테스트에서 통과했고 사용자 Quartus 내부 fit/다중 코너 STA도 통과했다. 앞의 `mepc+4`와 project-local EBREAK 설명은 현재 활성 동작이 아니라 과거 baseline 기록이다. 이후 Phase 4A-3B-CLOSE에서 대표 bus/APB/load-use/CSR stall·경합 fault/redirect 상호작용을 검증하여 `TRAP-002`를 VERIFIED로 전환했다. 전체 Cartesian 증명은 주장하지 않는다.
 
 ## 12. EBREAK / FENCE Cleanup
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 ### 12.1 EBREAK
 
@@ -289,6 +251,8 @@ Timer/UART/GPIO/G-sensor/AES-GCM/ADC/HEX는 polling/control MMIO 형태다.
 Board-I/O cleanup에서 `gpio_irq`, `sw_irq` local wire가 생겨도 future PLIC stage 전에는 CPU에 연결하지 않는다.
 
 ## 14. Bus Error 관계
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 현재:
 
@@ -342,6 +306,8 @@ Legacy PLIC는 참고자료일 뿐 final contract가 아니다.
 
 ## 17. Baseline Cleanup / PLIC Boundary
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 ### 17.1 BC gate에서 수행
 
 1. MRET `mepc+4` 제거, `mepc` 복귀.
@@ -370,6 +336,8 @@ Cleanup milestone을 PLIC 구현 단계로 확장하지 않는다.
 
 ## 18. Baseline Invariant
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 Cleanup verification 전 active RTL 기준:
 
 1. asynchronous CPU IRQ 없음.
@@ -388,6 +356,8 @@ Cleanup verification 전 active RTL 기준:
 14. legacy PLIC는 reference-only.
 
 ## 19. 승인된 Cleanup Policy 요약
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 ```text
 GPR reset              : x1..x31 unspecified after system reset

@@ -1,4 +1,4 @@
-# Target SoC LED Output Peripheral Specification — 한국어 Companion
+# SoC LED Output Peripheral Specification — 한국어 Companion
 
 > **P04 상태 주석(2026-09-15):** 슬롯 9 APB_LED가 LEDR[9:0] 전체를 소유하며 LEDR[9] 리셋 표시 소유권은 제거되었다. 공개 검증과 사용자 실행 Quartus 피팅이 통과했다. `BOARDIO-004`는 명시적 walking/all-on/off 보드 시험이 없어 OPEN이다. 아래 ‘미구현’ 문구는 P04 이전 이력이다.
 
@@ -7,6 +7,12 @@
 > **정본 언어:** 영어. 이 문서와 `spec/18_led.md`가 충돌할 경우 영문 canonical specification이 authoritative source이다.
 >
 > **상위 명세:** `soc_architecture.md`, `memory_map.md`, `apb_subsystem.md`, `reset_clock.md`, `gpio.md`, `board_io_architecture.md`.
+
+## 현행 계약과 source/evidence 경계
+
+APB_LED는 0x4009_0000 / PSEL[9]의 구현된 P04이며 LEDR[9:0] 전체를 소유한다. +0x00 LED_DATA는 10-bit latch, 상위 bit는 write-ignore/read-zero, reset은 모든 출력을 끄며 readback은 illumination이 아닌 latch다. 과거 LEDR[9] reset-indicator driver는 제거됐다. PREADY=1이며 IRQ/PWM/blink hardware는 없다. Direct local invalid offset은 PSLVERR 없는 RAZ/WI이고 CPU bridge는 invalid address/size/alignment를 PSEL 전에 2-cycle ERROR로 거부한다. BOARDIO-004는 명시적 physical walking/all-on/off test가 남아 OPEN이며 FW-006 map 수용과 digital test가 이 board 결과를 대신하지 않는다.
+
+추적: [APB_LED.v](../../rtl/peripherals/APB_LED.v); [AMBA_SoC_TOP.v](../../rtl/soc/AMBA_SoC_TOP.v); [led.c](../../firmware/drivers/led.c); [tb_p04_boardio.sv](../../verification/directed/bus/tb_p04_boardio.sv).
 
 ## 1. 목적
 
@@ -24,18 +30,7 @@ GPIO direction, PWM, blink timer, interrupt, DMA, hardware pattern generation은
 
 ## 2. 주소 및 APB slot
 
-현재 baseline에서는 `LEDR[8:0]`이 legacy `APB_GPIO`에 연결되고 `LEDR[9]`은 별도 reset indicator이다.
-
-확정된 cleanup target assignment:
-
-```text
-LED_BASE = 0x4009_0000
-APB slot = PSEL[9]
-```
-
-Target APB는 `PSEL[15:0]`을 사용하고 기존 slot 0~7은 유지한다. Slot 8은 SW, slot 9는 LED, slot 10~15는 Reserved이다.
-
-이 주소는 target architecture assignment이며 현재 FPGA image에 `APB_LED`가 이미 있다는 의미는 아니다. Cleanup RTL 통합 전까지 `memory_map.md`는 active baseline과 target allocation을 구분해서 기록해야 한다.
+현행 P04 production top은 PSEL[9], base `0x4009_0000`에 APB_LED를 instantiate하며 LEDR[9:0] 전체를 연결한다. PSEL[8]은 SW, PSEL[1]은 true GPIO이고 10..15는 reserved/error다. 과거 GPIO-to-LED/reset-indicator 구성은 역사적이다. 주소 권위는 memory map이며 새 배정은 없다.
 
 ## 3. 권장 module interface
 
@@ -67,23 +62,7 @@ CPU -> APB_LED -> LEDR[9:0]
 
 ## 4. Physical Ownership
 
-Target integration 후 `APB_LED`가 10개 red LED 전체를 소유한다.
-
-```text
-LED_DATA[0] -> LEDR[0]
-...
-LED_DATA[9] -> LEDR[9]
-```
-
-기존:
-
-```verilog
-assign LEDR[9] = ~HRESETn;
-```
-
-는 제거한다.
-
-Reset/debug indicator가 필요하다면 software-visible LED bit를 빼앗지 않는 별도 board-status policy로 정의한다.
+APB_LED는 LEDR[9:0]을 일대일 소유한다. 과거 `LEDR[9] = ~HRESETn` assignment는 더 이상 active가 아니다. 향후 reset/debug indicator는 별도 승인 resource ownership이 필요하며 LED_DATA bit를 임의로 사용하면 안 된다.
 
 ## 5. Canonical Register Map
 
@@ -95,7 +74,7 @@ Reset/debug indicator가 필요하다면 software-visible LED bit를 빼앗지 �
 
 Exact offset decode를 사용하고 legacy register mirroring은 만들지 않는다.
 
-이전 target 초안은 unknown offset에 zero/no-effect를 제안했다. 승인된 A2와 active P04 APB_LED가 이를 대체하여 비정규 offset/size는 LED side effect 없이 APB ERROR를 반환한다.
+이전 target 초안은 unknown offset에 zero/no-effect를 제안했다. 승인된 A2와 active P04 APB_LED가 이를 대체하여 CPU bridge가 비정규 offset/size/alignment를 LED PSEL 전에 2-cycle AHB ERROR로 거부한다. Direct slave에는 PSLVERR가 없으며 invalid local offset은 RAZ/WI다.
 
 ## 6. Write Semantics
 
@@ -152,7 +131,7 @@ Interrupt나 completion polling은 필요 없다.
 
 ## 11. GPIO / SW와의 관계
 
-확정된 target 구조:
+현행 P04 구조:
 
 ```text
 SW[9:0]   -> APB_SW    @ PSEL[8]
@@ -190,12 +169,12 @@ Board에서는 10개 LED 전체를 육안 검증한다.
 
 ## 14. 남은 결정
 
-APB base/slot/decoder width는 더 이상 TBD가 아니다. A2 reserved/default-slave ERROR policy는 동결됐지만 미구현이며 optional LED feature는 별도 향후 과제다.
+주소/slot/16-bit PSEL routing/A2 CPU validation은 이미 구현됐다. BOARDIO-004 physical pattern 수용은 OPEN이며 향후 optional LED feature는 별도 spec 권위가 필요하다. 새 IRQ/PWM/blink를 정의하지 않는다.
 
-## 15. Target Invariants
+## 15. Current Invariants
 
 1. `LED_BASE = 0x4009_0000`, `PSEL[9]`이다.
-2. Target APB는 16-slot 구조다.
+2. 현행 APB는 16-slot 구조다.
 3. `APB_LED`가 `LEDR[9:0]` 전체를 소유한다.
 4. `LED_DATA`가 유일한 architectural output latch이다.
 5. `[9:0]`만 구현한다.
@@ -203,6 +182,6 @@ APB base/slot/decoder width는 더 이상 TBD가 아니다. A2 reserved/default-
 7. readback은 latch 상태다.
 8. direction register가 없다.
 9. IRQ가 없다.
-10. target integration 시 `LEDR[9] = ~HRESETn`를 제거한다.
+10. 현행 P04에서 과거 `LEDR[9] = ~HRESETn` assignment는 제거됐다.
 11. legacy GPIO slot은 유지하지만 board LED를 더 이상 소유하지 않는다.
 12. 이 peripheral은 general-purpose GPIO가 아니다.

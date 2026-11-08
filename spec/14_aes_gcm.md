@@ -1,10 +1,20 @@
 # Baseline SoC AES-GCM Accelerator Specification
 
-> **Status:** Current baseline documentation plus **P13-01 Owner-approved TARGET** in Section 25 (pending implementation and acceptance). Original baseline sections remain observational; target behavior is not yet implemented.
+> **Status:** Current P13 v2 contract; distinguish existing bounded acceptance from D08 NOT_PROVEN.
 >
 > **Canonical language:** English. If this file and `kor/14_aes_gcm.ko.md` conflict, this file is authoritative.
 >
 > **Parent specifications:** `soc_architecture.md`, `memory_map.md`, `apb_subsystem.md`, `reset_clock.md`, `interrupt_architecture.md`.
+
+## Current Legacy contract and assurance boundary
+
+The P13 D01–D12 ABI in §25 is implemented v2, VERSION=0x322e3030; the old v1 observations in §§4–22/24 are historical wherever they differ. Preserve full-width LEN validation, MSW-word/MSB-byte packing, exclusive CTRL commands, sticky programming causes, BUSY write rejection, idle-only functional ZEROIZE and the serialized trusted-output gate DONE && TAG_OK && !ERROR. The wrapper compares full canonical 0x4004xxxx addresses: direct-APB noncanonical/reserved accesses are RAZ/WI with no PSLVERR; invalid CPU accesses are rejected by the bridge before AES PSEL. Rebased APB requires an explicit adapter/approved change.
+
+Existing AES-001..007/FW-010/VER-006/007 acceptance is bounded by the tracker and its cited evidence. AES-AC-01..09 remain obligations, not blanket new PASS labels. AES-AC-08/D08 integrated actual-core natural overflow/concurrent or late success remains NOT_PROVEN / BLOCK_FOR_PROMOTION; frozen error-priority intent is unchanged. Raw MMIO plaintext is not authenticated access control; zeroize is not physical erasure/security certification. P14 CPU VERSION smoke is separate from the 68-case actual-core APB KAT and 68-case positive CPU/real-AES replay. Health AES remains EXCLUDED_PENDING_CLEANUP.
+
+Existing requirement/AC IDs and frozen intent are preserved. Pre-cleanup descriptions that conflict with this current contract are historical, not new implementation requirements. Status cites the existing accepted scope in the read-only tracker; this reconciliation does not promote it.
+
+Traceability: [apb_aes_gcm_ip.v](../rtl/peripherals/aes_gcm/pipe0/apb_aes_gcm_ip.v); [aes_gcm.h](../firmware/include/aes_gcm.h); [README.md](../verification/selected_ip/README.md); [P13_08_D08_OWNER_MANUAL_RUN.md](../verification/directed/p13_aes_rtl/P13_08_D08_OWNER_MANUAL_RUN.md).
 
 ## 1. Purpose
 
@@ -99,6 +109,8 @@ This specification does not claim that the underlying AES-GCM algorithmic VHDL c
 
 ## 4. Canonical Register Map
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 The wrapper decodes `PADDR[7:2]`.
 
 | Offset | Register | Access | Reset | Meaning |
@@ -141,6 +153,8 @@ For **direct wrapper-local APB access**, offsets not listed above read zero unle
 
 ## 5. CTRL Register
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 `CTRL` is at `+0x0C`.
 
 ```text
@@ -179,6 +193,8 @@ It does not clear `BUSY`, input registers, output registers, key material, IV fi
 Any write to `CTRL` also loads the retained `ENC_DEC` readback bit from `PWDATA[1]`. Therefore a status-clear write containing only bit 2 also changes the visible retained direction bit to encrypt (`0`). Firmware shall not use the CTRL readback bit as a historical record of the last completed operation after arbitrary control writes.
 
 ## 6. STATUS Register
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 `STATUS` is at `+0x10`.
 
@@ -295,6 +311,8 @@ The baseline does not provide arbitrary software-supplied AAD.
 
 ## 10. Payload Window and Length Semantics
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 The software-visible payload window is exactly 128 bits:
 
 ```text
@@ -323,6 +341,8 @@ The accelerator does not stream multiple payload blocks and does not walk memory
 
 ## 11. Word and Byte Ordering
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 The wrapper concatenates 32-bit register words in increasing register order from most-significant to least-significant bits:
 
 ```text
@@ -343,6 +363,8 @@ OUT3 = result[31:0]
 Firmware converting byte arrays to MMIO words shall preserve the byte order expected by the established AES-GCM test vectors and protocol framing. The 32-bit MMIO word ordering alone shall not be confused with the CPU's byte-address endianness.
 
 ## 12. Operation Sequence
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 An accepted operation follows the project-local wrapper FSM:
 
@@ -395,6 +417,8 @@ Result capture is performed independently of the drive-FSM state so short valid 
 
 ## 13. Encrypt Contract
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 The minimum software sequence is:
 
 ```text
@@ -413,6 +437,8 @@ The minimum software sequence is:
 `TAG_IN` is not used for encryption authentication checking and may be zeroed by firmware for deterministic diagnostics.
 
 ## 14. Decrypt / Authenticate Contract
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 The minimum software sequence is:
 
@@ -451,6 +477,8 @@ BUSY = 1
 
 ## 16. Reset Behavior
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 System/APB reset clears:
 
 - BUSY, DONE, TAG_OK, ERROR,
@@ -487,6 +515,8 @@ Future documentation shall not describe this block as providing secure key stora
 
 ## 18. APB Decode and Error Limitations
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 The wrapper decodes only:
 
 ```text
@@ -502,6 +532,8 @@ For **current direct wrapper-local APB access**, unsupported or unused decoded o
 All canonical firmware accesses shall use naturally aligned 32-bit MMIO operations.
 
 ## 19. Firmware Integration
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 The active driver is:
 
@@ -526,6 +558,8 @@ The baseline generates no AES interrupt, so all completion handling is polling-b
 
 ## 20. Verification Status and Evidence Boundary
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 Different historical AES tests cover different layers and shall not be conflated.
 
 A legacy APB reference-model SoC test verifies CPU/APB register programming and fixed golden-vector register behavior without compiling the actual VHDL AES-GCM core. Passing that test does **not** by itself prove the active VHDL cryptographic datapath.
@@ -537,6 +571,8 @@ Before the baseline is frozen for major feature integration, the active source t
 AES-001 is `VERIFIED` after User/Chat approval of the Phase 4A actual production APB wrapper/VHDL core AES-128-GCM KAT: independent-oracle encrypt/decrypt cases for 0, 7 and 16 payload bytes passed. The detailed internal report is `PRIVATE_LOCAL_EVIDENCE_REQUIRED` until a sanitized public AES evidence package is approved. This scoped result does not close the other AES cleanup rows or VER-006. The unrelated full-SoC mixed-language CPU compile failure is retained under VER-001 evidence.
 
 ## 21. Required Directed Verification
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 At minimum, baseline cleanup verification shall cover:
 
@@ -562,6 +598,8 @@ At minimum, baseline cleanup verification shall cover:
 Cryptographic expected values shall come from a trusted independent implementation or published test vectors, not from the RTL under test.
 
 ## 22. Baseline Cleanup Targets
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 The following items shall be transferred into the consolidated baseline cleanup plan.
 
@@ -600,6 +638,8 @@ The existing APB block can remain a control/status or small-message path if that
 
 ## 24. Baseline Invariants
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 The following statements are authoritative for the current FPGA baseline:
 
 1. AES-GCM is at canonical APB base `0x4004_0000`, slot 4.
@@ -620,16 +660,14 @@ The following statements are authoritative for the current FPGA baseline:
 16. The VHDL cryptographic core is third-party Apache-2.0-derived; the APB/SoC integration is project-local.
 17. Historical reference-model verification is not a substitute for fresh active-core cryptographic KAT signoff.
 
-## 25. P13-01 Approved Target Contract — Pending Implementation and Acceptance
+## 25. P13 Approved Contract — Implemented v2 with Bounded Acceptance
 
-> **Lifecycle:** Owner-approved D01–D12 architecture and detailed ABI. This section is the **target contract**, not an assertion that the current RTL/FW implements it. Existing Sections 2–21 and 24 describe the observed/legacy baseline until P13-02/03 implementation and corresponding verification. No requirement status, tracker verdict, or AES-GCM SoC Health provider is promoted by this target contract.
-> **Scope boundary:** Changes to the cross-owned APB, memory map or tracker require a separate scoped decision.
 
 ### 25.1 Fixed interface and register map (D01, D04, D05, D09)
 
 - Preserve `AES_GCM_BASE=0x4004_0000`, slot `PSEL[4]`, aligned 32-bit APB/MMIO access, `PREADY=1`, AES-128, a single 0–16-byte payload window, PCLK domain and polling-only completion. There is no AES interrupt, DMA or hardware replay manager.
 - Existing DATA register offsets remain unchanged. `LEN` at `+0x3C` becomes **full-width `uint32_t` R/W storage and readback**; no masking or truncation at write, before validation, or in firmware. A valid operation is `LEN<=16`; the AAD uses its lower 16 bits only after full-width validation.
-- `VERSION` at `+0x08` becomes ASCII `"2.00"` (`0x322E3030`) when the target ABI is implemented. Existing `"1.00"` remains the current pre-cleanup value.
+- `VERSION` at `+0x08` becomes ASCII `"2.00"` (`0x322E3030`) when the target ABI is implemented. The earlier `"1.00"` value is historical and not v2-compatible.
 - Register words are concatenated in increasing offset, **MSW first**. Byte arrays pack to each 32-bit register **MSB first**: `w=(b0<<24)|(b1<<16)|(b2<<8)|b3` (not the CPU's byte-address endianness). `KEY=KEY0||KEY1||KEY2||KEY3`, `IV=NONCE_DIR||SEQ_HI||SEQ_LO`, `TAG_IN=TAG_IN0||...||TAG_IN3`; `PAYLOAD` and `HDR` use the same convention.
 - Fixed AAD is exactly `16'hA55A || NONCE_DIR || SEQ_HI || SEQ_LO || LEN[15:0]`, 128 bits. `LEN=n` validates the **leftmost/high-order n bytes** of the one-block payload (`LEN=7 -> bval=16'hFE00`). Trailing output bytes beyond LEN are unspecified and **not authenticated payload**; trusted firmware copies only the first LEN bytes.
 
@@ -696,7 +734,7 @@ At every IDLE-accepted START, previous `PAYLOAD_OUT` and `TAG_OUT` are cleared t
 
 The **CPU-visible** path is `CPU -> AHB/APB Bridge -> AES slot 4`: the bridge must allow only precisely specified canonical aligned 32-bit offsets and reject noncanonical slot-4 offsets, byte/halfword/misaligned accesses and address aliases **before asserting AES PSEL[4]**, returning the existing two-cycle AHB ERROR. The target AES wrapper additionally must decode exact canonical local offsets using the full APB address width available at the wrapper; acceptance must not truncate to `PADDR[7:2]`. The legal canonical register words remain available; `+0x100` and all other high-bit aliases must not select them. Direct-APB reads of reserved or noncanonical local offsets return zero (RAZ); writes are ignored (WI), with no MMIO state mutation or cryptographic core side effect. Retain `PREADY=1` and no AES `PSLVERR`; local RAZ/WI does not make invalid CPU accesses successful.
 
-Wrong-direction access to a canonical RO or WO register is a separate case from an invalid offset; this revision does not change its existing policy. In particular, a canonical RO write may receive OKAY/no-op because the bridge does not enforce register direction. The current wrapper still has the partial-decode aliases described in Section 19; exact decode and its verification are target work, not an implementation claim. APB-005 is not promoted.
+Wrong-direction access to a canonical RO or WO register is a separate case from an invalid offset; this revision does not change its existing policy. In particular, a canonical RO write may receive OKAY/no-op because the bridge does not enforce register direction. The v2 wrapper implements exact full-address decode. The partial-decode aliases described in historical Section 19 are superseded. Global APB-005 remains IN_PROGRESS; no status is promoted here.
 
 ### 25.8 Firmware and security integration (D11, D12)
 
@@ -704,9 +742,11 @@ A trusted driver validates full-width LEN and buffer arguments **before any MMIO
 
 Hardware does **not** allocate nonce/sequence values or enforce replay prevention. Firmware/protocol must ensure `(key, IV)` uniqueness for encryption, sequence persistence and appropriate anti-replay policy. No secure vault, IRQ/PLIC, DMA/streaming, physical erasure, constant-time system guarantee or SoC Health AES enable is added in P13-01. AES SoC Health remains `EXCLUDED_PENDING_CLEANUP` pending later accepted work.
 
-### 25.9 Target acceptance criteria and current status
+### 25.9 Stable AC definitions and historical P13-01 status
 
-| AC ID | Requirement | Required observable check | Status now |
+This table preserves stable criteria and the historical P13-01 OPEN record. For current accepted scope, see AES-001..007/FW-010/VER-006/007 in the [tracker](baseline_cleanup.md) and the current contract above. AES-AC-08 remains NOT_PROVEN; no fresh per-AC verdict is assigned here.
+
+| AC ID | Requirement | Required observable check | Historical P13-01 status |
 |---|---|---|---|
 | `AES-AC-01` | AES-002; D01/D02 | 0..16 accepted, 17/65535/65536/65552 rejected at START; full LEN readback, no core activation; terminal DONE and cleared outputs on reject | OPEN |
 | `AES-AC-02` | AES-003; D09 | MSW and big-endian-byte pack for KEY/IV/AAD/TAG/PAYLOAD, independent vectors including partial tail invalidity | OPEN (AES-001 KAT only is VERIFIED) |
@@ -718,7 +758,7 @@ Hardware does **not** allocate nonce/sequence values or enforce replay preventio
 | `AES-AC-08` | D08/D11 | Overflow terminates as fault; concurrent late success suppressed, independent fault checking | OPEN |
 | `AES-AC-09` | D12 | No unsupported crypto-security/vault/nonce/replay/health claims; responsibilities explicit | OPEN |
 
-Requirement `AES-001` remains `VERIFIED` **only** for the previously approved actual-core six-case KAT (encrypt/decrypt LEN 0/7/16). AES-002..007, FW-010 and VER-006 are not promoted by target authoring; APB-005/FW-002 remain independently owned statuses. No simulation, synthesis, board run, or new evidence claim is made in P13-01.
+Historical P13-01 authoring did not promote requirements. Current bounded acceptance is recorded above and in the tracker; the original AES-001 six-case KAT remains separately scoped. This reconciliation executes no new simulation or board work.
 
 ### 25.10 Traceability and pending actions
 

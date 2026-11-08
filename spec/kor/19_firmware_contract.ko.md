@@ -1,8 +1,10 @@
 # SoC Firmware Contract — 한국어 Companion
 
-> **Issue #7 S1 애플리케이션 역할 동결:** `firmware/apps/final_main.c`는 **HISTORICAL RC-CAR SYSTEM DEMO FIRMWARE**다. 출처/데모 재현을 위해 유지하고 외부 STM32 기반 RC-car 시스템에 의존한다. 정식 독립 SoC 통합 시험 펌웨어가 아니며 Issue #7 완료/리뷰 이후 Issue #6 C4-A/C4-B의 기반으로 사용하지 않는다. 소유자 제공 [FPGA SoC + STM32 RC-car demo](https://www.youtube.com/shorts/XYbi3uSHmUU).
+> **Issue #7 S1 애플리케이션 역할 동결:** `firmware/apps/final_main.c`는 **HISTORICAL RC-CAR SYSTEM DEMO FIRMWARE**다. 출처/데모 재현을 위해 유지하고 외부 STM32 기반 RC-car 시스템에 의존한다. 정식 독립 SoC 통합 시험 펌웨어가 아니며 Issue #7 완료/리뷰 이후 Issue #6 C4-A/C4-B의 기반으로 사용하지 않는다. 소유자 제공 FPGA SoC + STM32 RC-car demo.
 >
-> 미래 정식 app은 `firmware/apps/soc_health_main.c`이며 승인 계약과 임시 baseline-cleanup spec/FW 정합성 ledger는 [spec 22](22_soc_health_firmware.ko.md)에 있다. S1은 문서 단계로 app/service/provider/getter는 미구현이며 C4는 중단 상태다. Monitor는 `AES_GCM = EXCLUDED_PENDING_CLEANUP`을 보고하고 AES를 PASS/FAIL 어느 쪽에도 포함하지 않으며 AES operation을 실행하지 않는다. 이 application 제외는 기존 AES hardware/driver 계약을 바꾸지 않는다. 기존 IP별 규칙과 과거 section을 유지하고 광범위 조정은 ledger를 이용한 이후 통합 작업으로 연기한다.
+> 구현된 독립 app은 `firmware/apps/soc_health_main.c`이며 현행 계약과 과거 SYSFW ledger는 [spec 22](22_soc_health_firmware.ko.md)에 있다. SYSFW-01 host/provider/build 수용, 후속 P11 ADC C4 수용, P12 G16 한정 dashboard/restart 수용은 서로 별도 source-bound 범위다. `final_main`은 과거 demo다. Monitor는 P13 trusted AES driver 수용과 별개로 `AES_GCM = EXCLUDED_PENDING_CLEANUP`을 보고하고 AES를 PASS/FAIL에 포함하지 않으며 AES operation을 실행하지 않는다.
+
+
 
 > **P09 종결 주석(2026-09-17):** §12가 현행 코히어런트 G-sensor 펌웨어 계약(`gsensor_read_sample()`)을 정의하며 과거 원시 텔레메트리 설명을 대체한다. RV32I 빌드와 호스트 mock-MMIO 테스트가 통과했다; `FW-008`은 잔여 negative/경합 커버리지를 위해 `IN_PROGRESS`를 유지한다.
 
@@ -20,6 +22,16 @@
 > **정본 언어:** 영어. 이 문서와 `spec/19_firmware_contract.md`가 충돌하면 영문 canonical specification이 authoritative source이다.
 >
 > **관련 명세:** `soc_architecture.md`, `memory_map.md`, `memory_subsystem.md`, `cpu_interface.md`, `apb_subsystem.md`, `reset_clock.md`, `interrupt_architecture.md`, 각 peripheral spec, `board_io_architecture.md`.
+
+## 현행 Legacy 계약과 보증 범위
+
+Startup은 mtvec 설정, sp 설정, BSS clear 후 main을 호출하며 return하면 fail-stop한다. `.rodata/.data`는 미리 적재된 DMEM에 있고 ROM-to-RAM copy는 없다. System reset 후 x1..x31은 unspecified다. Reset mtvec=0x0000_6D60은 16 KiB IMEM 밖이므로 startup의 대체 값 commit 전 창은 보호되지 않는다. 구현된 trap endpoint는 mcause/mepc를 기록하고 loop하며 수용된 P08B fail-stop과 향후 system recovery는 별도다.
+
+현행 software는 soc_memory_map.h, P04 GPIO/SW/LED 소유권, P06 Timer §37, P07 UART/LoRa §38, 구현된 trusted AES v2 §40을 따른다. timer_wait_ready와 aes_gcm_wait_done은 없고 나머지 raw AES helper는 LEGACY/UNSAFE/DEBUG ONLY다. AES argument/overlap/LEN 검증은 MMIO 전이며 zero poll budget은 MMIO가 없다. 성공 때만 output을 release하며 START 후 timeout 또는 fatal core error는 recovery_required를 latch한다. acknowledge_external_reset에는 reset 완료 증명이 없어 latched driver를 풀지 않는다. Completed-read budget은 stuck bus 시간을 제한하지 않는다. Selected-IP 부분 수용에도 global FW-002/FW-003은 OPEN이며 IRQ/PLIC/ACLINT나 platform recovery를 추가하지 않는다.
+
+기존 requirement/AC ID와 동결 의도를 유지한다. 아래 현행 계약과 충돌하는 cleanup 전 설명은 역사적 기록이며 새 구현 요구가 아니다. 상태는 읽기 전용 tracker의 기존 수용 범위를 인용하며 이 정합화로 승격하지 않는다.
+
+추적: [start.S](../../firmware/bsp/start.S); [linker.ld](../../firmware/bsp/linker.ld); [soc_memory_map.h](../../firmware/include/soc_memory_map.h); [aes_gcm.c](../../firmware/drivers/aes_gcm.c); [aes_gcm.h](../../firmware/include/aes_gcm.h).
 
 ## 1. 목적
 
@@ -67,6 +79,7 @@ reset
   v
 _start
   |
+  +--> mtvec = __trap_entry
   +--> sp = __stack_top
   +--> .bss를 32-bit store로 clear
   +--> main 호출
@@ -103,7 +116,15 @@ stack                           -> DMEM 상단
 
 System reset이 DMEM 전체를 architectural하게 clear한다고 가정하면 안 된다. Firmware가 보장받는 것은 startup이 `.bss`를 clear한다는 것과 선택된 memory image에 포함된 initialized section뿐이다.
 
+### 3.1 Initial Stack ABI and Capacity Boundary
+
+Project build는 `-march=rv32i -mabi=ilp32`(ILP32E가 아닌 standard ILP32)를 사용한다. `__stack_top = ORIGIN(DMEM) + LENGTH(DMEM) = 0x1000_8000`은 exclusive DMEM end이자 비어 있는 downward-growing stack의 초기 SP다. Standard ABI procedure는 `sp`를 16-byte 정렬로 진입하고 정렬을 유지해야 한다(MUST). Linker ASSERT는 초기 stack symbol의 하위 네 bit가 0이 아니면 거부한다. Symbol assignment는 exclusive boundary에 section이나 byte를 할당하지 않는다. 첫 stack frame은 storage 접근 전에 `sp`를 그 주소 아래로 내린다.
+
+각 linked image의 initialized RAM과 `__bss_end`는 canonical DMEM 안에 사용 가능한 stack headroom을 남겨야 한다(MUST). 해당 image의 ELF/map과 startup binding을 확인한다. Alignment만으로 최대 call depth, worst-case stack capacity, overflow detection이나 고정 reserved stack budget을 증명하지 않는다. 그런 capacity/overflow 보증을 새로 만들지 않는다. Startup 순서는 `mtvec → sp → .bss clear → main`이며 initialized data는 ROM copy가 아닌 preload다.
+
 ## 4. 현재 Canonical MMIO Map
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 ```text
 UART0_BASE       = 0x4000_0000
@@ -164,6 +185,8 @@ HEX Display   -> hex_display
 
 ## 7. Current Polling Model
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 현재 CPU에는 active external interrupt path와 PLIC이 없다. Peripheral service는 polling 기반이다.
 
 현재 UART/LoRa sub-scope 밖에는 다음과 같은 unbounded wait가 남아 있다.
@@ -183,6 +206,8 @@ P07B는 normal UART TX와 LoRa AUX/TX entry point를 finite caller budget 또는
 Forward progress가 필요한 diagnostic/application은 target bounded API가 도입되기 전까지 가능한 경우 status API를 이용해 자체 polling budget을 둔다.
 
 ## 8. UART0 / UART1
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 UART0는 baseline에서 LoRa-facing, UART1은 PC-facing이다.
 
@@ -204,6 +229,8 @@ bounded/status-returning TX helper를 제공하며 combined sticky RX error quer
 `UART_CONTROL`은 RAZ/WI이며 interrupt enable 기능으로 해석하면 안 된다.
 
 ## 9. Timer
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 현재 timer는 polling-only다.
 
@@ -247,6 +274,8 @@ HW clear 사용 시 `CLEAR_BUSY` / `CLEAR_DONE` contract를 따라야 하며 cle
 VSYNC/clear infinite wait는 hang 가능성이 있으므로 fault-tolerant diagnostic에서는 bounded poll을 사용한다.
 
 ## 11. Legacy GPIO
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 현재 GPIO는 true bidirectional GPIO가 아니다.
 
@@ -391,6 +420,8 @@ VALUE[23:20] -> HEX5
 
 ## 15. AES-GCM
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 Current wrapper는 AES-128 + single 16-byte payload-window accelerator다.
 
 ### Length
@@ -423,6 +454,8 @@ Firmware/protocol이 sequence를 관리하며 동일 key 아래 동일 effective
 
 ## 16. Current Error Handling Limitation
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 현재 unmapped access는 경우에 따라 zero/OKAY로 완료될 수 있고 CPU access-fault path도 완전하지 않다.
 
 따라서 runtime MMIO probing이 아니라 compile-time canonical map을 사용해야 한다.
@@ -449,6 +482,8 @@ Cleanup 이후 firmware 공통 규칙:
 10. RTL/DV/FPGA evidence가 생긴 target behavior만 active로 승격
 
 ## 18. Target APB / Board-I/O Map
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 Board-I/O migration 이후:
 
@@ -505,6 +540,8 @@ Timeout은 success처럼 넘어가지 않고 explicit error를 반환한다.
 의도적으로 영구 block하는 함수가 필요하다면 debug/boot primitive라는 점을 이름/contract에서 명확히 한다.
 
 ## 21. Target GPIO / SW / LED
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 ### GPIO
 
@@ -569,6 +606,8 @@ PLIC source ID/MMIO/CSR/mcause는 future PLIC spec이 소유한다.
 
 ## 23. Target UART
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 TX-ready-before-write는 유지한다.
 
 Forward progress가 필요한 caller를 위해 bounded TX API를 제공한다.
@@ -576,6 +615,8 @@ Forward progress가 필요한 caller를 위해 bounded TX API를 제공한다.
 향후 IRQ 기반 UART가 추가되더라도 matching RTL/PLIC contract 검증 전에는 interrupt field를 firmware에서 사용하지 않는다.
 
 ## 24. Target Timer
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 Target timer driver가 stale READY/restart sequencing을 내부에서 책임진다.
 
@@ -629,6 +670,8 @@ DP는 RTL/top/QSF가 명시적으로 확장되기 전까지 unavailable이다.
 
 ## 29. Target AES-GCM
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 > **P13-01 상세:** Owner 승인 D01~D12 Target FW API/STATUS Cause/Finite Poll/Zeroize 계약은 아래 §40과 [AES 명세](../14_aes_gcm.md) §25를 참조한다. 현재 동작은 §15에 유지한다.
 
 Target driver는 다음을 직접 enforce한다.
@@ -657,6 +700,8 @@ Sequence/IV uniqueness는 별도 HW allocator가 생기지 않는 한 firmware/p
 Key zeroize hardware가 추가되면 driver가 해당 기능을 expose하고 key lifetime boundary에서 사용한다.
 
 ## 30. Target Error Handling
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 Firmware는 최소 다음을 구분해야 한다.
 
@@ -735,6 +780,8 @@ Transition compatibility wrapper는 허용할 수 있지만 cleanup milestone �
 
 ## 34. Cleanup Tracker로 전달할 Firmware Item
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 ```text
 FW-001  Unsupported peripheral/VRAM byte-write 사용 deprecate
 FW-002  Bounded polling/timeout API 추가
@@ -753,6 +800,8 @@ FW-012  Host MMIO regression + FPGA acceptance 갱신
 Central cleanup tracker에서 ID는 재정규화할 수 있다.
 
 ## 35. Firmware Invariants
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 ### Current
 
@@ -799,6 +848,8 @@ firmware/drivers/hex_display.c
 Hardware behavior는 각 canonical hardware spec이 authoritative하다. Current firmware와 hardware spec이 충돌하면 firmware가 hardware contract를 재정의하는 것이 아니라 cleanup defect로 기록한다.
 
 ## Phase 4A-2 승인된 firmware cleanup contract (일부 현행; P04 종결 주석 참조)
+
+> **과거 A1–A6 checkpoint:** 아래 unresolved MIN_SAFE_BAUD_DIV 및 target 시제는 당시 기록이다. 현행 P07B 값은 217..65535(§38)이며 P04/P06/P09B 구현은 각각의 현행 계약을 따른다.
 
 A1 generic GPIO는 JP1 GPIO_0–15의 16비트 DATA_IN/OUT/DIR/local IRQ이며 UART/LoRa pin은 분리, `gpio_irq`는 PLIC 전 CPU 미연결이다. P04가 해당 driver/map과 stale GPIO-LED assumption 제거를 구현했지만 `FW-005/FW-007`의 물리 보드 시험은 남아 있다. A2 invalid AHB/APB/DMEM/VGA/register 접근은 zero/OKAY가 아닌 fault; load/store cause 5/7, misalignment 4/6은 별개다. Driver는 canonical aligned offset/size만 사용한다. A3 framebuffer는 정렬된 32-bit `vram_write_word()`만 지원하고 `vram_write_byte()`는 제거/deprecate하며 readback API는 없다. A4 busy DATA write는 stall 후 1회 수락하므로 FW는 bounded TX_READY polling을 사용한다. UART_BAUD는 50 MHz divisor(default 434)이며 preset 외 안전 rate도 계산 가능하다. A5 `timer_start(N)` exact-N 계약과 A6 PCLK-only G-sensor visible contract는 각 owning evidence를 따른다. 언급하지 않은 계약은 종결 근거가 생길 때까지 target이다.
 
@@ -868,9 +919,9 @@ FW는 raw HOLD + current center/deadzone으로 독립 `joystick_policy_eval()` �
 
 물리적 축 극성 및 방향 매핑(CH1=X, CH2=Y; right/left, up/down)은 C4-C 실기 보드 특성화를 통해 검증 완료되었다.
 
-## 40. P13-01 Approved AES-GCM Firmware Target Contract — 구현 전
+## 40. P13 AES-GCM Trusted Firmware 계약 — 구현된 v2
 
-> **Lifecycle:** Owner 승인 D01~D12 Target ABI. 현재 `aes_gcm.c/.h` 구현이나 검증 완료를 주장하지 않는다. §15는 Current Baseline이고 §29는 Target 요약이다. 이 절은 상세 Firmware Target API를 소유한다. Hardware 계약은 [AES Spec](../14_aes_gcm.md) §25, 영어 FW 정본은 [19_firmware_contract.md](../19_firmware_contract.md). Target Driver는 신규 Status/Zeroize를 사용하기 전에 `VERSION` ASCII `"2.00"`을 확인하며, 기존 `"1.00"`을 v2 호환으로 취급하지 않는다.
+> **Lifecycle:** 구현된 serialized v2 API 계약이다. 위 현행 계약과 read-only tracker의 한정 수용 범위를 따르며 v1은 v2 호환이 아니다.
 
 ### 40.1 Owner / Input / Packing (D01, D03, D09, D12)
 
@@ -910,11 +961,13 @@ Core Overflow는 SW BUSY ZEROIZE가 아닌 **내부 Fatal Fault Termination**이
 
 ### 40.5 APB 및 통합 한계 (D07, D10, D12)
 
-Canonical 32-bit Aligned Slot4 주소만 사용한다. Bridge는 Invalid Offset/Size/Alignment를 AES PSEL 전에 차단하고 Two-cycle AHB ERROR로 종료한다. 하지만 유효 Offset의 Wrong-direction 접근까지 Fault로 보장하지 않는다. 현재 Wrapper는 PSLVERR 없이 Partial Direct-APB Alias가 남는다. 승인된 Target은 Wrapper에서 사용 가능한 전체 Address Width의 정확한 Local Offset Decode와 Reserved/Noncanonical Direct-APB RAZ/WI 및 부작용 없음을 요구하며 `+0x100`/High-bit Alias를 제거하고 AES PSLVERR 없음을 유지한다. Local 정책은 잘못된 CPU 접근을 성공시키지 않으며 정규 RO/WO Wrong-direction 동작은 별개로 변경하지 않는다. 인증 전 Raw MMIO Plaintext 접근도 가능하다. Trusted FW Driver가 직렬화해서 접근할 때만 Software Authentication Gate를 보장한다. IRQ/DMA/PLIC/Health AES Provider 활성화는 Deferred이며 SoC Health AES는 `EXCLUDED_PENDING_CLEANUP` 유지.
+항상 canonical aligned 32-bit slot-4 주소를 사용한다. Bridge는 invalid offset/size/alignment를 AES PSEL 전에 2-cycle AHB ERROR로 거부하지만 canonical offset의 wrong-direction 접근이 항상 fault한다고 보장하지 않는다. 현행 AES v2 wrapper는 PSLVERR 없이 full canonical 주소를 exact decode하며 reserved/noncanonical direct-APB는 side effect 없는 RAZ/WI다. `+0x100`/high-bit alias는 없다. 이 local 정책은 invalid CPU 접근을 성공시키지 않으며 canonical RO/WO 방향 정책은 별도다. Raw MMIO에는 인증 전 plaintext가 노출될 수 있고 FW authentication gate는 serialized trusted API 사용자에게만 유효하다. AES IRQ/DMA/PLIC 및 Health AES provider enable은 deferred이며 Health AES는 `EXCLUDED_PENDING_CLEANUP`이다.
 
-### 40.6 AC 및 Lifecycle
+### 40.6 고정 AC 정의와 역사적 P13-01 상태
 
-| AC ID | Req | 검증 조건 | 현재 |
+이 표의 OPEN은 역사적 P13-01 상태다. 현행 FW-010은 수용된 serialized v2 API 범위에서 VERIFIED이고 FW-002는 global OPEN이다. D08 NOT_PROVEN과 별도 recovery/새 플랫폼 검증 의무를 유지한다.
+
+| AC ID | Req | 검증 조건 | P13-01 historical status |
 |---|---|---|---|
 | `FW-AES-AC-01` | FW-010, D01/D11 | 32-bit LEN/Pointer 사전 검증, Invalid Argument MMIO 부작용 없음 | OPEN |
 | `FW-AES-AC-02` | FW-010, D11 | START 후 완료된 STATUS Read 최대 N회, DONE 시 종료; Zero-budget 0 MMIO; Bus Hang과 SW Timeout 구분 | OPEN |
@@ -923,5 +976,6 @@ Canonical 32-bit Aligned Slot4 주소만 사용한다. Bridge는 Invalid Offset/
 | `FW-AES-AC-05` | AES-003, D09/D12 | Word/Byte Pack, Partial Output, IV Unique/Replay 책임 | OPEN |
 | `FW-AES-AC-06` | FW-010, D08 | Cause별 결과·Diagnostics, PROG_ERROR 상태 정상 성공 금지 | OPEN |
 
-이는 Target AC이며 Evidence가 아니다. AES-001은 기존 Actual-core 6-case KAT 범위에서만 VERIFIED. AES-002~007 및 FW-010은 상태 승격하지 않는다. P13-03 FW 구현, P13-04 독립 DV, P13-05 CPU E2E는 후속 Gate다.
+이 AC는 evidence가 아니다. 위 표는 과거 P13-01 상태를 보존하며 당시 P13-03/04/05는 후속 gate였다. 현행 AES-001..007/FW-010/VER-006/007은 기존 source-bound 한정 수용을 따르고 D08 integrated actual-core 자연 overflow/late success는 NOT_PROVEN / BLOCK_FOR_PROMOTION이다. 이 문서 정합화는 status 승격이나 새 DV가 아니다.
 
+과거 P13-03, P13-04, P13-05 gate와 AES-002..007 요구의 ID/의무는 유지한다. 위 현재 범위 밖 증거를 이 정합화로 추가하지 않는다.

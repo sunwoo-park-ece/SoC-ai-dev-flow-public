@@ -8,6 +8,14 @@
 >
 > **상위 명세:** `soc_architecture.md`, `memory_map.md`, `apb_subsystem.md`, `reset_clock.md`, `interrupt_architecture.md`, `gpio.md`, `sw.md`, `led.md`.
 
+## 현행 Legacy 계약과 보증 범위
+
+P04 topology가 현행이다. Slot1 true GPIO는 JP1 GPIO_IO[15:0], slot8 SW는 SW[9:0]와 local sw_irq, slot9 LED는 LEDR[9:0]을 소유한다. Pre-P04 SW/LED pseudo-GPIO 구성은 역사적이다. gpio_irq/sw_irq는 source ID와 CPU routing이 없는 local source다. Pin/OE 수용과 BOARDIO-002는 STA-002를 닫거나 새 board를 자동 검증하지 않는다. P14 selected 구성은 SW/LED와 DE10-Lite pin binding을 제외하며 이는 test dependency 경계이지 production slot 삭제가 아니다.
+
+기존 requirement/AC ID와 동결 의도를 유지한다. 아래 현행 계약과 충돌하는 cleanup 전 설명은 역사적 기록이며 새 구현 요구가 아니다. 상태는 읽기 전용 tracker의 기존 수용 범위를 인용하며 이 정합화로 승격하지 않는다.
+
+추적: [AMBA_SoC_TOP.v](../../rtl/soc/AMBA_SoC_TOP.v); [APB_GPIO.v](../../rtl/peripherals/APB_GPIO.v); [APB_SW.v](../../rtl/peripherals/APB_SW.v); [APB_LED.v](../../rtl/peripherals/APB_LED.v); [README.md](../../verification/selected_ip/README.md).
+
 ## 1. 목적
 
 이 문서는 legacy `APB_GPIO`, DE10-Lite switch, LED 사이의 결합을 제거하고 board I/O를 재구성하는 cross-cutting target architecture를 정의한다.
@@ -27,6 +35,8 @@
 이 문서는 system-level integration과 ownership을 담당하며, 상세 local register semantics는 `gpio.md`, `sw.md`, `led.md`가 담당한다.
 
 ## 2. Baseline 문제
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 현재 active FPGA baseline은 `APB_GPIO`를 board-specific mixed I/O block처럼 사용한다.
 
@@ -340,6 +350,8 @@ LED에는 IRQ가 없다.
 
 ## 11. Migration Sequence
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 ```text
 1. APB PSEL[7:0] -> PSEL[15:0] 확장
 2. canonical APB decode tightening
@@ -360,6 +372,8 @@ LED에는 IRQ가 없다.
 최종 cleanup 상태에서는 SW, LED, generic GPIO pin ownership이 중복되면 안 된다.
 
 ## 12. Firmware Migration
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 ```text
 legacy:

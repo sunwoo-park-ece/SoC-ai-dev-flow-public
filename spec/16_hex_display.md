@@ -6,6 +6,14 @@
 >
 > **Parent specifications:** `soc_architecture.md`, `memory_map.md`, `apb_subsystem.md`, `reset_clock.md`.
 
+## Current contract and source/evidence boundary
+
+Current P10 RTL retains four full-16-bit local offsets +0x00/04/08/0c, VALUE[23:0], CTRL[1:0] with upper RAZ/WI, two 21-bit RAW banks and six active-low 7-segment outputs. Reset CTRL=1, VALUE=0 produces decoded 000000; disable blanks outputs while retaining data. Local invalid accesses are RAZ/WI, without PSLVERR; the CPU bridge rejects invalid slot-7 offset/size/alignment before PSEL and adds its mandatory SETUP phase even for this always-ready slave.
+
+The driver uses sole-owner CTRL shadow, explicit init/resync and masked side-effect-free raw getters added during SYSFW-01. P10 accepted HEX-001..003 combines directed/host/bus/CPU evidence with S6 board observations; the S6 derivative alone is CONDITIONAL_PASS / OWNER_CONFIRMED and does not itself prove every RTL criterion. Its source base is `128fc195aaf08c37a627835f185e5ae0400ac289` plus the recorded acceptance-app hash. No physical glitch, general I/O timing or current-main refit is inferred.
+
+Traceability: [APB_HEX_display.v](../rtl/peripherals/APB_HEX_display.v); [hex_display.c](../firmware/drivers/hex_display.c); [tb_hex_s5_cpu_e2e.sv](../verification/directed/hex/tb_hex_s5_cpu_e2e.sv); [summary.md](../reports/evidence/p10-hex-s6/summary.md).
+
 ## 1. Purpose
 
 This document defines the software-visible six-digit seven-segment HEX display peripheral in the active FPGA baseline.
@@ -491,7 +499,7 @@ The HEX display peripheral has a complete multi-tier verification and acceptance
 4. **S3 Firmware Shadow Host Suite (`hex_s3_shadow_host.c`):** Verified boot initialization (`hex_display_init()`), post-reset resynchronization (`hex_display_resync()`), mask enforcement (`& 0x3`), and sole-owner Shadow integrity.
 5. **S4 Directed Functional Suite (`tb_hex_s4_functional.sv`):** 1,774 checks covering all 16 hexadecimal patterns per digit, active-low raw polarity, single/multi-segment packing, blanking, mode switching, and 100% detection across 3 mutation suites.
 6. **S5 Interconnect & CPU E2E Suite (`tb_hex_s5_*.sv`):**
-   - Tier L1 (Bridge): 4 canonical offsets forward with zero wait; noncanonical offsets suppressed with 2-cycle AHB ERROR.
+   - Tier L1 (Bridge): 4 canonical offsets reach an always-ready slave after the mandatory bridge SETUP phase; noncanonical offsets suppressed with 2-cycle AHB ERROR.
    - Tier L2 (SoC Bus): Verified bus interconnect and continuous register immutability during cross-slave traffic.
    - Tier L3 (CPU E2E): RV32I load/store execution, cycle-accurate access-fault exceptions (cause 5/7) on invalid offsets, and precise MEPC alignment.
 7. **S6 FPGA Build and Physical Acceptance (`P10-HEX-S6-EV-01`):**
@@ -516,7 +524,7 @@ or change bus-error topology in HEX display.
 The display is a polling/configuration-style output peripheral and is not
 assigned a PLIC source in the baseline.
 
-## 15. Owner-Approved Cleanup Scope (Issue #3) — Status Resolution
+## 15. Existing Owner-Approved Cleanup Scope — Status Reference
 
 1. **HEX-001 (VERIFIED):** Retained approved public `[6:0]` pin Tcl; verified by final Quartus Fitter Pin report (42 pins, zero `[7]`) and physical board acceptance B0~B8.
 2. **HEX-002 (VERIFIED):** Retained RAW mode; independently verified all six fields, active-low polarity, packing, masking, readback, disable/enable, and reset in S0, S4, S5, and S6.

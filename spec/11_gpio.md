@@ -8,6 +8,14 @@
 >
 > **Parent specifications:** `soc_architecture.md`, `memory_map.md`, `apb_subsystem.md`, `reset_clock.md`, `interrupt_architecture.md`, `board_io_architecture.md`.
 
+## Current Legacy contract and assurance boundary
+
+Part II is implemented P04 behavior, not an unimplemented target. The baseline bank is 16 pins (generic RTL parameter GPIO_WIDTH=16); DATA_IN/DATA_OUT/DIR/IRQ_ENABLE/IRQ_TYPE/IRQ_POLARITY/IRQ_BOTH_EDGE/IRQ_PENDING occupy +0x00..1c in steps of four. DIR=0 is input/Hi-Z; DIR=1 drives DATA_OUT. Input readback is two-flop synchronized. Reset clears output, direction and IRQ configuration/pending, with edge warm-up/rearming. Only input pins participate in effective pending; edge events are sticky/set-dominant W1C, level pending remains active while the physical level is active. gpio_irq is the OR of enabled effective pending and is not connected to CPU. Direct selected APB wiring must retain slot ownership: local decode checks the full 16-bit offset, not the upper slot bits. Driver masks remain 16-bit; new widths require adaptation and qualification.
+
+Existing requirement/AC IDs and frozen intent are preserved. Pre-cleanup descriptions that conflict with this current contract are historical, not new implementation requirements. Status cites the existing accepted scope in the read-only tracker; this reconciliation does not promote it.
+
+Traceability: [APB_GPIO.v](../rtl/peripherals/APB_GPIO.v); [gpio.c](../firmware/drivers/gpio.c); [tb_p04_boardio.sv](../verification/directed/bus/tb_p04_boardio.sv); [gpio_host.c](../verification/selected_ip/gpio_host.c).
+
 ## 1. Purpose
 
 This document has two explicitly separated roles.

@@ -1,10 +1,20 @@
 # Baseline SoC AES-GCM Accelerator Specification — 한국어 Companion
 
-> **상태:** 현재 Baseline 기록 + Owner 승인 P13-01 TARGET (§24), 구현 및 Acceptance 전. 기존 Baseline 절은 관측값이며 Target 구현 완료를 의미하지 않는다.
+> **상태:** 현행 P13 v2 계약; 기존 bounded acceptance와 D08 NOT_PROVEN을 구분한다.
 >
 > **정본 언어:** 영어. 이 문서와 `../14_aes_gcm.md`가 충돌할 경우 영문 canonical specification이 authoritative source이다.
 >
 > **상위 명세:** `soc_architecture.md`, `memory_map.md`, `apb_subsystem.md`, `reset_clock.md`, `interrupt_architecture.md`.
+
+## 현행 Legacy 계약과 보증 범위
+
+P13 §24의 D01–D12 ABI는 구현된 v2이며 VERSION=0x322e3030이다. §§4–21/23의 v1 관찰 중 상충 내용은 역사적이다. Full-width LEN 검증, MSW-word/MSB-byte packing, 배타 CTRL, sticky programming cause, BUSY write 거부, idle-only functional ZEROIZE, serialized trusted-output gate DONE && TAG_OK && !ERROR를 유지한다. Wrapper는 전체 canonical 0x4004xxxx 주소를 비교한다. Direct-APB noncanonical/reserved는 PSLVERR 없는 RAZ/WI이며 invalid CPU 접근은 AES PSEL 전에 bridge가 거부한다. APB rebase에는 명시적 adapter/승인 변경이 필요하다.
+
+기존 AES-001..007/FW-010/VER-006/007 수용은 tracker와 그 증거 범위다. AES-AC-01..09 의무는 유지되며 일괄 새 PASS가 아니다. AES-AC-08/D08 integrated actual-core natural overflow/concurrent·late success는 NOT_PROVEN / BLOCK_FOR_PROMOTION이며 동결 오류 우선순위를 바꾸지 않는다. Raw MMIO plaintext는 인증 access control이 아니고 zeroize는 physical erasure/security 인증이 아니다. P14 CPU VERSION smoke와 68-case actual-core APB KAT, 68-case positive CPU/real-AES replay를 구분한다. Health AES는 EXCLUDED_PENDING_CLEANUP이다.
+
+기존 requirement/AC ID와 동결 의도를 유지한다. 아래 현행 계약과 충돌하는 cleanup 전 설명은 역사적 기록이며 새 구현 요구가 아니다. 상태는 읽기 전용 tracker의 기존 수용 범위를 인용하며 이 정합화로 승격하지 않는다.
+
+추적: [apb_aes_gcm_ip.v](../../rtl/peripherals/aes_gcm/pipe0/apb_aes_gcm_ip.v); [aes_gcm.h](../../firmware/include/aes_gcm.h); [README.md](../../verification/selected_ip/README.md); [P13_08_D08_OWNER_MANUAL_RUN.md](../../verification/directed/p13_aes_rtl/P13_08_D08_OWNER_MANUAL_RUN.md).
 
 ## 1. 목적
 
@@ -91,6 +101,8 @@ Project-local 작업 범위는 active Verilog APB wrapper, MMIO programming mode
 
 ## 4. Canonical Register Map
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 Wrapper는 `PADDR[7:2]`를 decode한다.
 
 | Offset | Register | Access | Reset | 의미 |
@@ -121,6 +133,8 @@ PAYLOAD/TAG도 동일하다.
 
 ## 5. CTRL
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 ```text
 bit 0 START
 bit 1 ENC_DEC
@@ -149,6 +163,8 @@ ERROR
 현재 implementation에서는 CTRL에 write할 때마다 `enc_dec_reg`도 `PWDATA[1]`으로 갱신된다. 따라서 `CLR_STATUS` bit만 1로 쓰면 visible direction readback은 0으로 바뀐다. 이것은 operation 결과 자체에는 영향이 없지만 control/readback semantics cleanup 대상이다.
 
 ## 6. STATUS
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 ```text
 bit 0 BUSY
@@ -238,6 +254,8 @@ START 시 이 header를 `HDR0..3`에 debug snapshot으로 저장한다.
 
 ## 10. Payload / LEN
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 Payload window는 정확히 128 bits 한 block이다.
 
 ```text
@@ -268,6 +286,8 @@ Multi-block streaming은 지원하지 않는다.
 
 ## 11. Operation FSM
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 ```text
 START
   -> CORE_RESET
@@ -292,6 +312,8 @@ Core output capture는 drive FSM과 독립적으로 수행되어 short valid pul
 
 ## 12. Encrypt Firmware Contract
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 ```text
 1. BUSY=0 확인
 2. KEY0..3 설정
@@ -309,6 +331,8 @@ Encrypt에서는 TAG_IN이 verification에 사용되지 않는다.
 
 ## 13. Decrypt / Authenticate Contract
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 ```text
 1. BUSY=0 확인
 2. KEY 설정
@@ -325,6 +349,8 @@ Encrypt에서는 TAG_IN이 verification에 사용되지 않는다.
 Hardware 내부에서는 tag verification 완료 전 plaintext output이 먼저 capture될 수 있다. Software trust boundary는 output register 존재 여부가 아니라 최종 `DONE/TAG_OK/ERROR`이다.
 
 ## 14. BUSY 중 Register Write
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 APB wrapper는 BUSY 중 일반 input register write를 막지 않는다.
 
@@ -357,6 +383,8 @@ AES는 별도 clock domain이 없다.
 
 ## 16. Security Limitation
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 현재 블록은 production hardened security boundary가 아니다.
 
 주요 limitation:
@@ -377,6 +405,8 @@ interrupt 없음
 
 ## 17. APB Decode Limitation
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 Wrapper는 `PADDR[7:2]`만 decode하기 때문에 register map이 0x100-byte 주기로 repeat된다.
 
 이 alias는 implementation artifact이며 canonical address가 아니다.
@@ -388,6 +418,8 @@ AES Wrapper 자체에는 `PSLVERR`가 없고 Crypto/Program 오류는 STATUS로�
 Canonical firmware access는 aligned 32-bit MMIO를 사용한다.
 
 ## 18. Firmware Integration
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 Active driver:
 
@@ -404,6 +436,8 @@ Driver는 key/IV/payload/tag programming, status clear, encrypt/decrypt start, D
 
 ## 19. Verification Evidence Boundary
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 Legacy APB reference-model SoC test는 CPU/APB register sequence 및 fixed golden behavior를 확인하지만 실제 VHDL crypto core를 compile하지 않는다.
 
 따라서 그 PASS만으로 active AES-GCM algorithm correctness를 증명할 수 없다.
@@ -415,6 +449,8 @@ Major feature integration 전에는 active wrapper + active VHDL core를 함께 
 AES-001은 User/Chat 승인에 따라 `VERIFIED`다. 실제 production APB wrapper/VHDL core에서 독립 oracle 기반 0·7·16바이트 encrypt/decrypt KAT가 통과했다. 상세 내부 보고서는 정제된 공개 AES evidence package가 승인될 때까지 `PRIVATE_LOCAL_EVIDENCE_REQUIRED`다. 다른 AES cleanup 행과 VER-006은 이 범위에 포함되지 않는다. 별개의 full-SoC mixed-language CPU compile 실패는 VER-001 증거로 보존한다.
 
 ## 20. Required Verification
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 최소 directed regression:
 
@@ -441,10 +477,12 @@ Expected crypto value는 RTL 자체가 아니라 independent trusted implementat
 
 ## 21. Baseline Cleanup Targets
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 | Priority | Cleanup | 이유 |
 |---|---|---|
 | High | active wrapper/core fresh AES-128-GCM KAT | reference model PASS만으로 crypto core 증명 불가 |
-| High | `LEN>16` explicit reject | 현재 out-of-range가 16-byte valid mask로 처리됨 |
+| High | `LEN>16` explicit reject | P13-01 historical status out-of-range가 16-byte valid mask로 처리됨 |
 | High | byte/word ordering independent-vector 검증 | protocol interoperability risk |
 | High | decrypt trust contract hardening | TAG success 전 plaintext 사용 금지 |
 | High | key zeroization policy | key가 readable MMIO에 남음 |
@@ -475,6 +513,8 @@ security/isolation
 
 ## 23. Baseline Invariants
 
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
+
 1. AES-GCM canonical base는 `0x4004_0000`, APB slot 4이다.
 2. Active wrapper는 `pipe0/apb_aes_gcm_ip.v`의 `apb_aes_gcm`이다.
 3. PREADY는 항상 1이다.
@@ -493,10 +533,8 @@ security/isolation
 16. VHDL crypto core는 third-party Apache-2.0-derived이고 APB/SoC integration은 project-local이다.
 17. Historical reference-model test는 fresh active-core KAT signoff를 대체하지 않는다.
 
-## 24. P13-01 Approved Target Contract — 구현 및 Acceptance 전
+## 24. P13 승인 계약 — 구현된 v2와 한정 수용
 
-> **Lifecycle:** Owner가 승인한 D01~D12 Architecture와 상세 ABI를 반영한 Target 명세이다. **현재 RTL/FW가 이미 구현했다는 뜻이 아니다.** 위의 기존 Baseline 절은 현재/레거시 동작을 기록하며, 이 절은 구현 후 적용할 Target Contract다. 이 Target 명세만으로 Tracker, AES SoC Health, VERIFIED 상태를 승격하지 않는다.
-> **Scope boundary:** APB, Memory Map 또는 Tracker의 변경은 별도 범위 결정을 필요로 한다.
 
 ### 24.1 인터페이스와 데이터 포맷 (D01, D04, D05, D09)
 
@@ -567,6 +605,8 @@ BUSY 중 ZEROIZE 요청은 `ZEROIZE_BUSY_ERR`를 Set하면서 기존 연산/Key/
 
 ### 24.7 APB/AHB Bridge 및 Wrapper Local Decode 정책 (D10)
 
+> **현행 v2:** 전체 canonical 32-bit 주소 exact decode가 구현됐다. 아래 partial-alias 잔존 또는 target-only 구현 시제는 P13-01의 역사적 설명이다. CPU bridge ERROR와 direct-APB RAZ/WI, canonical RO/WO 방향 정책의 분리는 현행이다.
+
 CPU→AHB/APB Bridge는 Slot4의 Canonical Offset/Aligned Word/Full Address를 Validation하고 Invalid Offset, Alias, Size, Alignment는 AES PSEL 없이 기존 Two-cycle AHB ERROR로 종료한다. Target AES Wrapper도 Wrapper에서 사용 가능한 전체 APB Address Width로 정확한 Canonical Local Offset을 Decode해야 하며 수락 판정에 `PADDR[7:2]`로 잘라서는 안 된다. 정규 Register Word는 계속 사용 가능하며 `+0x100` 및 다른 High-bit Alias는 이를 선택하지 못한다. Direct-APB의 Reserved/Noncanonical Local Offset Read는 0(RAZ), Write는 무시(WI)하고 MMIO 상태나 Crypto Core 부작용이 없어야 한다. `PREADY=1`, AES `PSLVERR` 없음을 유지하며 Local RAZ/WI가 잘못된 CPU 접근의 성공을 뜻하지 않는다.
 
 정규 RO/WO Register의 Wrong-direction 접근은 Invalid Offset과 별개이며 이번 개정은 기존 정책을 변경하지 않는다. 특히 Bridge는 Direction을 검사하지 않아 정규 RO Write는 OKAY/No-op일 수 있다. 현재 Wrapper는 앞 절의 Partial-decode Alias가 여전히 존재하며 Exact Decode 및 검증은 Target 작업이지 구현 완료 주장이 아니다. APB-005 전체 VERIFIED 승격 금지.
@@ -577,7 +617,9 @@ CPU→AHB/APB Bridge는 Slot4의 Canonical Offset/Aligned Word/Full Address를 V
 
 FW/Protocol은 Encryption `(Key, IV)` 유일성, Sequence Persistence 및 Replay Defense를 책임진다. HW는 Auto-IV/Nonce, Replay Counter, Secure Vault, Physical Erasure, DMA, IRQ/PLIC, Constant-time System Guarantee 또는 Health AES Provider Enable을 제공하지 않는다. SoC Health AES는 후속 검증 전 `EXCLUDED_PENDING_CLEANUP` 유지.
 
-### 24.9 Target AC와 현재 상태
+### 24.9 고정 AC 정의와 역사적 P13-01 상태
+
+이 표는 고정 AC와 당시 P13-01 OPEN 기록을 보존한다. 현행 수용 범위는 [tracker](baseline_cleanup.ko.md)의 AES-001..007/FW-010/VER-006/007 및 위 현행 계약을 참조한다. AES-AC-08은 여전히 NOT_PROVEN이며 개별 AC에 새 verdict를 부여하지 않는다.
 
 | AC ID | Req | 필요한 검증 | 현재 |
 |---|---|---|---|

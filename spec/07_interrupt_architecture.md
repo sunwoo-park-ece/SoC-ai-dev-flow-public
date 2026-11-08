@@ -8,7 +8,16 @@
 >
 > **Detailed CPU microarchitecture:** `cpu_core.md`.
 
-> **Phase 4A-3A reading rule:** Earlier missing-bus-fault descriptions are pre-cleanup observations; the final fault/IRQ boundary section records the now-verified data-bus access-fault sub-scope. Illegal-instruction, branch-alignment, and PLIC work remain open.
+
+## Current Legacy contract and assurance boundary
+
+The accepted synchronous contract includes cause 0 for taken branch/JAL/JALR target misalignment (JALR clears bit 0 first), cause 2 for rejected instruction/CSR encodings, EBREAK cause 3 to mtvec, load/store misalignment 4/6 before bus issue, final data-bus ERROR causes 5/7, and ECALL cause 11. Faulting PC travels with its instruction token; older successful WB may retire and younger effects are suppressed. `mepc` stores/reads bits 1:0 as zero and MRET returns exactly to that value, once, without +4.
+
+Machine IDs are 0/0/0x0001_0000/0 for mvendorid/marchid/mimpid/mhartid; mstatus=0x0000_1800 and misa=0x4000_0100. The four machine counters are the accepted project read-only/write-ignore subset. No instruction-fetch access-fault contract, mie/mip, functional MIE/MPIE, PLIC/ACLINT or CPU external IRQ path is added. gpio_irq/sw_irq are local wires; Timer/UART/AES are polling-only. TRAP-001..004 acceptance remains the representative existing scope, not exhaustive Cartesian proof.
+
+Existing requirement/AC IDs and frozen intent are preserved. Pre-cleanup descriptions that conflict with this current contract are historical, not new implementation requirements. Status cites the existing accepted scope in the read-only tracker; this reconciliation does not promote it.
+
+Traceability: [trap.vh](../rtl/core/vh/trap.vh); [Exception_Detector.v](../rtl/core/v/mem_stage/Exception_Detector.v); [CSR_File.v](../rtl/core/v/id_stage/CSR_File.v); [tb_trap_isa_closure.sv](../verification/directed/cpu/tb_trap_isa_closure.sv); [tb_trap_precision_interaction.sv](../verification/directed/cpu/tb_trap_precision_interaction.sv).
 
 ## 1. Purpose
 
@@ -68,130 +77,33 @@ Therefore the active baseline is **synchronous-trap capable, interrupt-incomplet
 
 ## 4. Active Exception Detector
 
-The active `ExceptionDetector` evaluates candidate synchronous events in ID, EX, and MEM stages.
-
-Its combinational priority is:
-
-```text
-MEM-stage exception
-    > EX-stage exception
-        > ID-stage exception
-```
-
-The selected result is registered into:
-
-```text
-trapped
-trap_status[2:0]
-```
-
-before being consumed by the trap-control path.
-
-The exact pipeline precision of `mepc` ownership under simultaneous bus/CSR/load-use/control-flow stalls remains a cleanup verification requirement and is further detailed by `cpu_core.md`.
+The active detector emits source-stage ID/EX fault-valid/cause metadata. Validity, cause and the faulting PC travel with the owning instruction token to the precise service boundary. Older MEM faults take precedence over younger EX/ID candidates; older successful WB effects remain eligible. The registered trapped/trap_status diagnostics are not a substitute for token ownership. TRAP-002 representative wait/CSR/load-use/redirect interaction evidence is accepted; exhaustive combinations are not claimed.
 
 ## 5. Implemented Trap/Event Codes
 
-`rtl/core/vh/trap.vh` currently defines:
+Current `trap.vh` defines 4-bit internal event codes; they are not mcause encodings.
 
-| Internal code | Name | Active baseline meaning |
+| Internal 4-bit code | Name | Architectural role |
 |---|---|---|
-| `3'b000` | `TRAP_NONE` | No active trap |
-| `3'b001` | `TRAP_EBREAK` | EBREAK event |
-| `3'b010` | `TRAP_ECALL` | ECALL event |
-| `3'b011` | `TRAP_MISALIGNED_INSTRUCTION` | Instruction-address misalignment |
-| `3'b100` | `TRAP_MRET` | MRET control event |
-| `3'b101` | `TRAP_FENCEI` | Symbol exists, but no active detector path was found |
-| `3'b110` | `TRAP_MISALIGNED_STORE` | Store-address misalignment |
-| `3'b111` | `TRAP_MISALIGNED_LOAD` | Load-address misalignment |
-
-`TRAP_MRET` is a return-control event, not an exception cause.
-
-`TRAP_FENCEI` shall not be treated as an active architectural trap merely because the symbolic value exists. The approved cleanup policy for FENCE/FENCE.I is defined in §12.2.
+| `0000` | TRAP_NONE | no trap |
+| `0001` | TRAP_EBREAK | mcause=3 |
+| `0010` | TRAP_ECALL | mcause=11 |
+| `0011` | TRAP_MISALIGNED_INSTRUCTION | mcause=0 |
+| `0100` | TRAP_MRET | return control, not exception cause |
+| `0101` | TRAP_FENCEI | dormant symbol, no trap/cache-clean action |
+| `0110` | TRAP_MISALIGNED_STORE | mcause=6 |
+| `0111` | TRAP_MISALIGNED_LOAD | mcause=4 |
+| `1000` | TRAP_LOAD_ACCESS_FAULT | mcause=5 |
+| `1001` | TRAP_STORE_ACCESS_FAULT | mcause=7 |
+| `1010` | TRAP_ILLEGAL_INSTRUCTION | mcause=2 |
 
 ## 6. Implemented Synchronous Exceptions
 
-### 6.1 ECALL
-
-The detector recognizes an environment instruction with `funct3 == 0` and zero immediate as ECALL.
-
-The trap controller records:
-
-```text
-mcause = 11
-```
-
-and vectors through `mtvec` after its ECALL-specific standby/drain sequence.
-
-### 6.2 EBREAK — active baseline
-
-EBREAK is recognized as an environment instruction and records:
-
-```text
-mcause = 3
-```
-
-The active trap controller does **not** vector EBREAK through `mtvec` in the same way as ordinary exceptions. It instead enables a project-local `debug_mode` state and exits the pre-trap handler.
-
-This is baseline behavior only and is not a complete RISC-V Debug Specification implementation.
-
-### 6.3 Misaligned Load
-
-The detector generates load-address-misaligned behavior for:
-
-- `LH` / `LHU` when address bit 0 is set,
-- `LW` when address bits `[1:0] != 2'b00`.
-
-The trap controller records:
-
-```text
-mcause = 4
-```
-
-### 6.4 Misaligned Store
-
-The detector generates store-address-misaligned behavior for:
-
-- `SH` when address bit 0 is set,
-- `SW` when address bits `[1:0] != 2'b00`.
-
-The trap controller records:
-
-```text
-mcause = 6
-```
-
-### 6.5 Instruction-Address Misalignment
-
-The active detector checks JAL/JALR targets for 4-byte alignment and produces:
-
-```text
-mcause = 0
-```
-
-for a detected misaligned instruction target.
-
-The historical branch-target misalignment check exists only as commented-out detector code. Therefore branch-target misalignment detection is incomplete in the active baseline.
-
-The detailed JALR bit-0 issue is owned by `cpu_core.md`: cleanup shall clear JALR target bit 0 before final IALIGN=32 checking.
+Current synchronous causes are instruction target misalignment 0, illegal instruction/CSR 2, breakpoint 3, load misalignment 4, load access fault 5, store misalignment 6, store access fault 7 and M-mode ECALL 11. EBREAK follows ordinary precise mtvec entry. JALR clears bit 0 before checking IALIGN=32; taken misaligned branch/JAL/JALR targets fault. Load/store misalignment is detected before bus issue; a completing data-bus ERROR is owned by the matching valid MEM instruction. Failed effects and retirement are suppressed. No interrupt entry is implied.
 
 ## 7. Exceptions Not Implemented as Active Baseline Contracts
 
-The active baseline does not provide a complete implementation of the standard machine-mode exception set.
-
-Notably absent or incomplete are:
-
-- illegal instruction exception (`mcause=2`),
-- instruction access fault,
-- load access fault,
-- store/AMO access fault,
-- normal breakpoint-to-`mtvec` behavior,
-- complete branch-target instruction-misalignment handling,
-- bus-error-to-exception propagation,
-- deterministic illegal CSR-access behavior.
-
-`TRAP_ILLEGAL_INSTRUCTION` is commented out in the active trap encoding header, and the detector does not currently generate an illegal-instruction trap.
-
-These are cleanup defects/omissions, not approved long-term behavior.
+Instruction-fetch access fault and a complete privileged exception/interrupt architecture are not implemented contracts. The old list of missing illegal/CSR, taken-branch, breakpoint and data-bus fault behavior is superseded by accepted Phase 4A-3B/3B3R/3B-CLOSE. No full privileged compliance claim follows.
 
 ## 8. CSR Baseline and Cleanup Policy
 
@@ -226,23 +138,14 @@ Therefore machine-mode interrupt masking/enabling semantics are absent from the 
 
 ### 8.2 Approved machine-identification CSR values for cleanup
 
-The active CPU currently carries inherited ASCII-like fixed machine-identification values. The cleanup target is frozen as:
+The approved cleanup identities are implemented and accepted within CPU-006 scope. No assigned nonzero vendor/architecture ID is claimed; hart 0 is the only hart.
 
-| CSR | Address | Approved cleanup value |
+| CSR | Address | Current readback |
 |---|---:|---:|
-| `mvendorid` | `0xF11` | `0x0000_0000` |
-| `marchid` | `0xF12` | `0x0000_0000` |
-| `mimpid` | `0xF13` | `0x0001_0000` |
-| `mhartid` | `0xF14` | `0x0000_0000` |
-
-Policy meaning:
-
-- `mvendorid=0`: the project does not claim a separately assigned JEDEC vendor ID,
-- `marchid=0`: the project does not claim a globally allocated nonzero architecture ID,
-- `mimpid=0x0001_0000`: project-owned cleanup CPU implementation revision 1.0.0,
-- `mhartid=0`: the current SoC is single-hart and uses hart ID 0.
-
-These values become active only after RTL cleanup and verification.
+| mvendorid | `0xF11` | `0x0000_0000` |
+| marchid | `0xF12` | `0x0000_0000` |
+| mimpid | `0xF13` | `0x0001_0000` |
+| mhartid | `0xF14` | `0x0000_0000` |
 
 ### 8.3 Approved machine-counter policy for cleanup
 
@@ -259,6 +162,8 @@ trap   -> no trap solely because the target is one of these project-RO counter C
 This exception is limited to these supported project-RO counters. Unsupported CSR addresses and other rejected CSR encodings remain subject to the cleanup illegal-instruction policy.
 
 ## 9. Trap Entry Sequence
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 For ordinary synchronous exceptions, the trap controller conceptually performs:
 
@@ -283,6 +188,8 @@ Exact cycle counts are implementation details unless promoted into a verificatio
 
 ## 10. ECALL-Specific Drain Behavior
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 ECALL uses:
 
 ```text
@@ -297,6 +204,8 @@ This sequence is intended to allow older instructions to progress before writing
 Cleanup shall explicitly verify precise `mepc` capture across bus stalls, APB waits, CSR stalls, load-use hazards, and simultaneous control-flow events.
 
 ## 11. MRET
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 ### 11.1 Active baseline
 
@@ -323,6 +232,8 @@ MRET redirects to the **exact architecturally stored/canonicalized `mepc`** valu
 **Phase 4A-3B3R implementation status:** Canonical storage/readback and exact MRET redirect/one-shot retirement passed the directed CPU/storage suites; the user-run Quartus fit and internal multicorner STA passed. The older `mepc+4` and project-local EBREAK descriptions above are retained as historical baseline observations, not current active behavior. Phase 4A-3B-CLOSE subsequently verified representative bus/APB/load-use/CSR stall and competing fault/redirect interactions; `TRAP-002` is VERIFIED without claiming exhaustive Cartesian proof.
 
 ## 12. EBREAK and FENCE Cleanup Policy
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 ### 12.1 EBREAK — approved cleanup target
 
@@ -377,6 +288,8 @@ UART, GPIO, G-sensor, AES-GCM, ADC joystick, and HEX are likewise polling/contro
 Approved board-I/O target work may create local `gpio_irq` and `sw_irq` wires, but those wires remain disconnected from CPU interrupt acceptance until the future PLIC stage.
 
 ## 14. Bus Error Relationship
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 The active AHB-style fabric may return default zero/OKAY for unmapped accesses, and the active CPU master does not consume `HRESP`.
 
@@ -435,6 +348,8 @@ The frozen legacy PLIC implementation may inform these decisions but shall not d
 
 ## 17. Baseline Cleanup Targets and PLIC Boundary
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 ### 17.1 Baseline-cleanup gate
 
 The following are baseline-cleanup work:
@@ -468,6 +383,8 @@ This separation prevents the cleanup milestone from silently turning into the PL
 
 ## 18. Baseline Invariants
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 Until cleanup implementation is verified, the following describe the **active FPGA baseline**:
 
 1. No asynchronous CPU interrupt path is active.
@@ -486,6 +403,8 @@ Until cleanup implementation is verified, the following describe the **active FP
 14. Legacy PLIC source/tests remain reference-only.
 
 ## 19. Approved Cleanup Policy Summary
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 ```text
 GPR reset              : x1..x31 unspecified after system reset

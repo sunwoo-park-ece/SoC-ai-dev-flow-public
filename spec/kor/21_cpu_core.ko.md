@@ -6,11 +6,20 @@
 >
 > **논리적 위치:** 번호는 기존 spec renumbering을 피하기 위해 `21`을 사용하지만, 내용상 `cpu_interface.md`와 `interrupt_architecture.md`의 CPU 내부 동작을 선행/보강하는 상세 문서이다.
 
-> **Phase 4A-3A 읽기 규칙:** 앞의 access-fault 미구현 설명은 cleanup 전 CPU 기록이다. 마지막 access-fault 문단은 검증된 load/store bus-fault 부분만 현행으로 승격하며 일반 retirement와 전체 `TRAP-003` 완료를 뜻하지 않는다.
 
 > **현재 C1a 읽기 규칙:** §20.1과 §20.3은 통합된 CPU/bus 구조와 한정된 검증 상태를 설명한다. 앞의 cleanup 전 decode/ISA/CSR/trap 설명과 §27의 역사적 목록은 이후 동결 계약이나 `baseline_cleanup.md`의 실제 requirement 상태를 대체하지 않는다. C1a는 조합 회로 topology를 바꾸며 논리 기능이나 architectural contract를 바꾸지 않는다.
 >
 > **Store payload/mask 계약 상태:** 통합 구현에는 §20.1이 요구하는 응답 독립적인 MEM payload/mask 경로가 존재한다. 소스에 결부된 simulation과 구조 검사가 해당 부분 범위를 뒷받침하며 공개 derivative evidence 정합화와 전체 acceptance는 별도이다. Whole-SoC timing, vendor BRAM, CDC 또는 board 종결을 뜻하지 않는다.
+
+## 현행 Legacy 계약과 보증 범위
+
+현행 RV32I 5단계 동작은 deterministic legality, rs2[4:0] register shift, JALR bit-0 clear 후 IALIGN32 검사, taken-branch misalignment, precise cause/PC 소유권, legal-no-op FENCE/FENCE.I, mtvec로 가는 EBREAK, canonical mepc로의 정확한 MRET를 포함한다. mcycle은 bus stall을 포함한 enabled cycle마다 증가하고 minstret은 real NOP·accepted MRET를 포함한 성공 commit마다 한 번 증가하며 bubble/held token/fault instruction은 세지 않는다. Recognized counter write는 정상 counting을 유지하는 legal write-ignore다. Machine ID는 0/0/0x0001_0000/0이고 unsupported CSR 주소는 illegal이다.
+
+CPU-001 VERIFIED는 폭/명칭뿐이며 CPU-003..009와 TRAP-001..004는 기존 한정 수용 범위를 유지한다. P14 LoadExtender 조합 cleanup은 262144 binary oracle case로 두 inferred latch를 제거했으며 universal X/Z equivalence나 clean lint를 증명하지 않는다. System reset 후 x1..x31은 unspecified(CPU-010 OPEN)다. Reset mtvec 창, vendor memory 가정, external IRQ 부재는 유지한다. DMA/AXI/coherency와 PLIC/ACLINT/dual-hart는 새 owning contract가 필요하다.
+
+기존 requirement/AC ID와 동결 의도를 유지한다. 아래 현행 계약과 충돌하는 cleanup 전 설명은 역사적 기록이며 새 구현 요구가 아니다. 상태는 읽기 전용 tracker의 기존 수용 범위를 인용하며 이 정합화로 승격하지 않는다.
+
+추적: [RV32I46F_5SP_MMIO.v](../../rtl/core/v/top/RV32I46F_5SP_MMIO.v); [ALU.v](../../rtl/core/v/ex_stage/ALU.v); [CSR_File.v](../../rtl/core/v/id_stage/CSR_File.v); [LoadExtender.v](../../rtl/core/v/mem_stage/LoadExtender.v); [tb_load_extender.sv](../../verification/selected_ip/tb_load_extender.sv).
 
 ## 1. 목적과 범위
 
@@ -139,24 +148,7 @@ NOP을 주입한다.
 
 ## 7. Decode / Immediate / Legality
 
-Active decoder는 LUI/AUIPC/JAL/JALR/BRANCH/LOAD/STORE/OP-IMM/OP/FENCE/SYSTEM opcode family를 다룬다.
-
-Immediate는 I/S/U/B/J format으로 생성된다.
-
-Instruction legality 검증은 불완전하다.
-
-현재 예:
-
-- unknown opcode가 illegal trap이 아니라 inert control로 처리될 수 있음,
-- JALR `funct3=000` 검증 없음,
-- R-type 전체 `funct7` legality 검증 없음,
-- shift-immediate upper encoding 검증 불완전,
-- invalid LOAD/STORE funct3도 bus transaction control이 올라갈 수 있음,
-- illegal CSR access trap 없음.
-
-Cleanup에서는 deterministic legality check + illegal-instruction exception을 추가한다.
-
----
+현행 decoder는 opcode/funct3/funct7/shift/SYSTEM/CSR encoding을 검증하며 거부 encoding/unsupported CSR 주소에 cause 2를 내고 architectural/bus effect를 억제한다. Recognized machine-counter write-ignore 예외는 legal이다. CPU-009는 기존 directed 범위에서 수용됐으며 exhaustive ISA compliance가 아니다.
 
 ## 8. Register File
 
@@ -182,32 +174,11 @@ Startup software가 필요한 register/software state를 설정해야 하며 fir
 
 ## 9. ALU
 
-지원 datapath operation:
-
-```text
-ADD SUB
-AND OR XOR
-SLT SLTU
-SLL SRL SRA
-CSR helper op
-NOP
-```
-
-Immediate shift는 shamt `[4:0]`만 사용한다.
-
-반면 register shift는 현재 전체 32-bit rs2가 shift operand로 들어간다.
-
-```verilog
-src_A << src_B
-src_A >> src_B
-$signed(src_A) >>> src_B
-```
-
-RV32 register shift는 `rs2[4:0]`만 사용해야 하므로 cleanup에서 반드시 수정한다.
-
----
+Register SLL/SRL/SRA는 rs2[4:0], immediate shift는 encoding의 5-bit shift amount를 사용한다. CPU-003의 수용 directed case는 0/31/32/33/63/0xFFFF_FFFF를 포함한다. 과거 full-width-shift 결함은 역사적이다.
 
 ## 10. Branch / Jump
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 Branch는 EX에서 forwarded operand를 비교하며 BEQ/BNE/BLT/BGE/BLTU/BGEU를 지원한다.
 
@@ -221,27 +192,11 @@ JAL은 EX에서 target을 계산하고 WB에서 PC+4를 rd에 쓴다.
 
 ### 10.1 JALR deviation / target
 
-현재:
-
-```text
-raw_target = rs1 + imm
-```
-
-를 그대로 redirect하고 raw low2를 검사한다.
-
-Cleanup target:
-
-```text
-target = (rs1 + imm) & ~1
-```
-
-후 final alignment를 판단한다.
+현행 JALR redirect는 `(rs1 + immediate) & ~1`이다. Bit 0을 지운 뒤 IALIGN=32를 검사하므로 raw low bits 01은 정렬될 수 있지만 canonical bit1은 target misalignment다. CPU-004의 수용 범위가 이 정책을 유지한다.
 
 ### 10.2 Branch alignment
 
-JAL/JALR alignment 검사는 있지만 branch-target misalignment detector는 inactive이다. IALIGN=32 기준 taken branch misalignment 처리를 cleanup에서 추가한다.
-
----
+IALIGN=32 위반 taken branch target은 해당 instruction PC와 cause 0을 만들고 잘못된 redirect/retirement를 억제한다. 이는 구현됐으며 수용된 TRAP-003 범위다. Not-taken branch는 target-alignment exception을 만들지 않는다.
 
 ## 11. Forwarding
 
@@ -381,78 +336,20 @@ commit_valid = clk_enable && !reset && WB_valid && !WB_exc_valid
 
 ## 17. CSR Datapath
 
-CSR instruction arithmetic:
+현행 readable CSR은 mcycle/mcycleh/minstret/minstreth(0xB00/0xB80/0xB02/0xB82), 아래 machine ID, mstatus=0x0000_1800, misa=0x4000_0100, 0x305/0x341/0x342의 mtvec/mepc/mcause다. 마지막 세 개만 writable state다. Recognized counter write는 counting을 유지하는 legal no-effect이며 unsupported CSR 주소와 거부 write/encoding은 CPU-009 trap이다. mepc[1:0]은 0으로 저장/read된다.
 
-```text
-CSRRW / CSRRS / CSRRC
-CSRRWI / CSRRSI / CSRRCI
-```
+| CSR | Address | Current readback |
+|---|---:|---:|
+| mvendorid | `0xF11` | `0x0000_0000` |
+| marchid | `0xF12` | `0x0000_0000` |
+| mimpid | `0xF13` | `0x0001_0000` |
+| mhartid | `0xF14` | `0x0000_0000` |
 
-현재 readable CSR:
-
-```text
-mcycle/mcycleh
-minstret/minstreth
-mvendorid/marchid/mimpid/mhartid
-mstatus
-misa
-mtvec
-mepc
-mcause
-```
-
-현재 writable:
-
-```text
-mtvec
-mepc
-mcause
-```
-
-`mstatus`는 `0x00001800` constant이며 `mie/mip`은 active baseline에 없다.
-
-Unsupported CSR는 read-zero / write-ignore 형태가 될 수 있고 illegal trap이 없다.
-
-### 17.1 Machine ID CSR — 승인된 cleanup 값
-
-Active baseline의 inherited ASCII-like value는 유지하지 않는다. Cleanup target은 다음으로 확정한다.
-
-| CSR | Address | Cleanup value | 의미 |
-|---|---:|---:|---|
-| `mvendorid` | `0xF11` | `0x0000_0000` | 이 프로젝트가 별도 JEDEC vendor ID를 주장하지 않음 |
-| `marchid` | `0xF12` | `0x0000_0000` | 별도 global nonzero architecture ID를 주장하지 않음 |
-| `mimpid` | `0xF13` | `0x0001_0000` | cleanup CPU implementation revision 1.0.0 |
-| `mhartid` | `0xF14` | `0x0000_0000` | 현재 single-hart SoC의 hart 0 |
-
-이 값은 **cleanup target**이며 active baseline RTL이 이미 이 값을 반환한다는 뜻은 아니다.
-
-향후 CPU implementation revision이 의미 있게 바뀌면 `mimpid` version을 canonical spec에서 명시적으로 갱신한다.
-
-### 17.2 mcycle/minstret — 승인된 cleanup policy
-
-이번 cleanup milestone에서는:
-
-```text
-mcycle/mcycleh/minstret/minstreth = read-only project subset
-```
-
-으로 유지한다.
-
-Write 동작은 **write-ignore**로 확정한다.
-
-```text
-counter CSR read   -> 현재 counter 값 반환
-counter CSR write  -> instruction은 정상 완료되지만 counter 값은 변경되지 않음
-trap               -> 이 지원되는 counter CSR에 write했다는 이유만으로 trap 발생하지 않음
-```
-
-즉 writable machine-counter semantics는 이번 범위에서 제외하고, counter는 기존 hardware counting rule로만 증가한다. 이는 full privileged-architecture compliance를 주장하는 동작이 아니라 이번 cleanup baseline의 project policy다.
-
-이 write-ignore 예외는 **지원되는 read-only project CSR**인 위 counter CSR들에만 적용한다. Arbitrary unsupported CSR address까지 legal하게 만드는 것이 아니며, unsupported CSR와 rejected CSR encoding은 cleanup legality contract에 따라 illegal-instruction 대상으로 남는다.
-
----
+Counter의 writable semantics와 mie/mip, MIE/MPIE는 구현하지 않는다. mcycle은 enabled cycle마다, minstret은 성공 commit마다 증가하며 real NOP와 accepted MRET는 한 번 센다.
 
 ## 18. Exception Detector
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 ID/EX/MEM candidate priority:
 
@@ -480,6 +377,8 @@ SYSTEM `funct3=000` decode에서 EBREAK를 exact canonical encoding이 아니라
 ---
 
 ## 19. Trap Controller / 승인된 cleanup 방향
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 현재 multi-cycle FSM은 대략:
 
@@ -705,6 +604,8 @@ Cleanup regression은 최소 다음을 포함해야 한다.
 ---
 
 ## 25. Cleanup Targets
+
+> **HISTORICAL — cleanup 전 기록:** 이 절의 미구현/결함/목표 시제는 당시 상태다. 현행 동작은 위 현행 계약 및 후속 수용 절을 따른다. 기존 ID의 의무는 삭제하거나 약화하지 않는다.
 
 ```text
 High

@@ -8,6 +8,14 @@
 >
 > **상위 명세:** `soc_architecture.md`, `memory_map.md`, `apb_subsystem.md`, `reset_clock.md`, `interrupt_architecture.md`, `board_io_architecture.md`.
 
+## 현행 Legacy 계약과 보증 범위
+
+Part II는 구현된 P04 동작이며 미구현 target이 아니다. Baseline은 16 pin(generic RTL parameter GPIO_WIDTH=16)이고 DATA_IN/DATA_OUT/DIR/IRQ_ENABLE/IRQ_TYPE/IRQ_POLARITY/IRQ_BOTH_EDGE/IRQ_PENDING은 +0x00..1c에 4 간격이다. DIR=0은 input/Hi-Z, DIR=1은 DATA_OUT drive다. Input readback은 2FF 동기화다. Reset은 output/direction/IRQ 설정·pending을 지우며 edge warm-up/rearming이 있다. Input pin만 effective pending에 참여하며 edge는 sticky/set-dominant W1C, level pending은 physical active level 동안 유지된다. gpio_irq는 enabled effective pending OR이며 CPU에 연결되지 않는다. Selected direct APB 연결도 slot 소유권을 유지해야 한다. Local decode는 전체 16-bit offset을 검사하며 상위 slot bit는 검사하지 않는다. Driver mask는 16-bit이며 새 폭은 수정·재검증이 필요하다.
+
+기존 requirement/AC ID와 동결 의도를 유지한다. 아래 현행 계약과 충돌하는 cleanup 전 설명은 역사적 기록이며 새 구현 요구가 아니다. 상태는 읽기 전용 tracker의 기존 수용 범위를 인용하며 이 정합화로 승격하지 않는다.
+
+추적: [APB_GPIO.v](../../rtl/peripherals/APB_GPIO.v); [gpio.c](../../firmware/drivers/gpio.c); [tb_p04_boardio.sv](../../verification/directed/bus/tb_p04_boardio.sv); [gpio_host.c](../../verification/selected_ip/gpio_host.c).
+
 ## 1. 목적
 
 이 문서는 두 역할을 명확히 분리한다.

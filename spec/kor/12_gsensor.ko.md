@@ -6,6 +6,14 @@
 >
 > **상위 명세:** `soc_architecture.md`, `memory_map.md`, `apb_subsystem.md`, `reset_clock.md`, `interrupt_architecture.md`.
 
+## 현행 계약과 source/evidence 경계
+
+현행 P09B production path는 PCLK-only, slot 3의 0x4003_0000이며 전체 주소 exact decode와 SETUP-sampled SNAP_CTRL data를 사용한다. E0→E1 publication, wrap 후 valid zero를 포함한 modulo-32 sequence, pre-edge coherent CAPTURE, RELEASE까지의 HOLD 불변성, 같은 edge 새 publication의 LIVE-valid clear 우선순위를 유지한다. Sequence 증가는 완료된 digital burst를 식별하며 반드시 새 physical sensor conversion은 아니다. 중간 LIVE generation은 덮어쓸 수 있다.
+
+Owner-approved P09B scoped engineering closure의 과거 source는 `7cc7956954bb07f78c83c28d5cc50f736b95de9d`다. 구현, directed digital/FW/CPU 및 source 통합을 포함하고 전체 physical sensor characterization, board acceptance, external timing은 명시적으로 제외한다. Display demo는 정량 calibration/IRQ pin timing 증명이 아니다. GS-001/003/004/005, CDC-002, FW-008은 기록된 IN_PROGRESS 범위를 유지하며 SPI-002와 STA-002는 별도다. PLIC route나 general SPI MMIO를 추가하지 않는다.
+
+추적: [APB_GSENSOR_MB.v](../../rtl/peripherals/gsensor/APB_GSENSOR_MB.v); [spi_ee_config.v](../../rtl/peripherals/gsensor/spi_ee_config.v); [gsensor.c](../../firmware/drivers/gsensor.c); [tb_p09_gsensor_cpu_e2e.sv](../../verification/directed/bus/tb_p09_gsensor_cpu_e2e.sv).
+
 ## 1. 목적
 
 이 문서는 활성 DE10-Lite FPGA 베이스라인의 온보드 ADXL345 가속도계 / G-sensor 서브시스템을 정의한다.
@@ -250,12 +258,7 @@ gsensor_status_t gsensor_read_sample(gsensor_sample_t *out);
 
 ## 11. 검증 상태
 
-P09B 기능 구현, 디지털 검증, 실제 RV32I CPU 통합, Quartus/TimeQuest 타이밍 및 실질적인 FPGA 보드 동작은 **완료 및 통합됨**:
-
-- **디지털 검증:** Mode 3 SPI 파형, 12-write 초기화 시퀀스, 56-bit 버스트 읽기, LIVE/HOLD 원자성, 단일 대기 스케줄러 슬롯, APB 레지스터 디코드 및 오류 처리가 모든 자체 검증 회귀 테스트를 통과함.
-- **CPU 통합:** RV32I CPU 하네스 및 드라이버 mock-MMIO 테스트에서 엔드투엔드 CAPTURE/RELEASE 폴링 및 트랩 처리를 검증함.
-- **타이밍 종결:** slow/fast 온도 코너 전반에서 내부 50 MHz PCLK 타이밍이 양의 setup/hold 마진으로 통과함.
-- **보드 동작 확인:** 디스플레이 애플리케이션을 통해 실질적인 FPGA 보드 동작 확인 (사진 `SEQ=0x1450`, 사용자 관측 `SEQ≈0x7C00`, 동적 기울임 반응).
+P09B 구현/source 통합과 directed digital/FW/CPU 범위는 과거 source `7cc7956954bb07f78c83c28d5cc50f736b95de9d`의 OWNER_APPROVED_SCOPED_CLOSURE다. 초기화/SPI, snapshot atomicity, APB fault, driver lifecycle의 실행된 case를 포함한다. 과거 internal 50 MHz fit과 display demo는 각각의 source/관찰 범위다. Full board acceptance, physical INT1/SPI waveform characterization, calibration, exhaustive reset-negative 종결은 명시적으로 제외됐다. §12의 residual tracker 상태는 유지한다.
 
 ## 12. 잔여 종결 갭
 

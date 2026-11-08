@@ -10,54 +10,48 @@
 
 > **Phase 4A-3A reading rule:** Earlier `PSEL[7:0]`, no-`PSLVERR`, and zero/OKAY passages reconstruct the pre-cleanup baseline. The final Phase 4A-3A APB status paragraph governs bridge/fault behavior at that milestone; P04 subsequently activated SW/LED slots 8/9. A4 UART cleanup remains open.
 
+## Current Legacy contract and assurance boundary
+
+The current bridge has IDLE/SETUP/ACCESS/ERROR_FINAL states, `PSEL[15:0]`, `HSIZE`, global `HREADY_IN` and completing `PSLVERR`. Canonical aligned word requests select slots 0..9; invalid requests select no real peripheral. SETUP holds HREADY low; successful ACCESS completes on PREADY. Address/control remain captured through waits; SETUP PWDATA comes from matching MEM HWDATA and is registered for ACCESS. UART DATA busy writes may deassert PREADY, so the old all-slaves-always-ready statement is historical. Completing PSLVERR or bridge validation failure returns two-cycle ERROR, and ERROR_FINAL accepts no next address. No PSTRB or universal RO/WO error policy is introduced.
+
+Existing requirement/AC IDs and frozen intent are preserved. Pre-cleanup descriptions that conflict with this current contract are historical, not new implementation requirements. Status cites the existing accepted scope in the read-only tracker; this reconciliation does not promote it.
+
+Traceability: [AHB_APB_bridge.v](../rtl/bus/AHB_APB_bridge.v); [AMBA_SoC_TOP.v](../rtl/soc/AMBA_SoC_TOP.v); [tb_ahb_apb_bridge_fault.sv](../verification/directed/bus/tb_ahb_apb_bridge_fault.sv); [tb_p07b_uart_ahb_wait.sv](../verification/directed/uart/tb_p07b_uart_ahb_wait.sv).
+
 ## 1. Purpose
 
-This document defines the active APB subsystem behind `AHB_APB_bridge` and records the approved target expansion that will be implemented during baseline cleanup.
+This document defines the active APB subsystem behind `AHB_APB_bridge` and records the implemented 16-slot expansion and its historical migration requirements.
 
 It covers:
 
 - AHB-to-APB transaction conversion,
 - bridge state-machine timing,
 - APB clock/reset relationship,
-- baseline `PSEL[7:0]` slot allocation,
+- current `PSEL[15:0]` slot allocation,
 - `PRDATA` / `PREADY` multiplexing,
 - read/write completion and wait-state behavior,
 - access-width and error limitations,
-- the approved future expansion to `PSEL[15:0]`.
+- historical expansion milestones and separately open acceptance gates.
 
 The active implementation is APB-style and shall not be described as complete AMBA compliance.
 
 ## 2. Active Baseline Topology
 
-```text
-CPU
- |
- v
-AHB-style fabric
- |
- v
-AHB_APB_bridge
- |
- | PADDR / PWRITE / PSEL[7:0]
- | PENABLE / PWDATA
- v
-+------------------------------------------+
-| Active APB subsystem                     |
-|                                          |
-| PSEL[0] UART0 / LoRa                     |
-| PSEL[1] legacy GPIO                      |
-| PSEL[2] Timer                            |
-| PSEL[3] G-sensor                         |
-| PSEL[4] AES-GCM                          |
-| PSEL[5] ADC / Joystick Policy            |
-| PSEL[6] UART1 / PC                       |
-| PSEL[7] HEX Display                      |
-|                                          |
-| PRDATA mux + PREADY mux                  |
-+------------------------------------------+
-```
+One AHB→APB master serves the full-production allocation below. The P14 selected fixture exposes only 0,1,2,4,6.
 
-There is one APB master: the AHB-to-APB bridge. No APB arbiter or second APB master exists.
+| Slot | Base | Peripheral |
+|---:|---:|---|
+| 0 | `0x4000_0000` | UART0 / LoRa |
+| 1 | `0x4001_0000` | 16-pin true GPIO |
+| 2 | `0x4002_0000` | Timer |
+| 3 | `0x4003_0000` | G-sensor |
+| 4 | `0x4004_0000` | AES-GCM v2 |
+| 5 | `0x4005_0000` | ADC v2 / Joystick Policy |
+| 6 | `0x4006_0000` | UART1 / PC |
+| 7 | `0x4007_0000` | HEX |
+| 8 | `0x4008_0000` | SW |
+| 9 | `0x4009_0000` | LED |
+| 10..15 | `0x400A_0000..0x400F_0000` | Reserved / ERROR |
 
 ## 3. Clock and Reset
 
@@ -70,157 +64,40 @@ In the baseline both are 50 MHz, so the AHB/APB boundary is protocol conversion,
 
 ## 4. Bridge Interface
 
-### 4.1 AHB side
-
-Inputs:
+Current interface:
 
 ```text
-HADDR[31:0]
-HWRITE
-HTRANS[1:0]
-HWDATA[31:0]
-HSEL
+AHB: HADDR[31:0], HWRITE, HTRANS[1:0], HSIZE[2:0], HWDATA[31:0],
+     HSEL, HREADY_IN -> HRDATA[31:0], HREADY, HRESP[1:0]
+APB: PCLK=HCLK, PRESETn=HRESETn, PADDR[31:0], PWRITE, PENABLE,
+     PSEL[15:0], PWDATA[31:0] <- PRDATA[31:0], PREADY, PSLVERR
 ```
-
-Outputs:
-
-```text
-HRDATA[31:0]
-HREADY
-HRESP[1:0] = 2'b00
-```
-
-The bridge does not receive `HSIZE`.
-
-### 4.2 APB side
-
-Active baseline signals:
-
-```text
-PCLK
-PRESETn
-PADDR[31:0]
-PWRITE
-PENABLE
-PSEL[7:0]
-PWDATA[31:0]
-PRDATA[31:0]
-PREADY
-```
-
-Not implemented:
-
-```text
-PSTRB
-PSLVERR
-PPROT
-```
+No PSTRB/PPROT is added; the aligned 32-bit MMIO contract remains.
 
 ## 5. Request Recognition and State Machine
 
-A request is accepted when:
-
-```text
-HSEL = 1
-and
-HTRANS = NONSEQ or SEQ
-```
-
-The bridge uses:
-
-```text
-IDLE -> SETUP -> ACCESS
-```
-
-Behavior:
-
-```text
-IDLE
-  valid request -> SETUP
-
-SETUP
-  -> ACCESS
-
-ACCESS
-  PREADY=0 -> stay ACCESS
-  PREADY=1 + next request -> SETUP
-  PREADY=1 + no next request -> IDLE
-```
+Accept addresses only with global HREADY_IN && HSEL && HTRANS[1], in IDLE or successful completing ACCESS. Normal sequencing is IDLE→SETUP→ACCESS; PREADY-low retains ACCESS. Invalid requests or completing PSLVERR take ACCESS(first ERROR)→ERROR_FINAL(final ERROR)→IDLE. ERROR_FINAL accepts no next address.
 
 ## 6. State Outputs
 
-| State | PSEL | PENABLE | AHB HREADY |
-|---|---|---|---|
-| IDLE | 0 | 0 | 1 |
-| SETUP | decoded one-hot | 0 | 0 |
-| ACCESS | decoded one-hot | 1 | `PREADY` |
+| State / result | PSEL | PENABLE | HREADY | HRESP |
+|---|---|---:|---:|---|
+| IDLE | 0 | 0 | 1 | 00 |
+| SETUP | valid one-hot or 0 | 0 | 0 | 00 |
+| ACCESS, waiting | valid one-hot | 1 | 0 | 00 |
+| ACCESS, success | valid one-hot | 1 | 1 | 00 |
+| ACCESS, rejected | valid one-hot for completing PSLVERR; 0 for invalid request | 1 | 0 | 01 |
+| ERROR_FINAL | 0 | 0 | 1 | 01 |
 
-Even an always-ready APB peripheral therefore causes a mandatory SETUP stall from the AHB/CPU perspective.
+Always-ready slaves still incur SETUP. Rejected transactions shall have no peripheral side effect.
 
 ## 7. Active Baseline Slot Decode
 
-The active bridge checks:
-
-```text
-addr[31:28] == 4'h4
-```
-
-then uses:
-
-```text
-addr[19:16]
-```
-
-for slot selection, but only produces `PSEL[7:0]`.
-
-Active canonical slots:
-
-| Slot | Base | Peripheral |
-|---:|---:|---|
-| 0 | `0x4000_0000` | UART0 / LoRa |
-| 1 | `0x4001_0000` | legacy GPIO |
-| 2 | `0x4002_0000` | Timer |
-| 3 | `0x4003_0000` | G-sensor |
-| 4 | `0x4004_0000` | AES-GCM |
-| 5 | `0x4005_0000` | ADC / Joystick Policy |
-| 6 | `0x4006_0000` | UART1 / PC |
-| 7 | `0x4007_0000` | HEX Display |
-
-Address bits `[27:20]` are ignored by the active decoder, so the same selections can alias elsewhere in `0x4xxx_xxxx`. These aliases are non-canonical.
-
-For slot values 8 through 15 the active decoder produces no select.
+Validate full canonical `addr[31:20]==0x400`, slot `addr[19:16]`, aligned word size and exact offset allowlist together. Reserved slots 10..15, upper aliases and invalid offsets produce ERROR with PSEL=0. Allocation is the current table above.
 
 ## 8. Active Baseline Response Multiplexing
 
-### 8.1 PRDATA
-
-```text
-PSEL[0] -> PRDATA_UART0
-PSEL[1] -> PRDATA_GPIO
-PSEL[2] -> PRDATA_TIMER
-PSEL[3] -> PRDATA_GSENSOR
-PSEL[4] -> PRDATA_AES
-PSEL[5] -> PRDATA_JOYSTICK
-PSEL[6] -> PRDATA_UART1
-PSEL[7] -> PRDATA_HEX
-otherwise -> 0
-```
-
-### 8.2 PREADY
-
-```text
-PSEL[0] -> UART0_READY
-PSEL[1] -> GPIO_READY
-PSEL[2] -> TIMER_READY
-PSEL[3] -> GSENSOR_READY
-PSEL[4] -> AES_READY
-PSEL[5] -> JOYSTICK_READY
-PSEL[6] -> UART1_READY
-PSEL[7] -> HEX_READY
-otherwise -> 1
-```
-
-All active baseline APB slaves currently use `PREADY=1`.
+PRDATA/PREADY select the response of PSEL[0..9]. Default PRDATA=0/PREADY=1 does not accept a reserved request. UART busy DATA writes can hold PREADY low. Completing G-sensor/ADC PSLVERR reaches the bridge; each slave suppresses effects of its rejected access.
 
 ## 9. Read Transaction
 
@@ -247,11 +124,9 @@ AHB store accepted
  -> PREADY=1 completes transfer
 ```
 
-## 11. PWDATA Setup-Phase Deviation
+## 11. Current PWDATA SETUP / ACCESS
 
-The active bridge does not guarantee the new write data throughout the complete SETUP phase. Correct `PWDATA` is guaranteed in ACCESS because it is registered at the edge ending SETUP.
-
-Current slaves work because they commit only in ACCESS, but this is a protocol-quality gap and shall be corrected during cleanup before claiming generic APB compliance.
+In SETUP, PWDATA is the matching MEM HWDATA; the SETUP-ending edge captures wdata_reg for ACCESS and any waits. Address/control come from the accepted request registers. The former SETUP data gap is historical, not an outstanding implementation defect. This project timing contract does not establish generic APB compliance.
 
 ## 12. Back-to-Back Transfers
 
@@ -281,9 +156,9 @@ Invalid/unmapped APB accesses now error before any real peripheral select or sid
 
 ## 15. Peripheral Register Mirroring
 
-Many active peripherals decode only a small subset of low `PADDR` bits, so registers can physically mirror inside a 64-KiB slot. Only exact offsets defined by `memory_map.md` and the peripheral spec are canonical.
+The bridge rejects noncanonical addresses before PSEL. UART/Timer/GPIO compare full 16-bit local offsets; AES v2 compares full canonical 32-bit addresses. Direct-APB reserved behavior and upper-slot ownership are separate. Global APB-005 remains IN_PROGRESS; completed sub-scopes do not promote the whole row.
 
-## 16. Approved Target Expansion — Not Yet Active
+## 16. Historical Approved Expansion — Implemented by P04
 
 > **HISTORICAL PHASE 4A-3A MIGRATION NOTE:** Phase 4A-3A widened bridge/top selection to `PSEL[15:0]`, while slots 8/9 still errored until P04. P04 now routes slots 8/9 to SW/LED; 10–15 remain reserved/error.
 
@@ -349,7 +224,7 @@ The existing GPIO slot is retained; only its board-specific SW/LED wiring is rem
 
 PLIC source IDs are not defined here.
 
-## 17. Baseline Cleanup Requirements
+## 17. Historical Baseline Cleanup Requirements
 
 The consolidated cleanup pass shall include at minimum:
 
@@ -368,14 +243,14 @@ Detailed board-I/O sequencing is owned by `board_io_architecture.md`.
 
 ## 18. Baseline vs Target Invariants
 
-### Active baseline
+### Historical pre-cleanup baseline
 
 - `PSEL[7:0]` only.
 - Eight active slots at `0x4000_0000`–`0x4007_0000`.
 - Slot 1 is legacy pseudo-GPIO tied to SW/LED roles.
 - No SW or LED dedicated APB peripheral exists.
 
-### Approved target
+### Current implemented topology
 
 - `PSEL[15:0]`.
 - Existing slot addresses 0–7 unchanged.
@@ -384,9 +259,9 @@ Detailed board-I/O sequencing is owned by `board_io_architecture.md`.
 - Slot 9 = LED at `0x4009_0000`.
 - Slots 10–15 reserved.
 
-The target section is a migration contract until the corresponding RTL and verification are complete.
+The migration above is implemented; separate board/physical and global cleanup requirements retain their tracker status.
 
-## P11 ADC Slot-5 Contract — Specification Freeze (In-progress)
+## P11 ADC Slot-5 Contract — Implemented / Bounded Acceptance
 
 P11 retains slot 5 at `0x4005_0000` but changes its architectural identity from the historical joystick-owned wrapper to `APB_ADC_Controller`, a generic ADC MMIO slave with an optional `Joystick_Policy` child.
 
@@ -397,19 +272,17 @@ The slot-5 bridge/peripheral contract is:
 - exact full local-offset validation, not `PADDR[7:2]` mirroring;
 - bridge allowlist updated through the highest implemented v2 register `+0x64`, admitting only the exact offsets listed in `01_memory_map.md` / `15_adc_joystick.md`;
 - CH3..CH6 raw offsets are valid RO reserved-channel addresses and return zero in the baseline;
-- `+0x50..+0x5C`, `+0x68..+0xFC`, wrong-direction accesses, malformed control writes, misalignment, and unsupported sizes return `PSLVERR`, propagated as the existing two-cycle AHB ERROR;
+- CPU address/offset/size/alignment errors are rejected by the bridge before ADC PSEL; local reserved offsets (`+0x50..+0x5C`, `+0x68..+0xFC`), wrong direction and malformed control produce completing `PSLVERR`, propagated as the existing two-cycle AHB ERROR. The local ADC interface has no HSIZE/PSTRB;
 - rejected accesses create no command, capture, calibration, counter, or error-clear side effect;
 - `CAPTURE` with no new frame is a valid command with OKAY/no-op semantics, not `PSLVERR`.
 
-The P11 implementation must add the ADC slave `PSLVERR` path into the existing bridge error mux. The former `PRDATA_JOYSTICK` / `JOYSTICK_READY` signal names may be renamed to ADC-oriented names during implementation; the architectural slot number does not change.
-
-This section freezes the target protocol. It does not claim the P11 RTL has been implemented or verified.
+The ADC completing `PSLVERR` path is implemented in the production response mux. The historical `PRDATA_JOYSTICK` / `JOYSTICK_READY` naming does not change slot ownership. P11 acceptance and the source-observed upper-zero local decode boundary are defined in [15_adc_joystick.md](15_adc_joystick.md); no additional CPU alias, generic rebase support or global APB-005 closure is inferred.
 
 ## Phase 4A-2 Approved APB Error and UART Target (APB fault portion active Phase 4A-3A)
 
 A2 requires canonical APB aperture, complete slot and full register-offset validation before any real peripheral side effect. Reserved slots, aliases, invalid offsets and unsupported sizes select an internal/default error responder. `PSLVERR` is meaningful only on a completing ACCESS; the bridge converts it to project two-cycle AHB ERROR (`HRESP=01`, `HREADY=0` then `1`). The pre-cleanup zero/OKAY behavior was an implementation gap closed for this bus fault scope. Under A4, a busy UART_DATA write holds `PREADY=0` until one byte can be accepted exactly once; other UART registers do not stall solely because TX is busy. No UART-specific hardware timeout is introduced. Unsupported/unsafe baud settings must not become active.
 
-**Phase 4A-3A implementation (historical checkpoint):** the bridge/top use `PSEL[15:0]`, validate the full slot/register offset and aligned word access before asserting a real peripheral select, and propagate completing `PSLVERR` as two-cycle AHB ERROR. SETUP request controls are valid and stable through ACCESS, including waits. At that checkpoint slots 8/9 were unimplemented/error; P04 subsequently activated SW/LED at slots 8/9 and verified the complete 16-slot selection behavior. Slots 10–15 remain reserved/error. A4 UART busy-write behavior remains cleanup work.
+**Phase 4A-3A implementation (historical checkpoint):** the bridge/top use `PSEL[15:0]`, validate the full slot/register offset and aligned word access before asserting a real peripheral select, and propagate completing `PSLVERR` as two-cycle AHB ERROR. SETUP request controls are valid and stable through ACCESS, including waits. At that checkpoint slots 8/9 were unimplemented/error; P04 subsequently activated SW/LED at slots 8/9 and verified the complete 16-slot selection behavior. Slots 10–15 remain reserved/error. At that historical checkpoint A4 was pending; the current accepted P07B digital UART busy-write contract is [09_uart.md](09_uart.md). Physical UART-005 remains separate.
 
 ## P09B slot-3 contract — paired publication update
 

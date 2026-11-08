@@ -6,6 +6,12 @@
 >
 > **Parent specifications:** `soc_architecture.md`, `reset_clock.md`, `gsensor.md`.
 
+## Current contract and source/evidence boundary
+
+“Private SPI” means the internal fixed-function sensor transport, not a private-repository or generated-vendor implementation. The two active project RTL files implement Mode 3, MSB-first 16-bit initialization writes (12 entries, POWER_CTL last), 56-bit 0xF2 reads, registered alternating 12/13-PCLK SCLK halves, and INT1/1,500,000-cycle fallback arbitration. No active spi_pll/reset_delay or software-programmable SPI aperture is implied. SPI-001 digital acceptance and historical internal fit evidence do not establish physical ADXL345 setup/hold, waveform calibration or STA-002 closure; SPI-002 remains IN_PROGRESS.
+
+Traceability: [spi_ee_config.v](../rtl/peripherals/gsensor/spi_ee_config.v); [README.md](../rtl/peripherals/gsensor/README.md); [tb_gsensor_single_pclk.sv](../verification/directed/models/gsensor/tb_gsensor_single_pclk.sv).
+
 ## 1. Purpose
 
 This document defines the private SPI engine in the active FPGA baseline.

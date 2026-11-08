@@ -8,11 +8,20 @@
 >
 > **Related specifications:** `memory_subsystem.md`, `cpu_interface.md`, `ahb_fabric.md`, `interrupt_architecture.md`, `firmware_contract.md`, `baseline_cleanup.md`.
 
-> **Phase 4A-3A reading rule:** Earlier missing-access-fault descriptions reconstruct the pre-cleanup CPU. The final access-fault section records the verified load/store bus-fault sub-scope; it does not close general precise retirement or other `TRAP-003` dependencies.
 
 > **Current C1a reading rule:** Sections 20.1 and 20.3 describe the integrated CPU/bus structure and bounded verification status. Earlier pre-cleanup decode/ISA/CSR/trap descriptions and the historical list in Section 27 do not override subsequent frozen contracts or the live requirement status in `baseline_cleanup.md`. C1a changes combinational topology, not the logical function or architectural contract.
 >
 > **Store payload/mask contract status:** The integrated implementation has the response-independent MEM payload/mask path required by Section 20.1. Source-bound simulation and structural checks support that sub-scope; public derivative evidence reconciliation and overall acceptance remain separate. This is not whole-SoC timing, vendor BRAM, CDC or board closure.
+
+## Current Legacy contract and assurance boundary
+
+Current RV32I five-stage behavior includes deterministic legality, rs2[4:0] register shifts, JALR bit-0 clearing followed by IALIGN32 checking, taken-branch misalignment, precise cause/PC ownership, legal-no-op FENCE/FENCE.I, EBREAK to mtvec and exact canonical-mepc MRET. mcycle increments on enabled cycles including bus stalls; minstret increments once per successful commit, including real NOP and accepted MRET, never bubbles, held tokens or faulting instructions. Recognized counter writes are legal write-ignore while normal counting continues. Machine IDs are 0/0/0x0001_0000/0; unsupported CSR addresses are illegal.
+
+CPU-001 VERIFIED is only width/naming; CPU-003..009 and TRAP-001..004 retain their earlier bounded acceptance. P14 LoadExtender combinational cleanup removed two inferred latches with 262144 binary oracle cases; it does not establish universal X/Z equivalence or clean lint. x1..x31 remain unspecified after system reset (CPU-010 OPEN). The reset mtvec window, vendor-memory assumptions and absent external IRQ architecture remain unchanged. Deferred DMA/AXI/coherency and PLIC/ACLINT/dual-hart behavior require new owning contracts.
+
+Existing requirement/AC IDs and frozen intent are preserved. Pre-cleanup descriptions that conflict with this current contract are historical, not new implementation requirements. Status cites the existing accepted scope in the read-only tracker; this reconciliation does not promote it.
+
+Traceability: [RV32I46F_5SP_MMIO.v](../rtl/core/v/top/RV32I46F_5SP_MMIO.v); [ALU.v](../rtl/core/v/ex_stage/ALU.v); [CSR_File.v](../rtl/core/v/id_stage/CSR_File.v); [LoadExtender.v](../rtl/core/v/mem_stage/LoadExtender.v); [tb_load_extender.sv](../verification/selected_ip/tb_load_extender.sv).
 
 ## 1. Purpose and Scope
 
@@ -249,18 +258,7 @@ Unknown opcodes receive zeroed decoded fields but retain their raw opcode value 
 
 ### 7.3 Current legality limitation
 
-The active decoder/control path does not fully validate reserved/illegal encodings. Examples include:
-
-- unsupported opcode encodings becoming inert controls instead of raising illegal-instruction,
-- JALR not enforcing `funct3=000`,
-- R-type legality not checked against complete `funct7`,
-- shift-immediate legality not checked against all required upper immediate bits,
-- unsupported LOAD/STORE `funct3` values still being able to request a bus transaction,
-- unsupported CSR accesses not generating illegal-instruction.
-
-This behavior is not an approved future ISA policy. Cleanup shall add deterministic legality checks and illegal-instruction handling.
-
----
+The active decoder validates instruction opcode/funct3/funct7/shift/SYSTEM/CSR encodings, raises cause 2 for rejected encodings/unsupported CSR addresses and suppresses their architectural/bus effects. The recognized machine-counter write-ignore exception remains legal. CPU-009 is accepted in the existing directed scope; this is not exhaustive ISA compliance.
 
 ## 8. Register File
 
@@ -314,17 +312,7 @@ The datapath provides the ordinary RV32I integer ALU families including ADD/SUB,
 
 ### 9.2 Register-shift amount defect
 
-Immediate shifts supply only the low five shift-amount bits. Register-register shifts currently pass the complete 32-bit rs2 value to Verilog shift operators:
-
-```text
-src_A << src_B
-src_A >> src_B
-$signed(src_A) >>> src_B
-```
-
-RV32 semantics require register shift amount = `rs2[4:0]`. Cleanup shall mask register-based shift amount to five bits and test rs2 values 0, 31, 32, 33, 63, and larger values.
-
----
+Register SLL/SRL/SRA use rs2[4:0]; immediate shifts use the encoded five-bit shift amount. CPU-003 accepted directed cases cover 0/31/32/33/63/0xFFFF_FFFF. The earlier full-width-shift defect is historical.
 
 ## 10. Branch and Jump Execution
 
@@ -344,27 +332,11 @@ JAL computes `EX_pc + J-immediate` in EX and writes `EX_pc + 4` to rd at WB.
 
 ### 10.3 JALR baseline deviation and cleanup target
 
-The active JALR target is the raw EX ALU result:
-
-```text
-rs1 + immediate
-```
-
-and the exception detector tests the raw low two bits for zero.
-
-Cleanup shall implement architectural RV32I behavior:
-
-```text
-target = (rs1 + immediate) & ~1
-```
-
-before final instruction-alignment checking and redirection.
+The active JALR redirect is `(rs1 + immediate) & ~1`. Clear bit 0 before final IALIGN=32 checking; raw targets ending in 01 may become aligned, while canonical bit1 still causes target misalignment. CPU-004 accepted scope preserves this policy.
 
 ### 10.4 Branch-target alignment gap
 
-Instruction-address misalignment detection exists for JAL/JALR, but the branch-target check is commented out. Cleanup shall detect taken-branch target misalignment for the active IALIGN=32 policy.
-
----
+A taken branch target that violates IALIGN=32 raises cause 0 with the owning instruction PC and no erroneous redirect/retirement. This is implemented and included in the accepted TRAP-003 scope; a not-taken branch does not take a target-alignment exception.
 
 ## 11. Forwarding Architecture
 
@@ -559,27 +531,13 @@ Recognized CSR access enters a small `csr_processing` sequence. The initial acce
 
 ### 17.3 Current readable CSR set
 
-| Address | CSR | Active baseline behavior |
-|---:|---|---|
-| `0xB00` | `mcycle` | low 32 bits, read |
-| `0xB80` | `mcycleh` | high 32 bits, read |
-| `0xB02` | `minstret` | low 32 bits, read |
-| `0xB82` | `minstreth` | high 32 bits, read |
-| `0xF11` | `mvendorid` | fixed inherited ASCII-like value |
-| `0xF12` | `marchid` | fixed inherited ASCII-like value |
-| `0xF13` | `mimpid` | fixed inherited ASCII-like value |
-| `0xF14` | `mhartid` | fixed inherited ASCII-like value |
-| `0x300` | `mstatus` | fixed `0x0000_1800` |
-| `0x301` | `misa` | fixed RV32I identity |
-| `0x305` | `mtvec` | read/write |
-| `0x341` | `mepc` | read/write |
-| `0x342` | `mcause` | read/write |
-
-Only `mtvec`, `mepc`, and `mcause` are writable in the active implementation. Unsupported CSR addresses return zero and do not raise illegal-instruction.
+Current readable CSRs are mcycle/mcycleh/minstret/minstreth (0xB00/0xB80/0xB02/0xB82), the machine IDs below, mstatus=0x0000_1800, misa=0x4000_0100, and mtvec/mepc/mcause at 0x305/0x341/0x342. Only the latter three have writable state. Recognized counter writes are legal no-effect while counting continues; unsupported CSR addresses and rejected writes/encodings trap under CPU-009. mepc[1:0] is stored/read as zero.
 
 ### 17.4 Approved cleanup machine-identification CSR policy
 
-The inherited/upstream-oriented fixed identification values shall be replaced by the following cleanup-target values:
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
+The approved identities below are implemented and accepted within CPU-006 scope:
 
 | Address | CSR | Approved cleanup value | Policy meaning |
 |---:|---|---:|---|
@@ -588,7 +546,7 @@ The inherited/upstream-oriented fixed identification values shall be replaced by
 | `0xF13` | `mimpid` | `0x0001_0000` | Project-owned implementation revision, initially encoding cleanup CPU version 1.0.0. |
 | `0xF14` | `mhartid` | `0x0000_0000` | The current SoC contains one hart and assigns it hart ID 0. |
 
-These are cleanup-target values, not evidence that the active baseline RTL already returns them.
+These are current implemented values; accepted evidence scope is recorded in the tracker.
 
 `mimpid` is the project-owned revision identifier. If the CPU implementation meaningfully changes after this cleanup milestone, its versioning policy shall be updated explicitly rather than silently reusing `0x0001_0000` forever.
 
@@ -624,6 +582,8 @@ Those features remain owned by the future CPU-interrupt/PLIC contract.
 
 ## 18. Synchronous Exception Detection
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 `ExceptionDetector` evaluates ID, EX, and MEM candidates with combinational priority:
 
 ```text
@@ -644,6 +604,8 @@ For SYSTEM `funct3=000`, EBREAK is classified through an immediate-bit test rath
 ---
 
 ## 19. Trap Controller Baseline and Approved Cleanup Direction
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 The current trap controller is a multi-cycle pre-trap-handling FSM with states including:
 
@@ -925,6 +887,8 @@ Cleanup-grade CPU regression shall cover at minimum:
 ---
 
 ## 25. Baseline Cleanup Targets
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 | Area | Priority | Required direction |
 |---|---|---|

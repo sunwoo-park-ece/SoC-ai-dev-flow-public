@@ -2,6 +2,14 @@
 
 > **Status: PROPOSED / NOT_ACCEPTED.** English canonical; [Korean companion](kor/physical_assurance_limitations.ko.md). This draft is not active exception authority, device qualification or release acceptance.
 
+## Current contract and source/evidence boundary
+
+This register and exception process remain PROPOSED / NOT_ACCEPTED. C08-PHYS-001 is still NOT_PROVEN / UNDETERMINABLE and its essential R1/R2 dependencies cannot be waived by a supplemental claim or internal planning checkpoint. Source presence of diagnostics, sampled zero flags, zero fitted SCCs and Owner-observed normal restart do not establish capture/ordering/bitcell guarantees. No new limitation ID, accepted exception or gate change is created here.
+
+Other retained source-bound limits are AES D08 integrated natural overflow/concurrent or late-success NOT_PROVEN; vendor BRAM configuration/collision assumptions; SPI/physical UART/GPIO/board mapping and STA-002 external I/O/electrical gaps. Accepted P10 HEX and P11 ADC observations keep their own source/test/use envelope; P12 board-functional acceptance excludes hazardous lock-loss/atomicity claims. P14 selective cleanup is complete only within its selected digital envelope; Clean Baseline remains NOT_RELEASED. Rehosting selected IP does not inherit physical qualification.
+
+Traceability: [pre_fetch_AHB_VRAM_DUAL_BUFFER.v](../rtl/video/vram/pre_fetch_AHB_VRAM_DUAL_BUFFER.v); [reset_release_sync.v](../rtl/soc/reset_release_sync.v); [README.md](../verification/selected_ip/README.md); [summary.md](../reports/evidence/p10-hex-s6/summary.md).
+
 ## Scope and authority
 
 This cross-module register owns limitation records and their proposed claim-disposition process. Owning subsystem specifications retain behavior, acceptance criteria and essential device assumptions; [baseline cleanup §3](baseline_cleanup.md#3-cleanup-exit-gate) retains milestone gates. A limitation record cannot change either authority.

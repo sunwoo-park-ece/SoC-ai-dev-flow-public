@@ -8,6 +8,14 @@
 >
 > **Parent specifications:** `soc_architecture.md`, `memory_map.md`, `apb_subsystem.md`, `reset_clock.md`, `interrupt_architecture.md`, `gpio.md`, `sw.md`, `led.md`.
 
+## Current Legacy contract and assurance boundary
+
+The P04 topology is current: slot1 true GPIO owns JP1 GPIO_IO[15:0], slot8 SW owns SW[9:0] and local sw_irq, slot9 LED owns LEDR[9:0]. The pre-P04 SW/LED pseudo-GPIO composition is historical. gpio_irq/sw_irq remain local, unnumbered sources with no CPU routing. Pin/OE acceptance and BOARDIO-002 do not close STA-002 or automatically qualify a new board. P14 selected composition excludes SW/LED and all DE10-Lite pin binding; this is a test dependency boundary, not deletion of production slots.
+
+Existing requirement/AC IDs and frozen intent are preserved. Pre-cleanup descriptions that conflict with this current contract are historical, not new implementation requirements. Status cites the existing accepted scope in the read-only tracker; this reconciliation does not promote it.
+
+Traceability: [AMBA_SoC_TOP.v](../rtl/soc/AMBA_SoC_TOP.v); [APB_GPIO.v](../rtl/peripherals/APB_GPIO.v); [APB_SW.v](../rtl/peripherals/APB_SW.v); [APB_LED.v](../rtl/peripherals/APB_LED.v); [README.md](../verification/selected_ip/README.md).
+
 ## 1. Purpose
 
 This document defines the cross-cutting board-I/O architecture that replaces the legacy coupling among `APB_GPIO`, DE10-Lite switches, and DE10-Lite LEDs.
@@ -27,6 +35,8 @@ It owns the system-level decisions that span multiple local peripheral specifica
 This file owns system-level integration and resource ownership. Detailed local register semantics are owned by `gpio.md`, `sw.md`, and `led.md`.
 
 ## 2. Baseline Problem Statement
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 The active FPGA baseline currently uses `APB_GPIO` as a board-specific mixed input/output block:
 
@@ -340,6 +350,8 @@ LED has no interrupt source.
 
 ## 11. Migration Sequence
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 Recommended cleanup order:
 
 ```text
@@ -362,6 +374,8 @@ Recommended cleanup order:
 The final cleanup state shall contain no conflicting physical ownership of SW, LED, or generic GPIO pins.
 
 ## 12. Firmware Migration
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 Firmware ownership shall change from:
 

@@ -6,7 +6,14 @@
 >
 > **Parent specification:** `soc_architecture.md`.
 
-> **Phase 4A-3A reading rule:** Earlier “active baseline” tables and implementation-gap descriptions reconstruct the pre-cleanup FPGA state. The final Phase 4A-3A status paragraph identifies which A2/A3 bus behavior is now implemented. A1/A5 and SW/LED migration remain targets.
+
+## Current Legacy contract and assurance boundary
+
+Current allocation uses a 16-bit APB select vector with slots 0..9 populated and 10..15 reserved/error. Each slot is a routing aperture, not 64 KiB of valid registers. DMEM decode is exactly 32 KiB at `0x1000_0000..0x1000_7FFF`; the old upper-half alias is rejected. Full production allocation and selected-test omission must remain distinct. Aligned 32-bit peripheral accesses use the bridge canonical-offset allowlist; invalid slot/offset/size/alignment produces two-cycle ERROR before peripheral selection. Direction policy remains peripheral-owned.
+
+Existing requirement/AC IDs and frozen intent are preserved. Pre-cleanup descriptions that conflict with this current contract are historical, not new implementation requirements. Status cites the existing accepted scope in the read-only tracker; this reconciliation does not promote it.
+
+Traceability: [AMBA_SoC_TOP.v](../rtl/soc/AMBA_SoC_TOP.v); [AHB_APB_bridge.v](../rtl/bus/AHB_APB_bridge.v); [soc_memory_map.h](../firmware/include/soc_memory_map.h).
 
 ## 1. Purpose
 
@@ -28,39 +35,17 @@ Detailed register semantics are owned by the corresponding peripheral specificat
 
 ## 3. Active Baseline Top-Level Map
 
-| Address range | Size | Target | Interconnect | Architectural use |
-|---|---:|---|---|---|
-| `0x0000_0000` – `0x0000_3FFF` | 16 KiB | IMEM | CPU-local | executable image |
-| `0x0000_4000` – `0x0FFF_FFFF` | — | Reserved | — | no canonical mapping |
-| `0x1000_0000` – `0x1000_7FFF` | 32 KiB | DMEM | AHB-side | data / rodata / BSS / stack |
-| `0x1000_8000` – `0x1FFF_FFFF` | — | Reserved | — | no canonical mapping |
-| `0x2000_0000` – `0x2000_95FF` | 38,400 B | VGA back buffer | AHB-side | 640×480×1-bpp framebuffer |
-| `0x2000_9600` – `0x2000_FFFF` | — | Reserved | AHB-side VGA subsystem | not software-visible framebuffer |
-| `0x2001_0000` | 4 B | VGA STATUS | AHB-side | VSync / clear status |
-| `0x2001_0004` | 4 B | VGA CONTROL | AHB-side | swap / HW clear |
-| `0x2001_0008` – `0x3FFF_FFFF` | — | Reserved | — | no canonical mapping |
-| `0x4000_0000` – `0x4007_FFFF` | 512 KiB | APB slots 0–7 | AHB→APB | active baseline APB subsystem |
-| `0x4008_0000` – `0xFFFF_FFFF` | — | Reserved in active baseline | — | no currently implemented canonical mapping |
+Current map; routing apertures do not make every byte a valid register.
 
-### 3.1 IMEM
+| Range | Capacity / role |
+|---|---|
+| `0x0000_0000..0x0000_3FFF` | 16 KiB CPU-local IMEM |
+| `0x1000_0000..0x1000_7FFF` | 32 KiB DMEM; upper alias rejected |
+| `0x2000_0000..0x2000_95FF` | 38,400-byte write-only aligned-word framebuffer |
+| `0x2001_0000`, `0x2001_0004` | VGA STATUS / CONTROL |
+| `0x4000_0000..0x400F_FFFF` | 16-slot APB routing aperture; slots 0..9 populated |
+| Other / gap / alias | Reserved; qualified invalid data accesses ERROR |
 
-```text
-Base = 0x0000_0000
-Size = 0x0000_4000
-End  = 0x0000_3FFF
-```
-
-IMEM is CPU-local, 4096×32-bit words, and is populated from `IMEM.mif`.
-
-### 3.2 DMEM
-
-```text
-Base = 0x1000_0000
-Size = 0x0000_8000
-End  = 0x1000_7FFF
-```
-
-The physical BRAM is 8192×32 bits. The active top-level selects `HADDR[31:16] == 16'h1000`, so `0x1000_8000`–`0x1000_FFFF` can alias the same physical memory because bit 15 is not used by the BRAM address. This upper-half alias is non-canonical.
 
 ## 4. VGA / VRAM Address Space
 
@@ -86,20 +71,21 @@ Detailed behavior is defined in `vga.md`.
 
 ## 5. Active Baseline APB Slot Allocation
 
-The currently implemented AHB-to-APB bridge exposes `PSEL[7:0]`. Each canonical APB slot is 64 KiB.
+Current `PSEL[15:0]` allocation. Slots are 64 KiB apertures; only exact canonical word offsets are accessible.
 
-| Slot | PSEL | Canonical range | Base | Peripheral |
-|---:|---:|---|---:|---|
-| 0 | `PSEL[0]` | `0x4000_0000` – `0x4000_FFFF` | `0x4000_0000` | UART0 / LoRa |
-| 1 | `PSEL[1]` | `0x4001_0000` – `0x4001_FFFF` | `0x4001_0000` | legacy GPIO |
-| 2 | `PSEL[2]` | `0x4002_0000` – `0x4002_FFFF` | `0x4002_0000` | Timer |
-| 3 | `PSEL[3]` | `0x4003_0000` – `0x4003_FFFF` | `0x4003_0000` | G-sensor |
-| 4 | `PSEL[4]` | `0x4004_0000` – `0x4004_FFFF` | `0x4004_0000` | AES-GCM |
-| 5 | `PSEL[5]` | `0x4005_0000` – `0x4005_FFFF` | `0x4005_0000` | ADC / Joystick Policy |
-| 6 | `PSEL[6]` | `0x4006_0000` – `0x4006_FFFF` | `0x4006_0000` | UART1 / PC |
-| 7 | `PSEL[7]` | `0x4007_0000` – `0x4007_FFFF` | `0x4007_0000` | HEX Display |
-
-The active decoder ignores `HADDR[27:20]`, so these physical selections can repeat elsewhere in `0x4xxx_xxxx`. Such repeats are non-canonical aliases.
+| Slot | Base | Peripheral |
+|---:|---:|---|
+| 0 | `0x4000_0000` | UART0 / LoRa |
+| 1 | `0x4001_0000` | 16-pin true GPIO |
+| 2 | `0x4002_0000` | Timer |
+| 3 | `0x4003_0000` | G-sensor |
+| 4 | `0x4004_0000` | AES-GCM v2 |
+| 5 | `0x4005_0000` | ADC v2 / Joystick Policy |
+| 6 | `0x4006_0000` | UART1 / PC |
+| 7 | `0x4007_0000` | HEX |
+| 8 | `0x4008_0000` | SW |
+| 9 | `0x4009_0000` | LED |
+| 10..15 | `0x400A_0000..0x400F_0000` | Reserved / ERROR |
 
 ## 6. Active Baseline Peripheral Register Offsets
 
@@ -114,14 +100,20 @@ The active decoder ignores `HADDR[27:20]`, so these physical selections can repe
 
 UART0 base is `0x4000_0000`; UART1 base is `0x4006_0000`.
 
-### 6.2 Legacy GPIO
+### 6.2 GPIO
+
+Base `0x4001_0000`; current P04 registers, independent of SW/LED.
 
 ```text
-0x4001_0000 +0x00 GPIO_DATA
-0x4001_0000 +0x04 GPIO_DIR
++0x00 GPIO_DATA_IN       RO, synchronized input
++0x04 GPIO_DATA_OUT      RW, output latch
++0x08 GPIO_DIR           RW, 0=input/Hi-Z, 1=output
++0x0C GPIO_IRQ_ENABLE    RW
++0x10 GPIO_IRQ_TYPE      RW, 0=level, 1=edge
++0x14 GPIO_IRQ_POLARITY  RW, 0=low/falling, 1=high/rising
++0x18 GPIO_IRQ_BOTH_EDGE RW
++0x1C GPIO_IRQ_PENDING   R / W1C(edge)
 ```
-
-The semantics of this active baseline block are documented in `gpio.md`. It is not a true bidirectional GPIO implementation.
 
 ### 6.3 Timer
 
@@ -135,11 +127,14 @@ The semantics of this active baseline block are documented in `gpio.md`. It is n
 ### 6.4 G-sensor
 
 ```text
-0x4003_0000 +0x00 GSENSOR_XY_DATA
-0x4003_0000 +0x04 GSENSOR_Z_DATA
++0x00 HOLD_XY    RO
++0x04 HOLD_Z     RO
++0x08 STATUS     RO
++0x0C HOLD_SEQ   RO
++0x10 SNAP_CTRL  WO
 ```
 
-The private ADXL345 SPI engine has no separate software-visible MMIO base.
+P09B uses the unchanged slot-3 base. Detailed coherent CAPTURE/read/RELEASE and direction/error semantics remain owned by [G-sensor](12_gsensor.md). No independent SPI MMIO is allocated.
 
 ### 6.5 AES-GCM
 
@@ -162,7 +157,7 @@ Important registers include:
 +0x80..0x8C HDR_DEBUG0..3
 ```
 
-### 6.6 ADC / Joystick Policy — P11 v2 Target (In-progress)
+### 6.6 ADC / Joystick Policy — P11 v2 implemented / bounded acceptance
 
 Canonical base: `0x4005_0000` (`ADC_BASE`). A temporary firmware `JOYSTICK_BASE` alias may remain only during migration.
 
@@ -199,7 +194,7 @@ CH3..CH6 offsets are reserved now to permit future six-channel activation withou
 
 `ADC_CTRL.CAPTURE` with no newer LIVE frame is an accepted OKAY no-op and preserves HOLD. Writes to RO registers, reserved offsets, malformed control values, unsupported sizes, and noncanonical offsets are errors with no peripheral side effect.
 
-The target register map is frozen for P11 specification purposes but remains **(In-progress)** implementation until P11 verification evidence exists. See `15_adc_joystick.md`.
+This is the implemented P11 canonical CPU register map. Existing source-bound acceptance and limitations are in [15_adc_joystick.md](15_adc_joystick.md). The local ADC upper-zero decode observation does not allocate a CPU alias or authorize rebasing.
 
 ### 6.7 HEX Display
 
@@ -212,96 +207,23 @@ The target register map is frozen for P11 specification purposes but remains **(
 
 ## 7. Register Mirroring
 
-Several active peripherals decode only a subset of low `PADDR` bits, so implemented registers can physically repeat inside a 64-KiB slot. These mirrors are not architectural addresses.
-
-Firmware and verification shall use only the exact offsets listed here or in the corresponding peripheral specification.
+The bridge rejects noncanonical CPU addresses before peripheral selection. Timer/GPIO/UART compare the full 16-bit local offset; upper slot ownership is supplied by integration. AES v2 compares the full canonical 32-bit address, so zero-based/rebased APB is not interchangeable. Direct local reserved behavior remains peripheral-owned; it is not permission for CPU aliases.
 
 ## 8. Reserved / Unmapped Access Behavior
 
-The active baseline does not provide a complete bus-error architecture.
-
-Unmapped/default accesses can complete with:
-
-```text
-HRDATA = 0
-HREADY = 1
-HRESP  = OKAY
-```
-
-and invalid APB slots can similarly return zero/ready. Software shall not depend on this behavior.
+A valid unmapped or rejected data access returns project two-cycle ERROR: `HRESP=01,HREADY=0`, then `HRESP=01,HREADY=1`; it must have no rejected slave side effect. Final ERROR cancels the following address. Ownerless idle defaults `HRDATA=0,HREADY=1,HRESP=00` are not an unmapped acknowledgement. CPU final load/store ERROR maps to causes 5/7 with precise PC; pre-bus misalignment causes 4/6 remain separate. Bridge validation rejects unsupported size/alignment/slot/offset before real PSEL. Canonical RO/WO direction policy remains peripheral-specific.
 
 ## 9. PLIC Address Status
 
 No PLIC address is currently canonical. The legacy test value `0x5000_0000` is reference-only and does not define the target architecture.
 
-## 10. Approved Target APB / Board-I/O Allocation — Not Yet Active
+## 10. Current P04 Board-I/O Allocation
 
-> **TARGET MIGRATION NOTE — NOT FULLY ACTIVE:** The following allocation is approved by `board_io_architecture.md`. Phase 4A-3A widened the bus infrastructure to `PSEL[15:0]`, but SW/LED peripherals at slots 8/9 are not yet implemented; those slots error until board-I/O migration.
-
-The target APB subsystem expands to:
-
-```text
-PSEL[15:0]
-```
-
-while preserving every existing slot 0 through 7.
-
-Target allocation:
-
-| Slot | Target base | Target peripheral | Migration status |
-|---:|---:|---|---|
-| 0 | `0x4000_0000` | UART0 / LoRa | unchanged |
-| 1 | `0x4001_0000` | true bidirectional GPIO | same slot, legacy GPIO to be redesigned |
-| 2 | `0x4002_0000` | Timer | unchanged |
-| 3 | `0x4003_0000` | G-sensor | unchanged |
-| 4 | `0x4004_0000` | AES-GCM | unchanged |
-| 5 | `0x4005_0000` | ADC / Joystick Policy | unchanged base; P11 ABI v2 |
-| 6 | `0x4006_0000` | UART1 / PC | unchanged |
-| 7 | `0x4007_0000` | HEX Display | unchanged |
-| 8 | `0x4008_0000` | SW | new target peripheral |
-| 9 | `0x4009_0000` | LED | new target peripheral |
-| 10–15 | `0x400A_0000` – `0x400F_0000` | Reserved | future use |
-
-Target board-I/O ownership becomes:
-
-```text
-GPIO_BASE = 0x4001_0000  -> reusable true GPIO on external bidirectional pins
-SW_BASE   = 0x4008_0000  -> dedicated SW[9:0] input + local IRQ
-LED_BASE  = 0x4009_0000  -> dedicated LEDR[9:0] output
-```
-
-The local SW and LED register contracts are defined in `sw.md` and `led.md`; cross-cutting ownership and migration rules are defined in `board_io_architecture.md`.
-
-### 10.1 Promotion rule
-
-The target addresses above are **approved future assignments** but shall not be treated as implemented hardware until the cleanup implementation updates:
-
-- AHB-to-APB bridge select width,
-- decoder and response muxes,
-- top-level peripheral instances,
-- firmware constants/drivers,
-- RTL/DV regression,
-- FPGA board acceptance.
-
-After that migration is verified, this document may be revised so the 16-slot map becomes the active canonical map rather than a target note.
+P04 implemented the allocation above, decoder/response mux, GPIO/SW/LED and firmware constants. SW uses +0x00 DATA, +0x04 IRQ_ENABLE, +0x08 IRQ_PENDING; LED uses +0x00 DATA. gpio_irq/sw_irq remain local wires without CPU routing. Accepted pin/OE scope and STA-002/board closure are separate.
 
 ## 11. Firmware Cross-Check
 
-The current active firmware map still contains:
-
-```text
-UART0_BASE       = 0x4000_0000
-GPIO_BASE        = 0x4001_0000
-TIMER_BASE       = 0x4002_0000
-GSENSOR_BASE     = 0x4003_0000
-AES_GCM_BASE     = 0x4004_0000
-ADC_BASE         = 0x4005_0000
-JOYSTICK_BASE    = ADC_BASE   // transitional P11 migration alias only
-UART1_BASE       = 0x4006_0000
-HEX_DISPLAY_BASE = 0x4007_0000
-```
-
-`SW_BASE = 0x4008_0000` and `LED_BASE = 0x4009_0000` shall be added to production firmware only as part of the corresponding cleanup implementation.
+Current `firmware/include/soc_memory_map.h` defines the bases and GPIO offsets above, including SW_BASE=0x4008_0000 and LED_BASE=0x4009_0000. JOYSTICK_BASE is a deprecated alias for ADC_BASE, not a second peripheral allocation.
 
 ## 12. Related Specifications
 
@@ -319,9 +241,9 @@ This document shall remain consistent with:
 
 ## Phase 4A-2 Approved Cleanup Target (partly active in Phase 4A-3A)
 
-The canonical address map is unchanged. Under frozen A2, unmapped AHB addresses, DMEM addresses above its canonical extent, VGA gaps/aliases, APB aliases outside the canonical aperture, reserved APB slots, noncanonical register offsets, and unsupported sizes return the project two-cycle ERROR response; pre-cleanup zero/OKAY mirrors are not architectural allocations. A3 restricts the framebuffer to naturally aligned 32-bit writes; reads and subword writes fault, while VRAM_STATUS/CONTROL retain their own register semantics. A1 fixes the generic GPIO bank at slot 1 to 16 bits on JP1 GPIO_0–GPIO_15; existing UART/LoRa pins remain separate. A5 defines COMPARE=N as exactly N PCLK counting edges after START, including immediate completion for N=0. A1/A5 are approved targets, not implementation claims.
+The canonical address map is unchanged. Under frozen A2, unmapped AHB addresses, DMEM addresses above its canonical extent, VGA gaps/aliases, APB aliases outside the canonical aperture, reserved APB slots, noncanonical register offsets, and unsupported sizes return the project two-cycle ERROR response; pre-cleanup zero/OKAY mirrors are not architectural allocations. A3 restricts the framebuffer to naturally aligned 32-bit writes; reads and subword writes fault, while VRAM_STATUS/CONTROL retain their own register semantics. A1 fixes the generic GPIO bank at slot 1 to 16 bits on JP1 GPIO_0–GPIO_15; existing UART/LoRa pins remain separate. A5 defines COMPARE=N as exactly N PCLK counting edges after START, including immediate completion for N=0. This paragraph records the historical Phase 4A-2 target; P04 GPIO/SW/LED and P06 Timer subsequently implemented A1/A5 within their separately accepted scopes.
 
-**Phase 4A-3A active scope:** the public RTL now decodes only the 32 KiB DMEM range and canonical APB aperture, rejects noncanonical bus/APB accesses with two-cycle ERROR, and enforces the A3 framebuffer bus-access policy. Directed decode, error, and CPU-fault tests pass. A1 GPIO, A5 timer, and SW/LED slot integration remain target behavior; this paragraph does not promote them.
+**Historical Phase 4A-3A scope:** the public RTL now decodes only the 32 KiB DMEM range and canonical APB aperture, rejects noncanonical bus/APB accesses with two-cycle ERROR, and enforces the A3 framebuffer bus-access policy. Directed decode, error, and CPU-fault tests pass. A1 GPIO, A5 timer, and SW/LED slot integration remain target behavior; this paragraph does not promote them.
 
 ## P09B G-sensor allocation — paired publication update
 

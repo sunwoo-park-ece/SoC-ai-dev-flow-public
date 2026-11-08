@@ -8,6 +8,14 @@
 
 > **Current G-sensor reset contract:** The integrated P09B architecture uses single 50 MHz PCLK and direct shared PRESETn. The historical local reset_delay instance is no longer part of the active wrapper path, and external SPI SCLK is a registered output rather than an internal clock domain.
 
+## Current Legacy contract and assurance boundary
+
+Production HCLK=PCLK=50 MHz uses the board input clock directly. System reset asserts asynchronously and releases after a two-flop synchronizer and the production 1,000,000-cycle qualification. Generated domains use their existing release synchronizers/PLL-ready boundary. P14 selected simulation shortens qualification to eight clocks through the parameter; this is not a production reset change. Preserve RST-001/002 accepted prerequisites without inferring final STA/CDC/board closure. The old phrase “final P14 timing review” is historical planning, not evidence that selected P14 cleanup closed STA-001/002.
+
+Existing requirement/AC IDs and frozen intent are preserved. Pre-cleanup descriptions that conflict with this current contract are historical, not new implementation requirements. Status cites the existing accepted scope in the read-only tracker; this reconciliation does not promote it.
+
+Traceability: [system_reset_controller.v](../rtl/soc/system_reset_controller.v); [reset_release_sync.v](../rtl/soc/reset_release_sync.v); [selected_soc.sv](../verification/selected_ip/selected_soc.sv).
+
 ## 1. Purpose
 
 This document defines the clock and reset architecture of the active FPGA baseline. It specifies:
@@ -153,7 +161,7 @@ PLL lock qualification is not itself VGA ownership CDC closure. The HCLK↔pixel
 
 `APB_GSENSOR_MB` and `spi_ee_config` use only 50 MHz `PCLK`; the controller drives a registered external mode-3 SCLK with 12/13-PCLK half-periods. The historical two-output `spi_pll` has no active G-sensor instance or Quartus binding. The G-sensor controller connects directly to shared `PRESETn`; the historical local `reset_delay` is inactive in P09B.
 
-## 8. ADC / Qsys Clock and Reset Domain — P11 Target (In-progress)
+## 8. ADC / Qsys Clock and Reset Domain — P11 implemented / bounded acceptance
 
 P11A establishes the generated instance clocks as:
 
@@ -178,7 +186,7 @@ Project-owned P11 acquisition logic runs on `adc_sys_clk` and uses a project-loc
 
 HCLK/PCLK does **not** require another local release synchronizer: `HRESETn` is already qualified/released in HCLK and `PCLK=HCLK`.
 
-P11 command/response cadence, vendor lock-loss recovery, and exact accepted-command-to-response timing remain **(In-progress)** verification and shall not be inferred solely from the 25/10 MHz clocks or the configured 1 MSPS sampling rate.
+Accepted P11 command/response/mailbox and two-channel cadence evidence is bounded by [15_adc_joystick.md](15_adc_joystick.md). Vendor lock-loss recovery and arbitrary command timing are not established by that acceptance or by the 25/10 MHz clocks/configured 1 MSPS alone.
 
 ## 9. External Reset Source
 
@@ -347,7 +355,7 @@ Historical multi-bit `spi_clk -> PCLK` CDC was removed by the A6 PCLK-only conve
 
 Therefore, no active internal CDC hazard exists between the SPI controller and the CPU interface. `CDC-002` remains `IN_PROGRESS` solely for conservative engineering-closure criteria (such as exhaustive reset-negative coverage and physical verification), not because an active unsafe clock crossing remains in the RTL.
 
-### 13.5 ADC Scan Frame: adc_sys_clk -> PCLK — P11 Target (In-progress)
+### 13.5 ADC Scan Frame: adc_sys_clk -> PCLK — P11 implemented / bounded acceptance
 
 The historical direct Qsys response crossing is not part of the P11 target contract.
 
@@ -365,7 +373,7 @@ The source shall hold the complete frame payload stable until ACK and shall not 
 
 An asynchronous FIFO is required instead if multiple frames must accumulate per handshake round trip, acquisition cannot pause, every high-rate frame must be retained, destination stalls can be long while acquisition continues, or a future DMA/SDRAM streaming path is introduced.
 
-No live Qsys response bus field may be exposed directly through APB after P11. P11 frame CDC implementation/verification and vendor lock-loss/protocol verification remain **(In-progress)**; this target description is not an implementation-completion or closure claim.
+No live Qsys response bus field may be exposed directly through APB after P11. P11 frame CDC is implemented and CDC-003 is VERIFIED within its accepted source/use envelope. Vendor lock-loss/protocol corner qualification remains separate; this does not close VGA CDC-001, VER-003 or STA-001/002.
 
 ### 13.6 Reset Release Into Generated Domains
 
@@ -461,7 +469,7 @@ The following are current baseline invariants:
 7. `KEY[0]` low asynchronously asserts system reset through `system_reset_controller`; release is HCLK-synchronized and qualified for approximately 20 ms.
 8. G-sensor initialization uses shared PRESETn directly; the historical ~20.97 ms local reset delay is inactive in P09B.
 9. VGA VSync uses an explicit multi-flop crossing into HCLK.
-10. VGA ownership uses the request/commit/ACK architecture defined above, but `CDC-001` remains OPEN until later independent behavioral and structural CDC acceptance. The historical direct-selector architecture is not current. The historical direct ADC response crossing is superseded by the frozen P11 scan-frame mailbox target architecture; its implementation/verification remains **(In-progress)**; G-sensor internal SPI-to-PCLK crossing is removed and cross-read XYZ/VALID/SEQ coherency is resolved by P09B LIVE/HOLD snapshot.
+10. VGA ownership uses the request/commit/ACK architecture defined above, but `CDC-001` remains OPEN until later independent behavioral and structural CDC acceptance. The historical direct-selector architecture is not current. The historical direct ADC response crossing is superseded by the frozen P11 scan-frame mailbox target architecture; its source-bound implementation/verification is accepted within P11 scope (CDC-003), without vendor lock-loss or global CDC/STA closure; G-sensor internal SPI-to-PCLK crossing is removed and cross-read XYZ/VALID/SEQ coherency is resolved by P09B LIVE/HOLD snapshot.
 11. The intended internal clocks are represented and constrained at the P05C checkpoint; final P14 stability/exception review and separate STA-002 external-I/O closure remain incomplete.
 12. No new feature may treat an existing CDC/timing gap as an architectural requirement to preserve.
 
@@ -514,7 +522,7 @@ P11 therefore does **not** fold `adc_sys_clk` deassertion into one multi-clock `
 
 The established `adc_sys_clk=25 MHz`, ADC hard-IP input `10 MHz`, and configured total ADC rate `1 MSPS` are the clock facts in Sections 3 and 8, not evidence of P11 frame cadence or CDC closure. The P11 target replaces historical direct response sampling with a stable bundled-data req/ack mailbox for complete frames from `adc_sys_clk` to PCLK: source holds payload stable until ACK, does not overwrite/publish the next completed frame while busy, and destination synchronizes the request and atomically captures the whole frame.
 
-P11 status:
+Historical P11 freeze status (superseded for ADC frame CDC by accepted P11; retained for provenance):
 
 - global HCLK/PCLK reset policy: already implemented/verified by P05 scope;
 - project-local ADC reset synchronizer: existing infrastructure retained;

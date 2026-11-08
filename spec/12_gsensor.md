@@ -6,6 +6,14 @@
 >
 > **Parent specifications:** `soc_architecture.md`, `memory_map.md`, `apb_subsystem.md`, `reset_clock.md`, `interrupt_architecture.md`.
 
+## Current contract and source/evidence boundary
+
+The current P09B production path is PCLK-only, slot 3 at 0x4003_0000, with exact full-address register decoding and SETUP-sampled SNAP_CTRL data. Preserve E0→E1 publication, modulo-32 sequence (including valid zero after wrap), pre-edge coherent CAPTURE, HOLD immutability until RELEASE, and successful new publication winning LIVE-valid clear on the same edge. A sequence advance identifies a completed digital burst, not necessarily a new physical sensor conversion; intermediate LIVE generations can be overwritten.
+
+Owner-approved P09B scoped engineering closure binds historical source `7cc7956954bb07f78c83c28d5cc50f736b95de9d`. It covers implementation, directed digital/FW/CPU integration and source integration; it explicitly excludes full physical sensor characterization, board acceptance and external timing. A display demonstration is not quantitative calibration/IRQ-pin timing proof. GS-001/003/004/005, CDC-002 and FW-008 retain their recorded IN_PROGRESS scope; SPI-002 and STA-002 remain separate. No PLIC route or general SPI MMIO is added.
+
+Traceability: [APB_GSENSOR_MB.v](../rtl/peripherals/gsensor/APB_GSENSOR_MB.v); [spi_ee_config.v](../rtl/peripherals/gsensor/spi_ee_config.v); [gsensor.c](../firmware/drivers/gsensor.c); [tb_p09_gsensor_cpu_e2e.sv](../verification/directed/bus/tb_p09_gsensor_cpu_e2e.sv).
+
 ## 1. Purpose
 
 This document defines the on-board ADXL345 accelerometer / G-sensor subsystem in the active DE10-Lite FPGA baseline.
@@ -250,12 +258,7 @@ The driver is single-owner and non-reentrant.
 
 ## 11. Verification Status
 
-P09B functional implementation, digital verification, actual RV32I CPU integration, Quartus/TimeQuest timing, and practical FPGA board operation are **COMPLETED and INTEGRATED**:
-
-- **Digital Verification:** Mode 3 SPI waveforms, 12-write initialization sequence, 56-bit burst reads, LIVE/HOLD atomicity, single pending scheduler slot, and APB register decode/error handling pass all self-checking regressions.
-- **CPU Integration:** RV32I CPU harness and driver mock-MMIO tests verify end-to-end CAPTURE/RELEASE polling and trap handling.
-- **Timing Closure:** Internal 50 MHz PCLK timing passes with positive setup/hold margins across slow and fast temperature corners.
-- **Board Demonstration:** Practical FPGA board operation confirmed via display applications (observed photo `SEQ=0x1450`, user observed `SEQ≈0x7C00`, dynamic tilt response).
+P09B implementation/source integration and directed digital/FW/CPU scope are OWNER_APPROVED_SCOPED_CLOSURE at historical source `7cc7956954bb07f78c83c28d5cc50f736b95de9d`. The evidence covers initialization/SPI, snapshot atomicity, APB faults and driver lifecycle within exercised cases. Historical internal 50 MHz fitted timing and display demonstrations retain their specific source/observation scope. Full board acceptance, physical INT1/SPI waveform characterization, calibration and exhaustive reset-negative closure were explicitly excluded. Current residual tracker states in §12 are unchanged.
 
 ## 12. Remaining Closure Gaps
 

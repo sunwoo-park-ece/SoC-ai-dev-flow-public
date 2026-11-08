@@ -6,6 +6,16 @@
 >
 > **Scope:** Current FPGA board-validated baseline in `rtl/`, excluding the frozen PLIC development snapshot under `verification/legacy/`.
 
+## Current Legacy contract and assurance boundary
+
+The production baseline is the full `AMBA_SoC_TOP`: one RV32I five-stage CPU, CPU-local IMEM, DMEM, VGA and APB slots 0..9 on `PSEL[15:0]`; slots 10..15 error. GPIO is the P04 16-pin bidirectional bank, with dedicated SW/LED at slots 8/9. P07 UART DATA writes may wait while TX is busy. P06 Timer is an exact-N one-shot, not an architectural machine timer.
+
+The P14 `selected_soc` is a test-only composition exposing slots 0,1,2,4,6 and default ERROR elsewhere. It does not replace the production map. Its CPU smoke reads AES VERSION; separate real-core KAT and CPU/real-AES positive replay substantiate only their bounded scopes. P14 selective cleanup is complete; Clean Baseline v1 remains `NOT_RELEASED`. No PLIC, ACLINT, AXI, DMA, dual hart or new IRQ allocation is implemented by this Legacy contract.
+
+Existing requirement/AC IDs and frozen intent are preserved. Pre-cleanup descriptions that conflict with this current contract are historical, not new implementation requirements. Status cites the existing accepted scope in the read-only tracker; this reconciliation does not promote it.
+
+Traceability: [AMBA_SoC_TOP.v](../rtl/soc/AMBA_SoC_TOP.v); [README.md](../verification/selected_ip/README.md).
+
 ## 1. Purpose
 
 This document defines the top-level architecture of the imported FPGA SoC baseline. It establishes the architectural boundaries that all lower-level specifications, RTL changes, firmware, verification, and FPGA integration work shall use as the starting contract.
@@ -16,18 +26,7 @@ This document intentionally does not duplicate detailed register maps or cycle-l
 
 ## 2. Source-of-Truth Boundary for This Baseline
 
-For reconstruction of the current baseline only, architectural evidence is interpreted in the following order:
-
-1. Active Quartus project source list and top-level integration (`fpga/quartus/project/AMBA_SoC_TOP.qsf`, `rtl/soc/AMBA_SoC_TOP.v`).
-2. RTL reachable from the active top-level instance hierarchy.
-3. Active firmware BSP, linker script, headers, and drivers under `firmware/`.
-4. Current integration/build evidence under `reports/integration/`.
-5. Current non-legacy documentation.
-6. Historical material under `docs/legacy/`, `reports/**/legacy/`, and `verification/legacy/`.
-
-Historical or legacy material may explain design intent but shall not silently override the active FPGA implementation.
-
-After baseline approval, the priority changes: `spec/` becomes the authoritative architecture and behavioral contract.
+Current `spec/` owns contract authority. Active top/source lists, RTL/FW, tests and accepted evidence establish implementation/assurance observations; they do not override frozen intent. A genuine conflict requires Owner disposition. Historical/legacy snapshots are not active authority.
 
 ## 3. Baseline Identification
 
@@ -49,7 +48,7 @@ The baseline contains:
 - AHB-connected data memory.
 - AHB-connected VGA/VRAM subsystem.
 - AHB-to-APB bridge.
-- Eight APB peripheral slots.
+- Ten populated APB slots on a 16-bit select vector.
 - Dual UART instances for LoRa and PC communication.
 - GPIO.
 - Polling timer.
@@ -199,10 +198,10 @@ The bridge owns:
 - APB address/control capture.
 - SETUP and ACCESS sequencing.
 - AHB backpressure while an APB transfer is in progress.
-- Eight-way `PSEL` generation.
+- 16-bit `PSEL` generation (slots 0..9 populated).
 - Read-data return from APB to AHB.
 
-All current APB slaves expose `PREADY = 1`, but the bridge architecture supports waiting for `PREADY` and propagating that wait through `HREADY`.
+UART DATA writes can hold PREADY low while busy; the bridge propagates waits through HREADY.
 
 Detailed behavior is defined in `apb_subsystem.md`.
 
@@ -250,24 +249,7 @@ Detailed display behavior is defined in `vga.md`.
 
 ## 8. APB Peripheral Architecture
 
-The bridge decodes eight canonical 64 KiB APB slots:
-
-| PSEL | Canonical region | Peripheral | External role |
-|---:|---|---|---|
-| 0 | `0x4000_0000 - 0x4000_FFFF` | UART0 | LoRa UART + AUX status |
-| 1 | `0x4001_0000 - 0x4001_FFFF` | GPIO | DE10-Lite switches / LEDs |
-| 2 | `0x4002_0000 - 0x4002_FFFF` | TIMER | Polling timer |
-| 3 | `0x4003_0000 - 0x4003_FFFF` | GSENSOR | ADXL345 accelerometer subsystem |
-| 4 | `0x4004_0000 - 0x4004_FFFF` | AES-GCM | Cryptographic accelerator |
-| 5 | `0x4005_0000 - 0x4005_FFFF` | ADC | Generic ADC MMIO + optional joystick policy |
-| 6 | `0x4006_0000 - 0x4006_FFFF` | UART1 | PC/debug UART |
-| 7 | `0x4007_0000 - 0x4007_FFFF` | HEX | Six-digit seven-segment display |
-
-These are the only canonical APB peripheral slots in the baseline.
-
-A broad implementation decode may cause address mirroring outside the canonical regions. Firmware and verification shall not rely on such aliases unless a future specification explicitly promotes them.
-
-Peripheral register maps and behavior are specified in the individual peripheral documents and summarized in `memory_map.md`.
+Current full-production APB allocation is defined by the [memory map](01_memory_map.md). PSEL[15:0] populates slots 0..9 and rejects slots 10..15. GPIO owns true JP1 GPIO; SW/LED have independent slots 8/9. A routing aperture does not make every offset a valid register.
 
 ## 9. Display Architecture
 
@@ -336,15 +318,7 @@ Detailed cycle behavior is specified in `timer.md`.
 
 ## 12. GPIO Architecture
 
-The GPIO block provides ten software-visible GPIO bits corresponding to DE10-Lite board I/O.
-
-Each bit has:
-
-- Output-data storage.
-- Direction control.
-- Readback that returns output data for output-configured bits and physical input data for input-configured bits.
-
-Detailed behavior is specified in `gpio.md`.
+P04 APB_GPIO is a 16-pin true bidirectional bank independent of SW/LED. DIR=0 is input/Hi-Z; DIR=1 drives DATA_OUT, and DATA_IN reads two-flop synchronized pins. IRQ is local-only. The GPIO owning spec defines detailed reset/edge/W1C behavior.
 
 ## 13. Accelerometer and SPI Architecture
 
@@ -372,7 +346,7 @@ The current baseline is designed around a 128-bit payload block transaction inte
 
 Detailed register ordering, IV/AAD construction, start/done behavior, encryption/decryption mode, and tag validation are specified in `aes_gcm.md`.
 
-## 15. ADC / Joystick Architecture — P11 Target (In-progress)
+## 15. ADC / Joystick Architecture — P11 implemented / bounded acceptance
 
 P11 changes slot 5 from a joystick-owned ADC wrapper into a **generic ADC MMIO peripheral with an optional joystick-policy child**.
 
@@ -392,13 +366,13 @@ APB_ADC_Controller (PCLK)
         +-- Joystick_Policy combinational child over HOLD
 ```
 
-Structural channel capacity is six. The Clean Baseline scans command CH1/CH2 only; on the referenced DE10-Lite schematic these correspond to board `ADC_IN0/ADC_IN1` (JP8 A0/A1). Default joystick policy treats CH1 as logical X and CH2 as logical Y, while physical cable orientation/polarity remains board acceptance **(In-progress)**.
+Structural channel capacity is six. The Clean Baseline scans command CH1/CH2 only; on the referenced DE10-Lite schematic these correspond to board `ADC_IN0/ADC_IN1` (JP8 A0/A1). Default joystick policy treats CH1 as logical X and CH2 as logical Y. The accepted P11 physical polarity/direction observation applies only to the configuration in [15_adc_joystick.md](15_adc_joystick.md) §3.4; another cable/sensor/board requires its own qualification.
 
-A scan frame is a coherent digital publication unit, not simultaneous analog sampling. The generated Modular ADC is configured for 1 MSPS total rate with a 10 MHz hard-IP input clock and 25 MHz `adc_sys_clk`; at ideal continuous scheduling adjacent samples are 1 us apart. Actual project frame cadence remains an implementation/evidence item because command/response latency and mailbox backpressure can lengthen the interval.
+A scan frame is a coherent digital publication unit, not simultaneous analog sampling. The generated Modular ADC is configured for 1 MSPS total rate with a 10 MHz hard-IP input clock and 25 MHz `adc_sys_clk`; at ideal continuous scheduling adjacent samples are 1 us apart. The accepted two-channel P11 observation is 299 CPU cycles/frame at 50 MHz (about 167.22 kframes/s over 2,810,880 frames); it is not a guaranteed frame rate or six-channel characterization. Command/response latency and mailbox backpressure determine effective cadence.
 
 PCLK software uses a LIVE bank plus CAPTURE-only HOLD snapshot. There is no ADC RELEASE command; this intentionally differs from the P09 G-sensor CAPTURE/RELEASE ownership lifecycle. `Joystick_Policy` is a simple stateless child and firmware independently recomputes the same policy as a golden/reference model.
 
-Detailed register, CDC, reset, timing, and verification contracts are authoritative in `15_adc_joystick.md` and `06_reset_clock.md`. Nothing in this architecture section promotes P11 implementation to Verified.
+Detailed register, CDC, reset, timing, and verification contracts are authoritative in `15_adc_joystick.md` and `06_reset_clock.md`. P11 ADC-001..006/CDC-003/FW-009 acceptance is bounded by its historical source and evidence in that owning spec; this section creates no new verdict or general physical/STA closure.
 
 ## 16. Seven-Segment Display Architecture
 
@@ -501,11 +475,7 @@ Therefore:
 
 ## 22. Error-Response Policy
 
-The current baseline does not implement a comprehensive bus-fault/error-response architecture.
-
-At top level, unmapped or unselected accesses can return zero data with ready/OKAY-style completion rather than generating a processor-visible bus fault. Individual current slaves also generally return successful bus responses.
-
-This behavior is part of the observed baseline but shall not be interpreted as a requirement that future interconnect revisions can never add explicit error handling. Any such change requires an updated bus and CPU-interface specification.
+A valid unmapped or rejected data access returns project two-cycle ERROR: `HRESP=01,HREADY=0`, then `HRESP=01,HREADY=1`; it must have no rejected slave side effect. Final ERROR cancels the following address. Ownerless idle defaults `HRDATA=0,HREADY=1,HRESP=00` are not an unmapped acknowledgement. CPU final load/store ERROR maps to causes 5/7 with precise PC; pre-bus misalignment causes 4/6 remain separate. Bridge validation rejects unsupported size/alignment/slot/offset before real PSEL. Canonical RO/WO direction policy remains peripheral-specific.
 
 ## 23. Active, Dormant, and Legacy Source Classification
 

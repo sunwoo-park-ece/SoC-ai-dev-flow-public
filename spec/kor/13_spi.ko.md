@@ -6,6 +6,12 @@
 >
 > **상위 명세:** `soc_architecture.md`, `reset_clock.md`, `gsensor.md`.
 
+## 현행 계약과 source/evidence 경계
+
+“Private SPI”는 내부 fixed-function sensor transport라는 뜻이며 private repository 또는 generated-vendor 구현이라는 뜻이 아니다. 두 active project RTL file은 Mode 3, MSB-first 16-bit 초기화 write(12개, POWER_CTL 마지막), 56-bit 0xF2 read, 등록된 교대 12/13-PCLK SCLK half, INT1/1,500,000-cycle fallback 중재를 구현한다. Active spi_pll/reset_delay나 software-programmable SPI aperture를 뜻하지 않는다. SPI-001 digital 수용과 과거 internal fit은 physical ADXL345 setup/hold, waveform calibration, STA-002 종결을 증명하지 않으며 SPI-002는 IN_PROGRESS다.
+
+추적: [spi_ee_config.v](../../rtl/peripherals/gsensor/spi_ee_config.v); [README.md](../../rtl/peripherals/gsensor/README.md); [tb_gsensor_single_pclk.sv](../../verification/directed/models/gsensor/tb_gsensor_single_pclk.sv).
+
 ## 1. 목적
 
 이 문서는 활성 FPGA 베이스라인에 존재하는 전용 SPI 엔진을 정의한다.

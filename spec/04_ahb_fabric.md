@@ -8,6 +8,14 @@
 
 > **Current / historical reading rule:** The active structure implements the existing frozen Phase 4A-3A decode/error contract. Former broad decode, silent unmapped OKAY and undriven `HSIZE` are historical pre-cleanup observations. C1a changes only CPU/master combinational structure; no address, latency or exception policy changes here.
 
+## Current Legacy contract and assurance boundary
+
+The full production fabric retains exactly one CPU master, qualified decode and registered data-phase owner. HREADY-low holds the owner; final ERROR cancels the following address. ERROR is HRESP=01/ready-low then HRESP=01/ready-high, distinct from ownerless idle OKAY. P14 selected tests preserve this pattern but omit nonselected production slaves. BUS-001..005 acceptance is bounded by existing evidence; no arbitration, generic AMBA compliance or changed-platform proof is added.
+
+Existing requirement/AC IDs and frozen intent are preserved. Pre-cleanup descriptions that conflict with this current contract are historical, not new implementation requirements. Status cites the existing accepted scope in the read-only tracker; this reconciliation does not promote it.
+
+Traceability: [AMBA_SoC_TOP.v](../rtl/soc/AMBA_SoC_TOP.v); [tb_soc_bus_transitions.sv](../verification/directed/bus/tb_soc_bus_transitions.sv); [tb_soc_cpu_fault_e2e.sv](../verification/directed/bus/tb_soc_cpu_fault_e2e.sv).
+
 ## 1. Purpose
 
 This document defines the active baseline SoC data interconnect between the CPU-side `AHB_Master_Interface` and the three top-level AHB-side targets:

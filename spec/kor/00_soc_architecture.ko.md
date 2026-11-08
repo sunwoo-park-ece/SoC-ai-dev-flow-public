@@ -6,6 +6,16 @@
 >
 > **범위:** `rtl/`의 현재 FPGA 보드 검증 baseline. `verification/legacy/` 아래의 동결된 PLIC 개발 snapshot은 제외한다.
 
+## 현행 Legacy 계약과 보증 범위
+
+Production baseline은 전체 `AMBA_SoC_TOP`이다. RV32I 5단계 CPU 하나, CPU-local IMEM, DMEM, VGA와 `PSEL[15:0]`의 APB slot 0..9를 포함하며 slot 10..15는 오류다. GPIO는 P04 16-pin 양방향 bank이고 SW/LED는 slot 8/9로 분리된다. P07 UART DATA write는 TX busy 동안 대기할 수 있다. P06 Timer는 정확히 N edge인 one-shot이며 architectural machine timer가 아니다.
+
+P14 `selected_soc`은 slot 0,1,2,4,6만 노출하고 나머지는 default ERROR인 test-only 구성이다. Production map을 대체하지 않는다. CPU smoke는 AES VERSION을 읽으며 별도 real-core KAT와 CPU/real-AES positive replay는 각각의 한정된 범위만 뒷받침한다. P14 selective cleanup은 완료됐지만 Clean Baseline v1은 `NOT_RELEASED`다. 이 Legacy 계약은 PLIC, ACLINT, AXI, DMA, dual hart, 새 IRQ 배정을 구현하지 않는다.
+
+기존 requirement/AC ID와 동결 의도를 유지한다. 아래 현행 계약과 충돌하는 cleanup 전 설명은 역사적 기록이며 새 구현 요구가 아니다. 상태는 읽기 전용 tracker의 기존 수용 범위를 인용하며 이 정합화로 승격하지 않는다.
+
+추적: [AMBA_SoC_TOP.v](../../rtl/soc/AMBA_SoC_TOP.v); [README.md](../../verification/selected_ip/README.md).
+
 ## 1. 목적
 
 이 문서는 import된 FPGA SoC baseline의 최상위 아키텍처를 정의한다. 이후의 세부 specification, RTL 변경, firmware, verification, FPGA integration 작업이 공통으로 따라야 하는 상위 아키텍처 경계를 고정하는 것이 목적이다.
@@ -16,18 +26,7 @@
 
 ## 2. 현재 Baseline 복원 시 Source-of-Truth 경계
 
-현재 baseline을 복원하는 이번 단계에 한해서 아키텍처 근거는 다음 순서로 해석한다.
-
-1. Active Quartus project source list 및 top-level integration (`fpga/quartus/project/AMBA_SoC_TOP.qsf`, `rtl/soc/AMBA_SoC_TOP.v`).
-2. Active top-level instance hierarchy에서 실제로 도달 가능한 RTL.
-3. `firmware/` 아래의 active BSP, linker script, header, driver.
-4. `reports/integration/` 아래의 현재 integration/build evidence.
-5. 현재 non-legacy documentation.
-6. `docs/legacy/`, `reports/**/legacy/`, `verification/legacy/` 아래의 historical material.
-
-Legacy/historical 자료는 설계 의도를 설명하는 참고자료로 사용할 수 있지만, active FPGA implementation을 암묵적으로 덮어쓰면 안 된다.
-
-Baseline이 승인된 이후에는 우선순위가 바뀌며, `spec/`이 architecture/behavior의 authoritative contract가 된다.
+현행 `spec/`가 계약 권위를 소유한다. Active top/source list, RTL/FW, test 및 수용 evidence는 구현/보증을 확인하는 근거이며 동결 계약을 덮어쓰지 않는다. 불일치는 Owner 결정 대상으로 남긴다. Historical/legacy snapshot은 현행 권위가 아니다.
 
 ## 3. Baseline 식별
 
@@ -199,10 +198,10 @@ Bridge는 다음 기능을 담당한다.
 - APB address/control capture.
 - SETUP/ACCESS sequencing.
 - APB transfer 중 AHB backpressure 생성.
-- 8-way `PSEL` generation.
+- 16-bit `PSEL` generation (slot 0..9 배정).
 - APB read data를 AHB로 반환.
 
-현재 APB slave들은 모두 `PREADY = 1`을 출력하지만, bridge 자체는 `PREADY`를 기다릴 수 있으며 해당 wait를 `HREADY`를 통해 CPU 쪽으로 전달한다.
+UART DATA busy write는 PREADY-low로 wait할 수 있으며 bridge는 이를 HREADY로 CPU에 전달한다.
 
 세부 동작은 `apb_subsystem.md`에서 정의한다.
 
@@ -250,24 +249,7 @@ Display-control register도 framebuffer window와 동일한 AHB target 안에 �
 
 ## 8. APB Peripheral Architecture
 
-Bridge는 8개의 canonical 64 KiB APB slot을 decode한다.
-
-| PSEL | Canonical region | Peripheral | External role |
-|---:|---|---|---|
-| 0 | `0x4000_0000 - 0x4000_FFFF` | UART0 | LoRa UART + AUX status |
-| 1 | `0x4001_0000 - 0x4001_FFFF` | GPIO | DE10-Lite switches / LEDs |
-| 2 | `0x4002_0000 - 0x4002_FFFF` | TIMER | Polling timer |
-| 3 | `0x4003_0000 - 0x4003_FFFF` | GSENSOR | ADXL345 accelerometer subsystem |
-| 4 | `0x4004_0000 - 0x4004_FFFF` | AES-GCM | Cryptographic accelerator |
-| 5 | `0x4005_0000 - 0x4005_FFFF` | ADC | Generic ADC MMIO + optional joystick policy |
-| 6 | `0x4006_0000 - 0x4006_FFFF` | UART1 | PC/debug UART |
-| 7 | `0x4007_0000 - 0x4007_FFFF` | HEX | Six-digit seven-segment display |
-
-Baseline의 canonical APB peripheral slot은 위 8개뿐이다.
-
-Implementation의 coarse decode로 canonical region 밖에서 peripheral mirroring이 발생할 수 있지만 firmware와 verification은 해당 alias에 의존해서는 안 된다. 향후 specification에서 명시적으로 승격하지 않는 한 unsupported behavior이다.
-
-Peripheral register map과 behavior는 각 peripheral 문서에서 정의하고, 전체 요약은 `memory_map.md`에서 제공한다.
+현행 full-production APB 배정은 [메모리 맵](01_memory_map.ko.md)을 따른다. PSEL[15:0]에서 slot 0..9가 배정되고 slot 10..15는 ERROR다. GPIO는 JP1 true GPIO이며 SW/LED는 독립 slot 8/9다. Routing aperture 전체가 유효 register는 아니다.
 
 ## 9. Display Architecture
 
@@ -336,15 +318,7 @@ Active FPGA baseline에서 timer는 **interrupt를 생성하지 않는다.**
 
 ## 12. GPIO Architecture
 
-GPIO block은 DE10-Lite board I/O에 대응하는 10개의 software-visible GPIO bit를 제공한다.
-
-각 bit는 다음 특성을 갖는다.
-
-- Output-data storage.
-- Direction control.
-- Output으로 설정된 bit는 output data를, input으로 설정된 bit는 physical input data를 readback.
-
-세부 동작은 `gpio.md`에서 정의한다.
+P04 APB_GPIO는 SW/LED와 분리된 16-pin true bidirectional bank다. DIR=0은 input/Hi-Z, DIR=1은 DATA_OUT drive이고 DATA_IN은 2FF synchronized pin 값이다. IRQ는 local-only다. 상세 reset/edge/W1C 계약은 GPIO owning spec을 따른다.
 
 ## 13. Accelerometer 및 SPI Architecture
 
@@ -372,7 +346,7 @@ Current baseline은 APB wrapper boundary에서 128-bit payload block transaction
 
 Register ordering, IV/AAD construction, start/done behavior, encrypt/decrypt mode, tag validation은 `aes_gcm.md`에서 정의한다.
 
-## 15. ADC / Joystick Architecture — P11 Target (In-progress)
+## 15. ADC / Joystick Architecture — P11 implemented / bounded acceptance
 
 P11은 slot 5를 joystick-owned ADC wrapper에서 **generic ADC MMIO + optional joystick policy child** 구조로 변경한다.
 
@@ -387,11 +361,11 @@ MAX 10 ADC / adc_qsys
        -> combinational Joystick_Policy
 ```
 
-Internal 구조는 6채널까지 표현하며 Clean Baseline은 CH1/CH2만 scan한다. 현재 generated ADC는 1 MSPS total rate, 10 MHz ADC input, 25 MHz `adc_sys_clk`으로 확인됐다. Scan frame은 동시 analog sample이 아니라 sequential sample을 하나의 coherent publication identity로 묶는 구조다.
+Internal 구조는 6채널까지 표현하며 Clean Baseline은 CH1/CH2만 scan한다. 참조 DE10-Lite schematic에서 CH1/CH2는 ADC_IN0/ADC_IN1(JP8 A0/A1)이며 기본 policy는 CH1=X, CH2=Y다. 수용된 physical polarity/direction은 [15_adc_joystick.ko.md](15_adc_joystick.ko.md) §3.4 구성에 한정되며 다른 cable/sensor/board는 별도 qualification이 필요하다. 현재 generated ADC는 1 MSPS total rate, 10 MHz ADC input, 25 MHz `adc_sys_clk`으로 확인됐다. Scan frame은 동시 analog sample이 아니라 sequential sample을 하나의 coherent publication identity로 묶는 구조다.
 
 Software snapshot은 LIVE + CAPTURE-only HOLD이며 ADC에는 RELEASE가 없다. 이는 P09 G-sensor CAPTURE/RELEASE ownership lifecycle과 의도적으로 다르다. Hardware joystick child와 independent firmware policy를 병행해 HW/FW equivalence 검증에 사용한다.
 
-세부 contract는 `15_adc_joystick.md`, reset/CDC는 `06_reset_clock.md`가 정본이다. 실제 구현/검증은 **(In-progress)**다.
+세부 contract는 `15_adc_joystick.md`, reset/CDC는 `06_reset_clock.md`가 정본이다. P11 ADC-001..006/CDC-003/FW-009의 기존 수용은 해당 문서의 과거 source/evidence 범위에 한정되며 새 verdict나 전반 physical/STA closure가 아니다. 수용된 2채널 관찰은 50 MHz에서 299 CPU cycles/frame(2,810,880 frame에 걸쳐 약 167.22 kframes/s)이며 보장 rate나 6채널 characterization이 아니다.
 
 ## 16. Seven-Segment Display Architecture
 
@@ -494,11 +468,7 @@ Current RTL에는 coarse top-level decode expression이 존재하여 canonical r
 
 ## 22. Error-Response Policy
 
-Current baseline에는 comprehensive bus-fault/error-response architecture가 없다.
-
-Top-level에서 unmapped/unselected access는 processor-visible bus fault 대신 zero data와 ready/OKAY-style completion으로 끝날 수 있다. Current slave들도 일반적으로 successful bus response를 반환한다.
-
-이는 observed baseline behavior이지만, future interconnect revision에서 explicit error handling을 추가할 수 없다는 요구사항은 아니다. 해당 변경 시 bus/CPU-interface specification을 함께 갱신해야 한다.
+유효 unmapped/rejected data 접근은 project 2-cycle ERROR인 `HRESP=01,HREADY=0` 후 `HRESP=01,HREADY=1`이며 거부된 slave side effect가 없어야 한다. Final ERROR는 다음 주소를 취소한다. Owner 없는 idle 기본값 `HRDATA=0,HREADY=1,HRESP=00`은 unmapped 응답이 아니다. CPU final load/store ERROR는 precise PC와 cause 5/7이며 pre-bus misalignment cause 4/6은 별도다. Bridge는 size/alignment/slot/offset 오류를 실제 PSEL 전에 거부한다. Canonical RO/WO 방향 정책은 peripheral별이다.
 
 ## 23. Active, Dormant, Legacy Source 분류
 

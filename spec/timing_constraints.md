@@ -2,13 +2,21 @@
 
 > **Status:** Baseline timing contract for the current DE10-Lite public candidate. English is canonical; `kor/timing_constraints.ko.md` is a synchronized companion. This is a policy, not a claim of full board timing sign-off. Clock/reset architecture is in [06_reset_clock.md](06_reset_clock.md); engineering milestone history and raw fitted evidence remain outside this public specification.
 
+## Current contract and source/evidence boundary
+
+The active public SDC creates clk at 20.000 ns and derives PLL clocks/uncertainty. It supplies no fabricated external I/O delays. Required nonnegative setup/hold and zero endpoint TNS are unchanged acceptance conditions; historical WNS/Fmax values belong only to the exact fitted source, constraints, binding and firmware image that produced them. No single older P05/P11/P12/P13 fit is the current 35e4633 source qualification. In particular P14 changed synthesizable LoadExtender RTL and did not run a new vendor fit.
+
+P11 C4-D diagnosed its historical HREADY loop; later P12 fitted evidence found zero exported combinational SCCs and positive internal timing on its bound Health image. Neither statement proves present-source RDC/CDC, edge-near M9K atomicity or external I/O closure. STA-001 remains IN_PROGRESS, STA-002 BLOCKED; clock progress, exception applicability and all primitive assumptions remain explicit. The old “final P14” timing queue label is historical planning, not completion of the selective P14 cleanup task.
+
+Traceability: [de10_lite.sdc](../fpga/quartus/constraints/de10_lite.sdc); [P11_ADC_C4D_TIMING_REGRESSION_ROOT_CAUSE_REPORT.md](../reports/evidence/P11_ADC_C4D_TIMING_REGRESSION_ROOT_CAUSE_REPORT.md); [summary.md](../reports/evidence/cpu-ahb-c1a/summary.md).
+
 ## 1. Scope
 
 This specification governs clocks, timed relationships, setup/hold acceptance, exceptions, evidence and rebuild decisions for the **current 50 MHz baseline**. It separates internal STA from external I/O timing, CDC correctness and board characterization. It does not authorize a timing exception, SDC/QSF edit, new build or target-SoC frequency increase.
 
 ## 2. Baseline Timing Objective
 
-The DE10-Lite board reference `clk` directly drives the 50 MHz CPU/AHB system clock; APB `PCLK` is the same clock. Its period is **20.000 ns**. For every required, correctly modeled internal relationship at the relevant corners: setup WNS ≥ 0 ns, TimeQuest endpoint TNS = 0 ns, and required hold slack ≥ 0 ns. These are acceptance conditions, not measured margins. The present +0.253 ns Slow 85°C WNS is an observation, **not** a new specification threshold.
+The DE10-Lite board reference `clk` directly drives the 50 MHz CPU/AHB system clock; APB `PCLK` is the same clock. Its period is **20.000 ns**. For every required, correctly modeled internal relationship at the relevant corners: setup WNS ≥ 0 ns, TimeQuest endpoint TNS = 0 ns, and required hold slack ≥ 0 ns. These are acceptance conditions, not measured margins. Historical +0.253 ns Slow 85°C WNS is a source-bound observation, not a current-main measurement or a new specification threshold.
 
 ## 3. Clock Definitions
 
@@ -84,7 +92,7 @@ STA is a modeled worst-case timing judgment across stated PVT/constraints. Runni
 
 ## 20. Known Open Timing Scope
 
-The P05C fitted reset/clock checkpoint is **PASS within current internal constraints**: multicorner worst setup `+0.558 ns`, hold `+0.111 ns`, recovery `+11.334 ns`, removal `+0.478 ns`, and design-wide TNS `0`. All intended internal clocks are constrained and no G-sensor internal generated clock is present. `STA-001` remains IN_PROGRESS until the final P14 frozen-source multicorner, exception/CDC, and multi-seed/stability review. External I/O timing/electrical and ADC/VGA board impact are **NOT CLOSED** (`STA-002` BLOCKED); the P05C design still has 32 unconstrained input ports/55 paths and 87 unconstrained output ports/2,146 paths. These are separate from reset-row closure and release approval. Detailed changing margins belong in the local STA status history, not here.
+STA-001 remains IN_PROGRESS and STA-002 BLOCKED. P05C internal reset/clock timing, P11 ADC C4 fit, P12 G14 Health fit and P13 fits are distinct historical checkpoints; their margins, unconstrained-port counts, exceptions and image identities are not interchangeable. P14 selective cleanup did not perform a vendor refit. Use each exact source-bound report for observed WNS/TNS/Fmax and warning details. No current-main external I/O timing, physical CDC/RDC or full release sign-off is asserted. Old “final P14” review terminology is historical planning only.
 
 ## 21. Future Target-SoC Timing Re-Closure
 
@@ -92,13 +100,5 @@ PLIC, AXI, DMA, SDRAM or a higher frequency target requires a new architecture/C
 
 ## 22. P11-ADC C4-D Timing Regression Investigation Traceability
 
-The 50 MHz Fmax regression between the historical baseline (53.93 MHz, +1.458 ns slack) and the C4-B implementation (50.35 MHz, +0.140 ns slack) was investigated under milestone P11C-C4-D. The comprehensive root-cause analysis is documented in:
-- [`../reports/evidence/P11_ADC_C4D_TIMING_REGRESSION_ROOT_CAUSE_REPORT.md`](../reports/evidence/P11_ADC_C4D_TIMING_REGRESSION_ROOT_CAUSE_REPORT.md)
-
-Traceability summary:
-1. **Fmax regression was investigated**: The primary timing limiter is an architectural 153-node combinational loop on `HREADY` (TimeQuest Warning 332081/332125, +4.064 ns loop penalty) and an unpipelined cross-subsystem cascade (`u_bridge|addr_reg` to `U_VRAM` block RAMs). The direct timing impact of the P11 ADC subsystem is zero (+18.238 ns setup slack on its 25 MHz generated clock domain, with core 10 MHz clock MPW slack of +44.575 ns).
-2. **Evidence report path**: `reports/evidence/P11_ADC_C4D_TIMING_REGRESSION_ROOT_CAUSE_REPORT.md`.
-3. **No timing optimization was performed in P11 C4-D**: Synthesis RTL, SDC constraints, QSF assignments, placement seeds, and clock trees were kept strictly unmodified.
-4. **P11 functional/physical acceptance remains unchanged**: Positive setup slack (+0.140 ns WNS, 0.000 TNS, +0.082 ns hold WNS), physical 167 kHz continuous ADC hardware sampling cadence, and 100% testbench/telemetry PASS remain fully valid and signed off.
-5. **Future timing closure is deferred until baseline cleanup completion if required**: Candidate architectural improvements (breaking the `HREADY` loop, qualifying VRAM write enables with `HSEL_VRAM`, or pipelining APB bridge ready generation) are deferred to post-baseline cleanup activities.
+The P11 C4-D report documents its source-specific 153-node HREADY loop and +4.064 ns loop-breaking penalty, with an ADC-specific critical-path assessment. Those findings are historical and do not assert that the loop persists in the current RTL. Later P12 fitted analysis reported zero exported combinational SCCs for its bound Health image; P13/P14 changed the CPU path further. Neither arithmetic subtraction of an old loop penalty nor an older Fmax is a current-system performance guarantee. See the [P11 analysis](../reports/evidence/P11_ADC_C4D_TIMING_REGRESSION_ROOT_CAUSE_REPORT.md); later raw source-bound fit records remain in their existing custody. This reconciliation performs no timing optimization, new STA process or constraint exception.
 

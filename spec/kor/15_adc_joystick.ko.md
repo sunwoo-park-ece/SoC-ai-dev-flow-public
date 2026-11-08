@@ -1,12 +1,20 @@
 # P11 ADC / 조이스틱 서브시스템 명세
 
-> **상태:** P11 VERIFIED SPECIFICATION — 아키텍처 동결 완료; RTL, FW 드라이버, DV, 물리 하드웨어 케이던스(167 kHz 연속 샘플링), 방향 특성화 및 타이밍 원인 분석 검증 완료.
+> **상태:** 기존 P11 source/configuration-bound ADC 범위 수용. 전체 SoC timing/physical/release를 뜻하지 않는다.
 >
 > **정본 언어:** 영어. 이 문서와 `../15_adc_joystick.md`가 충돌하면 영문 문서가 authoritative source이다.
 >
 > **소스 앵커:** P11 public worktree `P11-ADC-Cleanup`, HEAD `3be24514d87ed5d6e40361323e6ea8465a4645e6`.
 >
 > **Preflight:** Private Issue #4 `[P11A] ADC Cleanup Preflight`, report comment `issuecomment-5830820717`.
+
+## 현행 계약과 source/evidence 경계
+
+P11은 source/configuration에 결부된 ADC 범위에서 수용됐다. 최종 문서 checkpoint는 `6dfdd812c757fd1c49ac95ea92eb0186080948fe`이며 과거 source/result identity를 현재 main SHA로 바꾸면 안 된다. 현행 project RTL은 sole acquisition owner, 6-channel structural capacity와 CH1/CH2만 활성(ACTIVE_MASK=0x03), persistent ENABLE request/ack, stable bundled-data mailbox, RELEASE 없는 CAPTURE-only HOLD, accepted LIVE publication의 FRAME_COUNT, STATUS[6]=0을 유지한다. Generic v2 controller, stateless joystick policy, 독립 FW model은 별도다.
+
+Configured total ADC 1 MSPS와 core input 10 MHz는 vendor configuration 사실이지 측정 frame rate가 아니다. 수용된 2-channel board 기록은 50 MHz에서 299 CPU cycles/frame, 약 167.22 kframes/s, 2,810,880 frames를 보고하며 이는 한정 관찰이지 conversion/consumer rate 보장이나 6-channel 증명이 아니다. P11 ADC-001..006/CDC-003/FW-009와 ADC-only APB-005 수용은 global STA-001/002, board electrical qualification, 타 peripheral 부채, Clean Baseline release를 닫지 않는다. Behavioral vendor model은 generated hard-IP qualification이 아니다.
+
+추적: [adc_acquisition_engine.v](../../rtl/soc/adc_acquisition_engine.v); [adc_frame_mailbox_cdc.v](../../rtl/soc/adc_frame_mailbox_cdc.v); [APB_ADC_Controller.v](../../rtl/peripherals/APB_ADC_Controller.v); [Joystick_Policy.v](../../rtl/peripherals/Joystick_Policy.v); [adc.c](../../firmware/drivers/adc.c); [P11_ADC_FINAL_DOCUMENTATION_RECONCILIATION.md](../../reports/evidence/P11_ADC_FINAL_DOCUMENTATION_RECONCILIATION.md).
 
 ## 1. 목적과 범위
 
@@ -405,16 +413,9 @@ sticky이며 CLEAR_ERROR로 전체 clear한다. 같은 edge의 새 HW error는 s
 
 ## 10. APB error 정책
 
-exact full local offset decode를 사용한다. `+0x100` 같은 mirror는 허용하지 않는다.
+CPU 접근은 bridge의 full-address/word-size/alignment/offset allowlist와 ADC slave의 방향/CTRL 검증을 따른다. 거부 CPU 접근은 ADC side effect 없는 기존 2-cycle AHB ERROR다. Local APB에는 HSIZE/PSTRB 입력이 없어 CPU transfer width를 독립 검증할 수 없다. Pinned source의 ADC wrapper는 canonical upper 0x4005 또는 zero-based upper 0x0000과 exact local offset을 수용한다. 이는 source 관찰이며 CPU alias 추가 배정이나 generic rebase 허가가 아니다. 새 direct-APB/rebased 사용은 owning integration 결정이 필요하다.
 
-다음은 `PSLVERR` 및 bridge AHB ERROR로 연결되고 side effect가 없어야 한다.
-
-- unsupported size/misalignment,
-- RO write,
-- reserved/unmapped offset,
-- reserved bit를 포함한 malformed CTRL write.
-
-반면 no-new CAPTURE는 OKAY/no-op이다.
+RO write/reserved offset/CTRL reserved bit 오류는 state 변경 없는 completing PSLVERR다. 적합한 CAPTURE에서 새 frame이 없으면 기존 HOLD를 보존하는 OKAY/no-op이며 error가 아니다. 동결 canonical CPU map/no-alias 의도는 유지한다.
 
 ## 11. Joystick_Policy HW child
 

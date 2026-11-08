@@ -1,19 +1,23 @@
 # SoC Health Firmware 계약 및 정합성 트래커
 
-> **상태:** S1/S2 계약 보존; S3 Timer/UART/G-sensor/ADC/joystick/VGA provider 구현, 로컬 host 시험, 실제 peripheral RTL 통합 및 RV32I build 완료. S4-A board I/O provider와 HEX raw getter는 host/RTL 검증을 포함해 구현했다. S4-B 공통 formatter 및 실제 VGA/UART1 TX observer도 구현·로컬 검증했으며 실제 board, timing 또는 Clean Baseline 합격 근거가 아니다.
+> **상태:** 구현된 SYSFW-01 standalone contract. 과거 host/RTL/build 수용과 후속 ADC/VGA bounded board evidence를 구분하며 전체 system release는 아니다.
 > **언어:** [영어 문서](../22_soc_health_firmware.md)가 정본이며 이 한국어 companion은 같은 계약을 반영한다.
 > **역할:** Role A는 독립 health firmware를 정의한다. Role B는 개별 IP 명세를 대체하지 않고 baseline-cleanup spec/FW 정합성 부채를 모은다.
-> **소스 기준:** `390db6da2dcc8bbfa1c93b444525b0ba1e852056`. Trace ID: Issue #7 S0 결과 `5845036298`, S0 승인 `5845199371`, S1 명령 `5845199693`. 내부 governance locator이며 공개 runtime evidence가 아니다.
+> **소스 기준:** 현행 검토 base `35e4633a53a080402526ef751d128df120f311a9`; SYSFW-01 수용 source `2bf3c7a6c4625af20631f2d3553fd3014d418be8`. 과거 단계는 새 실행 evidence가 아니다.
+
+## 현행 계약과 source/evidence 경계
+
+soc_health_main은 구현된 standalone application이며 미래 placeholder가 아니다. SYSFW-01은 `2bf3c7a6c4625af20631f2d3553fd3014d418be8`에서 host/RTL-provider/build 범위로 수용됐으며 당시 CPU/physical/vendor NOT_RUN 행은 그 checkpoint의 역사적 evidence다. 후속 P11 C4는 ADC-specific CPU/vendor/board/cadence/policy 범위, P12 G16은 정상 VGA/Health dashboard와 Owner 관찰 restart만 수용했다. 모든 Health provider의 physical qualification이나 same-N UART/VGA matching으로 확대하지 않는다.
+
+현행 app은 provider, shared board service, sole VGA preparation/release, UART observer를 cooperative loop에 연결한다. 복사된 two-slot snapshot, reader lease, explicit-field FNV-1a, current/sticky mask, provider별 evidence class, 32-software-epoch publication 계약을 유지한다. Software epoch는 초 단위 real-time deadline이 아니다. final_main은 historical RC-car demo이며 별도 P13 AES 수용 후에도 Health AES는 EXCLUDED_PENDING_CLEANUP이다. 아래 S1/S2/S3/S4/S5는 과거 SYSFW-01 단계이며 독립 Legacy Spec-refresh 단계와 다르다.
+
+추적: [soc_health_main.c](../../firmware/apps/soc_health_main.c); [soc_health.c](../../firmware/services/soc_health.c); [soc_health_providers.c](../../firmware/services/soc_health_providers.c); [soc_health_observers.c](../../firmware/services/soc_health_observers.c); [soc_health_board_io.c](../../firmware/services/soc_health_board_io.c).
 
 ## 1. 상태, 목적 및 역사적 역할 분리
 
-`firmware/apps/final_main.c`는 **HISTORICAL RC-CAR SYSTEM DEMO FIRMWARE**다. 출처 보존과 데모 재현을 위해 유지하며 외부 STM32 기반 RC-car 시스템에 의존한다. 정식 독립 SoC 통합 시험 펌웨어가 아니다. Issue #7 완료 및 리뷰 이후 Issue #6 C4-A/C4-B의 기반으로 사용하지 않는다.
+`firmware/apps/soc_health_main.c`는 현행 canonical standalone diagnostic이며 `final_main.c`는 historical RC-car demo다. 구현된 app/service/provider/scheduler와 HEX raw getter가 pinned source에 있다. 위에서 구분한 SYSFW-01 host/RTL/build 수용, 후속 P11 ADC C4 수용, P12 G16 bounded board-functional 수용은 서로 다른 evidence layer다.
 
-소유자가 제공한 데모: [FPGA SoC + STM32 RC-car demo](https://www.youtube.com/shorts/XYbi3uSHmUU). 출처를 설명하는 링크이며 미래 health monitor를 독립적으로 검증한 근거가 아니다.
-
-미래 정식 애플리케이션은 `firmware/apps/soc_health_main.c`다. 외부 RC-car 시스템 없이 독립 실행하며 production peripheral 계약을 사용하고, 진행과 실패를 보고하며 VGA와 PC UART 관찰자에 전달할 하나의 snapshot을 동결한다. ADC 전용 시험이 아닌 재사용 가능한 시스템 진단 자산이다.
-
-S1은 문서만 변경한다. 애플리케이션, service, provider, scheduler 및 HEX raw getter는 S1 구현 산출물이 아니다. S2는 §10.1 기반 구조를 추가했고 S3는 §10.2 strong/functional provider만 추가한다. S3 승인 후 S4-A를 진행했으며 S4-A 승인 후 S4-B를 진행했으며 S5 이전 S4-B 소유자 리뷰가 필요하다. 또한 Issue #6 C4는 중단 상태를 유지한다. 레지스터, hardware 동작 및 기존 합격 범위의 권위는 owning IP spec에 있다. 기존 STOP gate를 보존한다. 이 문서는 P08B 재개, IRQ/PLIC 추가, ADC/peripheral RTL 재설계, pin 변경 또는 전역 cleanup/STA/board 종결을 승인하지 않는다.
+Owning IP 계약, one-owner MMIO, 복사된 immutable observer snapshot과 모든 STOP/release 한계를 유지한다. AES provider, PLIC/interrupt, 새 pin, real-time scheduling 증명, blanket system/board 수용은 추가하지 않는다. 아래 SYSFW historical stage 설명을 현행 app 미구현 또는 C4 중단으로 읽지 않는다.
 
 ## 2. Health 모델 및 실패 이력
 
@@ -156,6 +160,8 @@ Helper가 stale status를 지우기 전에 abort를 기록한다. 다음 cycle�
 
 ## 10. 구현된 기반 구조 및 미래 stage gate
 
+> **과거 SYSFW checkpoint 기록:** 아래 stage 수용/NOT_RUN/다음 gate 시제는 당시 snapshot의 기록이다. 현행 lifecycle과 후속 P11/P12 범위는 위 현행 경계 및 §11.2를 따른다. 새 status 승격이 아니다.
+
 아래 경로는 현재 S2 기반 구조 및 host 검증 파일로 존재한다.
 
 ```text
@@ -183,6 +189,8 @@ S1에서는 S2–S5를 구현하지 않았다. S2 기반 구조, S3 provider, S4
 
 ### 10.1 승인된 S2 core ABI, ownership 및 결정적 signature
 
+> **과거 SYSFW checkpoint 기록:** 아래 stage 수용/NOT_RUN/다음 gate 시제는 당시 snapshot의 기록이다. 현행 lifecycle과 후속 P11/P12 범위는 위 현행 경계 및 §11.2를 따른다. 새 status 승격이 아니다.
+
 Stable ID는 SYSTEM_SERVICE=0, TIMER=1, UART_LOOP=2, GPIO=3, GSENSOR=4, ADC=5, JOY_POLICY=6, VGA=7, SW=8, LED=9, HEX=10, AES_GCM=11이다. Mask bit `1u << id`는 고정한다. State/evidence enum 순서는 §2와 같다. Record는 state, evidence, heartbeat_count, last_progress_epoch, miss_count, detail을 보관한다. 현재 mask는 publication 시 복사한 record에서 산출하며 UNKNOWN은 bit가 없다. FAIL은 sticky 이력을 설정하고 복구해도 지우지 않는다. Runtime sticky-clear API는 없다.
 
 S2 checkpoint에서 한 cooperative owner가 Timer 없이 software epoch를 증가시킨다. 각 turn은 열 개 pending provider(ID 1–10) 중 하나를 round-robin 방문하고 observer character를 최대 두 개 처리한다. SYSTEM_SERVICE progress는 software service turn 실행만 뜻한다. S2 peripheral placeholder는 UNKNOWN 및 `SOC_HEALTH_NOT_IMPLEMENTED`(0x4e4f5451, NOT QUALIFYING HARDWARE EVIDENCE)을 유지한다. AES는 provider/callback 없이 EXCLUDED_PENDING_CLEANUP이며 AES report는 모두 거부한다. Production S2 code는 MMIO를 수행하지 않는다.
@@ -204,6 +212,8 @@ Signature 자체, struct padding, pointer, slot lease 및 live deduplication tok
 
 ### 10.2 S3 strong provider 및 검증 범위
 
+> **과거 SYSFW checkpoint 기록:** 아래 stage 수용/NOT_RUN/다음 gate 시제는 당시 snapshot의 기록이다. 현행 lifecycle과 후속 P11/P12 범위는 위 현행 경계 및 §11.2를 따른다. 새 status 승격이 아니다.
+
 `firmware/include/soc_health_providers.h`와 `firmware/services/soc_health_providers.c`가 provider-local state를 추가한다. Generic S2 core는 변경하지 않았다. `soc_health_main`은 실제 provider dispatcher를 호출한다. S2 pending-dispatch API는 unit test용으로 유지하며 현재 app은 strong dispatcher를 사용한다. 두 API 모두 stable ID 순서를 따른다. 초기 bounded visit은 UART, Timer, G-sensor, ADC, VGA 순서이며 이후 열 개 ID 1–10을 round-robin 방문한다. 각 step은 유한하다. UART는 readiness poll 한 번으로 최대 한 byte 송신 및 최대 네 byte 수신/drain, ADC는 `adc_enable(0)`으로 한 번 요청 후 turn별 acknowledgement 확인, VGA는 deterministic back-bank word 한 개만 기록한다. JOY는 ADC acquisition을 공유한다. S3 checkpoint에서는 GPIO/SW/LED/HEX가 pending placeholder였다. S4-A는 §10.3의 board callback을 연결한다. AES는 dispatch하지 않는다. S2 cursor는 hardware output을 하지 않는다.
 
 기본 provider budget은 262144 software epoch, Timer compare는 50000 PCLK count다. 초기 유한 engineering parameter이며 측정된 wall-clock quota나 board 보장이 아니다. 소유한 peer 가정에서 하나의 outstanding 12-byte UART transaction은 16-byte RX FIFO에 들어가며 RX error는 명시적으로 FAIL한다. Scheduler count로 hardware progress를 만들지 않는다.
@@ -221,6 +231,8 @@ Signature 자체, struct padding, pointer, slot lease 및 live deduplication tok
 
 ### 10.3 S4-A board I/O provider 및 검증 범위
 
+> **과거 SYSFW checkpoint 기록:** 아래 stage 수용/NOT_RUN/다음 gate 시제는 당시 snapshot의 기록이다. 현행 lifecycle과 후속 P11/P12 범위는 위 현행 경계 및 §11.2를 따른다. 새 status 승격이 아니다.
+
 `firmware/services/soc_health_board_io.c`와 `include/soc_health_board_io.h`는 static board state를 보관한다. 선택적 dispatcher callback으로 기존 S3 전용 harness를 보존하며 app은 GPIO=3, SW=8, LED=9, HEX=10에 callback을 연결한다. Ten-way schedule, strong provider 함수, health core, copied snapshot ABI/signature 및 AES 제외는 유지한다. 각 visit은 유한하며 IRQ, busy wait 또는 두 번째 VGA owner가 없다.
 
 GPIO는 소유한 두 pin을 input으로 해제하고 GPIO0 low를 preload한 뒤 production API로 GPIO0 output/GPIO1 input을 설정한다. 독립적으로 보관한 `0,1,1,0`을 구동하며 소유 pair 외 direction/output bit를 보존한다. 각 sample은 visit을 넘어 최소 세 software epoch 기다린 후 synchronized GPIO1과 expected stimulus를 비교한다. MMIO는 PCLK를 전진시키므로 두 input synchronization stage를 포함한다. DIR/DATA_OUT readback은 보조 검사다. 네 sample이 모두 일치할 때만 loopback generation이 완료된다. 전체 cycle의 262144-epoch deadline은 DATA_OUT이 정상이어도 stuck/late/inverted sense를 거부하며 configuration/readback 불일치는 즉시 fail한다. 이후 완전한 cycle은 current PASS를 복구하되 sticky를 보존한다.
@@ -237,6 +249,8 @@ Fresh external RUN_ROOT로 `scripts/wsl/soc_health_board_io_test.sh`, `scripts/w
 
 
 ### 10.4 S4-B 공통 formatter 및 실제 observer
+
+> **과거 SYSFW checkpoint 기록:** 아래 stage 수용/NOT_RUN/다음 gate 시제는 당시 snapshot의 기록이다. 현행 lifecycle과 후속 P11/P12 범위는 위 현행 경계 및 §11.2를 따른다. 새 status 승격이 아니다.
 
 `include/soc_health_observers.h` / `services/soc_health_observers.c`의 순수 `soc_health_format_line(snapshot, line_index, buffer, size)` 하나를 VGA/UART가 함께 사용한다. Return은 잘리지 않은 logical length이며 size>0이면 buffer 안에 terminator를 기록하고 size=0이면 쓰지 않는다. Logical line은 19개, buffer는 고정 48 bytes이며 uppercase hexadecimal/tiny helper만 사용한다. Formatter에는 printf/allocation/MMIO가 없다. State는 P/W/F/?/X다. Text의 모든 값은 복사된 snapshot에서 읽으며 live health state를 읽지 않는다.
 
@@ -412,6 +426,8 @@ VGA preparation은 기존 `soc_health_vga_service` owner의 callback이며 두 �
 
 ### 11.1 S5 검증 closure 및 C4 인계 경계
 
+> **과거 SYSFW checkpoint 기록:** 아래 stage 수용/NOT_RUN/다음 gate 시제는 당시 snapshot의 기록이다. 현행 lifecycle과 후속 P11/P12 범위는 위 현행 경계 및 §11.2를 따른다. 새 status 승격이 아니다.
+
 S5는 production C, driver, peripheral RTL, checker 및 build script를 변경하지 않고 완료했다. S2/S3/S4-A/S4-B host 4종 및 provider/driver/RTL 3종이 새 run에서 통과했다. S2 isolated mutation 6종, S3 host mutation 10종/RTL mutation 6종, S4-A negative 19종, S4-B negative 32종은 실제 targeted rejection/실패 전파를 다시 검증했다. Timer P06, UART P07, VGA/VRAM P08B, G-sensor P09 host(실제 GS RTL은 S3 integration), HEX P10 functional/shadow, ADC/JOY P11 C2/C3, GPIO/SW/LED P04 host 및 S4-A real RTL을 실행했다. 이 결과는 CPU E2E 또는 physical acceptance가 아니다. Raw command/source/hash/target/guard/parent 증거는 외부 run과 S5 결과 댓글에 보존한다.
 
 Fresh `soc_health_main` RV32I/ILP32/nostdlib build: `.imem` **13,492 / 16,384 bytes (82.3486%)**, headroom **2,892**, S4-B 대비 delta **0**. `.dmem_init` **1,048**, `.bss` **1,556**, allocated span **2,604 / 32,768**, headroom **30,164 bytes**. ELF section/map/symbol로 확인했으며 ELF/MIF/map/disassembly hash를 보존했다. Undefined symbol은 없고 printf/allocation/memcpy/memset/mul/div/mod helper 또는 예상 밖 libc/libgcc는 없다. Observer service만 기존 `-Os`, 나머지는 O2다. 대표 non-health `display_smoke`의 entry 대비 IMEM/DMEM binary/MIF가 동일하며 health service는 포함되지 않는다. Default depth는 4096/8192를 유지한다.
@@ -441,23 +457,9 @@ Fresh `soc_health_main` RV32I/ILP32/nostdlib build: `.imem` **13,492 / 16,384 by
 
 ### 11.2 실기 하드웨어 수용 및 텔레메트리 실측 증적 (이슈 #6 C4-B / putty_26_09_27_1.log)
 
-Terasic DE10-Lite FPGA 실기 보드 수용 시험은 이슈 #6 C4-B를 통해 수행되었으며, 시리얼 텔레메트리 로그에서 6,800만 클럭 사이클에 걸쳐 수집된 **4,055개 연속 파싱 헬스 스냅샷**을 통해 완전성이 검증되었습니다:
-- **텔레메트리 로그**: `/home/swp/soc/putty_26_09_27_1.log` (SHA-256 `469047c4b037e6b0bcbdaee63e9098a09f8043815ff5e78b931756ed7109cd3e`).
-- **실기 보드 사진**: `/home/swp/soc/P11_board_test.jpg` (SHA-256 `45f0180f3fbcbe2d686fcad80878bb7bd08069cba50be750916788c8432a6227`), `docs/assets/images/soc_health_board_demo.jpg`. 에포크 141,025,616 사이클(`0x0867E150`)에서 촬영되었으며 `SYSTEM: PASS`, 스위치 `V=380`, `HEX=180` 출력 상태를 증명함.
-- **48초 실기 보드 시연 영상**: `https://www.youtube.com/shorts/RxXCySoRTMY`.
+후속 P11 C4-B/C/D는 한정된 ADC/joystick board 범위를 뒷받침한다. 보존 telemetry log SHA-256은 `469047c4b037e6b0bcbdaee63e9098a09f8043815ff5e78b931756ed7109cd3e`, board photograph SHA-256은 `45f0180f3fbcbe2d686fcad80878bb7bd08069cba50be750916788c8432a6227`다. Local raw artifact 이름/경로는 custody 정보이며 portable spec reference가 아니다. 수용된 P11 cadence/direction/model 비교는 [ADC](15_adc_joystick.ko.md)와 [P11 evidence derivative](../../reports/evidence/P11_ADC_FINAL_DOCUMENTATION_RECONCILIATION.md)에 요약돼 있다.
 
-#### 주요 실기 검증 결과:
-1. **자율 오류 검출 및 복구 (GPIO 루프백)**:
-   - 의도적인 GPIO 점퍼(`PIN_V10` $\leftrightarrow$ `PIN_W10`) 분리 시 실시간으로 오류를 포착하여 `MISS` 카운트가 `0x007A`까지 증가하고 sticky 실패 비트 `S=0x00000008` (bit 3 = GPIO)을 래치함.
-   - 점퍼 재연결 즉시 시스템 중단 없이 `P ... LOOP`로 자동 복구되며 하트비트가 신속히 재개(`HB=0x00141D30` = 131만 패킷)되어 CPU 행 없는 자율 복구 복원력을 입증함.
-2. **SW-to-HEX APB 수학적 변환 및 MMIO 리드백 검증**:
-   - 펌웨어 변환 규칙 $M = (\text{SW} \gg 9) \ \&\ 1$ 및 $P = \text{SW} \ \&\ \text{0x1FF}$가 31가지 고유 스위치 입력 패턴 및 4,055개 스냅샷 전체에서 **불일치 0건 (100% 수학적 일치)**으로 검증됨.
-   - `HEX_CTRL`, `HEX_VALUE`, `HEX_RAW_LOW`, `HEX_RAW_HIGH`의 하드웨어 MMIO 리드백 결측 오류 0건 (`HEX P ... MISS=0000`).
-3. **ADC 및 조이스틱 결측 없는 공존성 (Zero Miss)**:
-   - 시퀀스 번호가 단조 증가하여 `SEQ=0x084ABAAE` (실기 보드 상 1억 3,911만 회 캡처)에 도달했으며 시험 전 과정에서 **결측 프레임 0건 (`MISS=0000`)** 유지.
-   - 하드웨어 레지스터 `ADC_JOY_STATUS`와 펌웨어 오라클 `joystick_policy_eval()`이 **4,055개 스냅샷 전체에서 100% 일치**.
-4. **서브시스템 간 공존성**:
-   - 고대역폭 VGA 메모리 트래픽(8,333회 이상 프레임버퍼 스왑), 577,912회 UART 하드웨어 루프백 전송(손실 0건), 동적 스위치 토글링, 지속적인 HEX MMIO 리드백이 병행 실행되는 동안 ADC 샘플링 및 CPU 실행에 간섭을 전혀 주지 않음.
+후속 P12 G16 Owner 수용은 Health SOF SHA-256 `f40843a1fd429a74a721cc6a5c1a0bc811011dc690891f1c495c00dd090cb064`의 정상 VGA/Health dashboard와 Owner 관찰 정상 KEY0 restart에 대한 BOARD_FUNCTIONAL_PASS_BOUNDED다. Image 선택/reset 횟수는 OWNER_ATTESTED, dashboard/post-reset은 PHOTO_OBSERVED다. Same-N UART/VGA signature matching은 NOT_INDEPENDENTLY_VERIFIED다. Physical loopback/GPIO/pin test, hardware CLEAR, trap injection, lock-loss/R1/R2/M9K safety, external I/O, continuous endurance를 이 좁은 결정으로 닫지 않는다. 이는 과거 exact-image 결과이며 current-main hardware 실행이나 모든 provider 수용이 아니다.
 
 ## 12. Baseline-cleanup spec/FW 정합성 트래커 (Role B)
 
@@ -472,6 +474,8 @@ Terasic DE10-Lite FPGA 실기 보드 수용 시험은 이슈 #6 C4-B를 통해 �
 Evidence ID: **E0** = 기준 소스의 S0 static source inspection 및 승인된 결과. **E1** = S1 local documentation checkpoint의 문서 delta. 둘 다 실행된 firmware test를 뜻하지 않는다. Owning spec은 자체 과거 evidence reference를 포함한다. 이 문서에 raw log, machine-local path 또는 private payload를 넣지 않는다.
 
 ### 12.2 초기 record 및 S1 조치
+
+> **역사적 ledger:** 당시 HREC disposition을 보존한다. P14는 timer_wait_ready와 aes_gcm_wait_done을 제거했다. 다른 문서의 현행 정합화는 별도 S3에서 통합하며 global FW-002/003 또는 evidence 상태를 승격하지 않는다.
 
 모든 row는 Issue #7/S0에서 기원하여 S1로 이어진다. FW column의 `firmware/`, spec column의 `spec/` prefix는 repository-relative다.
 

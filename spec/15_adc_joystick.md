@@ -1,6 +1,6 @@
 # P11 ADC / Joystick Subsystem Specification
 
-> **Status:** P11 VERIFIED SPECIFICATION — architecture frozen; RTL, FW driver, behavioral DV, physical hardware cadence (167 kHz continuous), direction characterization, and timing regression root cause are fully verified and signed off under Issue #6.
+> **Status:** Existing accepted P11 source/configuration-bound ADC scope. Not whole-SoC timing/physical/release acceptance.
 >
 > **Canonical language:** English. If this file and `kor/15_adc_joystick.ko.md` conflict, this file is authoritative.
 >
@@ -9,6 +9,14 @@
 > **Preflight authority:** Private Issue #4 `[P11A] ADC Cleanup Preflight`, report comment `issuecomment-5830820717`.
 >
 > **Parent specifications:** `00_soc_architecture.md`, `01_memory_map.md`, `05_apb_subsystem.md`, `06_reset_clock.md`, `19_firmware_contract.md`, `baseline_cleanup.md`.
+
+## Current contract and source/evidence boundary
+
+P11 is accepted within its source/configuration-bound ADC scope. The accepted final documented checkpoint is `6dfdd812c757fd1c49ac95ea92eb0186080948fe`; historical source/result identity must not be replaced with the current main SHA. Current project RTL retains the sole acquisition owner, 6-channel structural capacity with only CH1/CH2 active (ACTIVE_MASK=0x03), persistent ENABLE request/ack, stable bundled-data mailbox, CAPTURE-only HOLD with no RELEASE, FRAME_COUNT on accepted LIVE publication, and STATUS[6]=0. The generic v2 controller, stateless joystick policy and independent FW model remain distinct.
+
+Configured 1 MSPS total ADC rate and 10 MHz core input are vendor-configuration facts, not the measured frame rate. The accepted two-channel board record reports 299 CPU cycles/frame at 50 MHz, about 167.22 kframes/s over 2,810,880 frames; this is a bounded observation, not a guaranteed conversion/consumer rate or six-channel proof. P11 ADC-001..006/CDC-003/FW-009 and ADC-only APB-005 acceptance do not close global STA-001/002, board electrical qualification, other peripheral debt or Clean Baseline release. Behavioral vendor models are not generated hard-IP qualification.
+
+Traceability: [adc_acquisition_engine.v](../rtl/soc/adc_acquisition_engine.v); [adc_frame_mailbox_cdc.v](../rtl/soc/adc_frame_mailbox_cdc.v); [APB_ADC_Controller.v](../rtl/peripherals/APB_ADC_Controller.v); [Joystick_Policy.v](../rtl/peripherals/Joystick_Policy.v); [adc.c](../firmware/drivers/adc.c); [P11_ADC_FINAL_DOCUMENTATION_RECONCILIATION.md](../reports/evidence/P11_ADC_FINAL_DOCUMENTATION_RECONCILIATION.md).
 
 ## 1. Purpose and Scope
 
@@ -708,20 +716,9 @@ It resets to zero only on system reset in P11 baseline.
 
 ### 9.7 Invalid access policy
 
-The P11 ADC slot shall use exact full local-offset validation.
+CPU accesses use the bridge full-address/word-size/alignment/offset allowlist and the ADC slave direction/CTRL validation. Rejected CPU accesses return the existing two-cycle AHB ERROR without an ADC side effect. The local APB interface has no HSIZE/PSTRB input and cannot independently validate CPU transfer width. At the pinned source the ADC wrapper accepts canonical upper address 0x4005 or zero-based upper 0x0000 with exact local offsets; this is a source observation, not allocation of an additional CPU alias or generic rebasing permission. Any new direct-APB/rebased use needs an owning integration decision.
 
-The bridge allowlist shall admit only architecturally implemented offsets. Low-bit aliases such as `+0x100` mirrors are not permitted.
-
-The following return APB error / propagated AHB error with no side effect:
-
-- non-word access,
-- misaligned direct bus access,
-- write to RO register,
-- read/write of unimplemented reserved offsets,
-- malformed `ADC_CTRL` write with reserved bits set,
-- any slot-local offset not listed as architecturally valid.
-
-An eligible `CAPTURE` that finds no new frame is **not** an error; it is an OKAY no-op.
+RO writes, reserved offsets and malformed CTRL reserved bits produce completing PSLVERR with no state change. An otherwise eligible CAPTURE with no new frame remains OKAY/no-op and preserves HOLD; it is not an error. The frozen canonical CPU map and no-alias intent are unchanged.
 
 ## 10. Joystick Hardware Policy
 
@@ -1012,7 +1009,7 @@ joystick FW policy               = independent reference/golden function
 interrupt                        = none / polling
 ```
 
-All listed items are verified by raw evidence across C1..C4-D.
+Acceptance is limited to the recorded C1..C4-D source/configuration, exercised cases and board observations; it does not qualify changed bindings or unperformed cases.
 
 
 ## 17. Historical / Pre-P11 Baseline

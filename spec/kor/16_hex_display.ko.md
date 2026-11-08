@@ -6,6 +6,14 @@
 >
 > **상위 명세:** `soc_architecture.md`, `memory_map.md`, `apb_subsystem.md`, `reset_clock.md`.
 
+## 현행 계약과 source/evidence 경계
+
+현행 P10 RTL은 full-16-bit local offset +0x00/04/08/0c, VALUE[23:0], 상위 RAZ/WI인 CTRL[1:0], 21-bit RAW bank 두 개, active-low 7-segment 여섯 출력을 유지한다. Reset CTRL=1, VALUE=0은 decoded 000000이며 disable은 data를 보존하고 blank한다. Local invalid는 PSLVERR 없는 RAZ/WI이며 CPU bridge는 slot-7 offset/size/alignment 오류를 PSEL 전에 거부하고 always-ready slave에도 필수 SETUP phase를 추가한다.
+
+Driver는 sole-owner CTRL shadow, 명시적 init/resync와 SYSFW-01에서 추가한 masked side-effect-free raw getter를 쓴다. HEX-001..003 수용은 directed/host/bus/CPU evidence와 S6 board 관찰을 결합한다. S6 derivative 단독은 CONDITIONAL_PASS / OWNER_CONFIRMED이며 모든 RTL criterion을 자체 증명하지 않는다. Source base는 `128fc195aaf08c37a627835f185e5ae0400ac289`와 기록된 acceptance-app hash다. Physical glitch, 전체 I/O timing, current-main refit을 추론하지 않는다.
+
+추적: [APB_HEX_display.v](../../rtl/peripherals/APB_HEX_display.v); [hex_display.c](../../firmware/drivers/hex_display.c); [tb_hex_s5_cpu_e2e.sv](../../verification/directed/hex/tb_hex_s5_cpu_e2e.sv); [summary.md](../../reports/evidence/p10-hex-s6/summary.md).
+
 ## 1. 목적
 
 이 문서는 active FPGA baseline의 6-digit seven-segment HEX display peripheral을 정의한다.

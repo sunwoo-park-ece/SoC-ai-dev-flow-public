@@ -1,8 +1,10 @@
 # SoC Firmware Contract
 
-> **Issue #7 S1 application-role freeze:** `firmware/apps/final_main.c` is **HISTORICAL RC-CAR SYSTEM DEMO FIRMWARE**, retained for provenance/demo reproduction and dependent on the external STM32-based RC-car system. It is not the canonical standalone SoC integration-test firmware and, after Issue #7 completion/review, is not the basis for Issue #6 C4-A/C4-B. Owner-provided [FPGA SoC + STM32 RC-car demo](https://www.youtube.com/shorts/XYbi3uSHmUU).
+> **Issue #7 S1 application-role freeze:** `firmware/apps/final_main.c` is **HISTORICAL RC-CAR SYSTEM DEMO FIRMWARE**, retained for provenance/demo reproduction and dependent on the external STM32-based RC-car system. It is not the canonical standalone SoC integration-test firmware and, after Issue #7 completion/review, is not the basis for Issue #6 C4-A/C4-B. Owner-provided FPGA SoC + STM32 RC-car demo.
 >
-> The future canonical app is `firmware/apps/soc_health_main.c`; its approved contract and temporary baseline-cleanup spec/FW reconciliation ledger are [spec 22](22_soc_health_firmware.md). S1 is documentation only: app/services/providers/getters remain unimplemented and C4 remains paused. The monitor reports `AES_GCM = EXCLUDED_PENDING_CLEANUP`, contributes AES to neither PASS nor FAIL, and executes no AES operations. This application exclusion does not alter the existing AES hardware/driver contract. Existing per-IP rules and historical sections remain intact; broad reconciliation is deferred to the ledger's later coordinated pass.
+> The implemented standalone app is `firmware/apps/soc_health_main.c`; its current contract and historical SYSFW ledger are [spec 22](22_soc_health_firmware.md). SYSFW-01 host/provider/build acceptance, later P11 ADC C4 acceptance and P12 G16 bounded dashboard/restart acceptance remain separate source-bound scopes. `final_main` remains historical. The monitor reports `AES_GCM = EXCLUDED_PENDING_CLEANUP`, contributes AES to neither PASS nor FAIL and executes no AES operations, independently of P13 trusted AES driver acceptance.
+
+
 
 > **P09 closure note (2026-09-17):** Section 12 defines the active coherent G-sensor firmware contract (`gsensor_read_sample()`) and supersedes the historical raw telemetry description. RV32I builds and host mock-MMIO tests pass; `FW-008` is `IN_PROGRESS` for residual negative/race coverage.
 
@@ -21,6 +23,16 @@
 > **Canonical language:** English. If this file and `firmware_contract.ko.md` conflict, this file is authoritative.
 >
 > **Related specifications:** `soc_architecture.md`, `memory_map.md`, `memory_subsystem.md`, `cpu_interface.md`, `apb_subsystem.md`, `reset_clock.md`, `interrupt_architecture.md`, all peripheral specifications, and `board_io_architecture.md`.
+
+## Current Legacy contract and assurance boundary
+
+Startup installs mtvec, establishes sp, clears BSS, calls main and fail-stops if it returns. `.rodata/.data` reside in preloaded DMEM; there is no ROM-to-RAM copy. x1..x31 are unspecified after system reset. Reset mtvec=0x0000_6D60 lies outside 16 KiB IMEM until startup commits its replacement: that window is unprotected. The implemented trap endpoint records mcause/mepc and loops; its accepted P08B fail-stop boundary is distinct from target system recovery.
+
+Current software uses the map in soc_memory_map.h, P04 GPIO/SW/LED ownership, P06 Timer §37, P07 UART/LoRa §38 and the implemented trusted AES v2 API of §40. timer_wait_ready and aes_gcm_wait_done are absent; remaining raw AES helpers are LEGACY/UNSAFE/DEBUG ONLY. AES argument/overlap/LEN validation precedes MMIO; zero poll budget performs no MMIO. Success alone releases output; timeout after START or fatal core error latches recovery_required. acknowledge_external_reset supplies no reset-completion proof and does not unlock a latched driver. Finite completed-read budgets do not bound a stuck bus. Global FW-002/FW-003 remain OPEN despite accepted selected-IP sub-scopes; no IRQ/PLIC/ACLINT or platform recovery is added.
+
+Existing requirement/AC IDs and frozen intent are preserved. Pre-cleanup descriptions that conflict with this current contract are historical, not new implementation requirements. Status cites the existing accepted scope in the read-only tracker; this reconciliation does not promote it.
+
+Traceability: [start.S](../firmware/bsp/start.S); [linker.ld](../firmware/bsp/linker.ld); [soc_memory_map.h](../firmware/include/soc_memory_map.h); [aes_gcm.c](../firmware/drivers/aes_gcm.c); [aes_gcm.h](../firmware/include/aes_gcm.h).
 
 ## 1. Purpose
 
@@ -68,6 +80,7 @@ reset / instruction fetch
         v
       _start
         |
+        +--> mtvec = __trap_entry
         +--> sp = __stack_top
         +--> clear .bss with 32-bit stores
         +--> call main
@@ -110,9 +123,17 @@ The current design does not copy initialized data from IMEM into DMEM at runtime
 
 System reset does not architecturally scrub the entire DMEM. Firmware may assume only that `.bss` is cleared by `_start` and that initialized DMEM sections contain the values placed into the selected memory image.
 
+### 3.1 Initial Stack ABI and Capacity Boundary
+
+The project build uses `-march=rv32i -mabi=ilp32` (standard ILP32, not ILP32E). `__stack_top = ORIGIN(DMEM) + LENGTH(DMEM) = 0x1000_8000` is the exclusive DMEM end and the initial empty downward-growing stack pointer. Standard ABI procedures MUST enter with `sp` aligned to 16 bytes and preserve that alignment; the linker ASSERT rejects an initial stack symbol with nonzero low four bits. The symbol assignment allocates no section or byte at the exclusive boundary. The first stack frame moves `sp` below that address before accessing stack storage.
+
+For each linked image, initialized RAM and `__bss_end` MUST leave usable stack headroom within canonical DMEM; inspect that image’s ELF/map and startup binding. Alignment alone does not prove maximum call depth, worst-case stack capacity, overflow detection or a fixed reserved stack budget. No such capacity or overflow guarantee is introduced here. Startup order remains `mtvec → sp → .bss clear → main`; initialized data is preloaded, not copied from ROM.
+
 Firmware shall not use non-canonical DMEM or VRAM aliases even when coarse RTL decode causes them to access physical storage.
 
 ## 4. Current Canonical MMIO Map
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 The current firmware-visible APB bases are:
 
@@ -175,6 +196,8 @@ The current HEX driver maintains `hex_ctrl_shadow`. Therefore application code t
 
 ## 7. Current Polling Model
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 The active CPU has no integrated external interrupt path and no active PLIC. Peripheral service is therefore polling-based.
 
 Current drivers still contain unbounded waits outside the UART/LoRa sub-scope,
@@ -196,6 +219,8 @@ peripheral can stall the CPU indefinitely.
 Applications that require forward progress should use their own bounded polling around status APIs where practical until the target driver contract is implemented.
 
 ## 8. UART0 / UART1 Rules
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 UART0 and UART1 share the same register contract. UART0 is the LoRa-facing port in the baseline; UART1 is the PC-facing port.
 
@@ -228,6 +253,8 @@ transmit helpers. It exposes sticky combined RX error query and
 unimplemented interrupt functionality.
 
 ## 9. Timer Rules
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 The current timer is polling-based.
 
@@ -277,6 +304,8 @@ If hardware clear is used, firmware shall obey the `CLEAR_BUSY` / `CLEAR_DONE` s
 Current infinite polling helpers can hang if VSYNC or clear completion never arrives. Diagnostic applications that need fault tolerance should use a bounded poll as `display_smoke` already does for VSYNC.
 
 ## 11. Legacy GPIO Rules
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 The current GPIO block is not a true bidirectional GPIO peripheral.
 
@@ -472,6 +501,8 @@ The current top-level exposes seven segments per digit; firmware shall not assum
 
 ## 15. AES-GCM Rules
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 The current wrapper is an AES-128, single-payload-window accelerator. The firmware contract is stricter than the current driver implementation.
 
 ### 15.1 Length
@@ -523,6 +554,8 @@ The current accelerator is not a secure key vault. Key registers are software-vi
 
 ## 16. Current Error-Handling Limitations
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 Current bus behavior does not provide a reliable architectural fault for every invalid address:
 
 ```text
@@ -556,6 +589,8 @@ After the baseline-cleanup redesign, firmware shall follow these project-wide pr
 10. target behavior is enabled only after corresponding RTL/DV/FPGA evidence exists.
 
 ## 18. Target APB / Board-I/O Map
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 After the approved board-I/O migration is implemented, firmware shall use:
 
@@ -626,6 +661,8 @@ Timeout shall produce an explicit software error rather than silently continue a
 A deliberately infinite wait may exist only as a clearly named debug/boot primitive where permanent blocking is the intended policy.
 
 ## 21. Target GPIO / SW / LED Contract
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 ### 21.1 GPIO
 
@@ -700,6 +737,8 @@ PLIC source IDs, PLIC MMIO addresses, CSR enable rules, and `mcause` encoding ar
 
 ## 23. Target UART Contract
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 The target UART driver shall preserve TX-ready-before-write behavior and shall add a bounded transmit API for callers requiring forward progress.
 
 If later UART cleanup adds interrupt-driven RX/TX, the polling APIs may remain as boot/debug primitives, but interrupt-enable fields shall not be used by firmware until the matching RTL and PLIC source contract are verified.
@@ -707,6 +746,8 @@ If later UART cleanup adds interrupt-driven RX/TX, the polling APIs may remain a
 Driver APIs shall expose RX framing/overflow/error state in a way that does not silently discard the information available from the hardware status model.
 
 ## 24. Target Timer Contract
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 The target timer driver shall own restart sequencing so callers do not need to remember stale READY behavior.
 
@@ -800,6 +841,8 @@ intentionally extended and the HEX specification is revised.
 
 ## 29. Target AES-GCM Contract
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 > **P13-01 detail:** The Owner-approved but not yet implemented D01–D12 target API, status causes, finite polling and zeroize boundary are specified in Section 40 and in [14_aes_gcm.md](14_aes_gcm.md) Section 25. Current behavior remains in Section 15.
 
 The target crypto driver shall enforce, rather than merely document:
@@ -828,6 +871,8 @@ Firmware/protocol logic remains responsible for IV/sequence uniqueness unless a 
 If hardware cleanup adds key zeroization, the target driver shall expose it and use it at key-lifetime boundaries. Until then, software shall not claim secure key erasure from the accelerator.
 
 ## 30. Target Error-Handling Contract
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 Firmware shall distinguish at minimum:
 
@@ -919,6 +964,8 @@ Compatibility wrappers may exist temporarily during cleanup, but they shall be c
 
 ## 34. Cleanup Items to Carry Forward
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 The consolidated `baseline_cleanup.md` shall include firmware-visible work items for at least:
 
 ```text
@@ -939,6 +986,8 @@ FW-012  Add host MMIO driver regressions and FPGA acceptance updates
 Exact IDs may be normalized when the central cleanup tracker is created.
 
 ## 35. Firmware Invariants
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 ### 35.1 Current baseline invariants
 
@@ -991,6 +1040,8 @@ firmware/drivers/hex_display.c
 Hardware behavior remains authoritative in the corresponding canonical specifications. If current firmware code conflicts with a hardware specification, the conflict is a cleanup defect rather than permission for firmware to redefine the hardware contract.
 
 ## Phase 4A-2 Approved Firmware Cleanup Contract (partly active; see P04 closure note)
+
+> **Historical A1–A6 checkpoint:** The unresolved MIN_SAFE_BAUD_DIV and target tense below describe that milestone. Current P07B accepts 217..65535 (§38); P04/P06/P09B implementation is governed by its current owning clauses.
 
 Under A1, expose 16 generic GPIO bits (`GPIO_IO[0:15]` to JP1 `GPIO_[0:15]`) through DATA_IN/OUT, DIR and local IRQ registers; existing UART/LoRa pins are separate and `gpio_irq` is not yet CPU-routed. P04 implements this driver/map structure and removes the stale GPIO-LED assumptions, but physical GPIO/LED board tests for `FW-005/FW-007` remain. Under A2, invalid AHB/APB, DMEM, VGA and peripheral accesses fault rather than read zero/OKAY; load/store faults have causes 5/7, with misalignment causes 4/6 remaining distinct. Drivers must use canonical aligned offsets/sizes and handle errors, not rely on mirrors. Under A3, framebuffer API is `vram_write_word()` for aligned 32-bit writes only; remove/deprecate `vram_write_byte()` and provide no framebuffer readback API. Under A4, use bounded `TX_READY` polling; busy DATA writes are backpressured, not dropped. `UART_BAUD` is a 50 MHz PCLK divisor, default 434, not an enumeration; presets include 9600/19200/38400/57600/115200/230400, and additional safe rates may be calculated. Zero/unsafe divisors cannot become active; `MIN_SAFE_BAUD_DIV` remains an unresolved implementation constraint. Under A5, `timer_start(N)` writes COMPARE=N then START to create a fresh exact-N-edge one-shot (N=0 completes at START); W1C does not restart. Under A6, software-visible G-sensor register behavior is unchanged by the private PCLK-only SPI clock implementation. Unmentioned contracts remain targets until their owning evidence closes them.
 
@@ -1055,9 +1106,9 @@ The coherent G-sensor firmware API `gsensor_read_sample()` is fully integrated i
 
 Prior to P09B, the firmware had no coherent driver or snapshot mechanism. Software read raw telemetry directly from two APB registers (`GSENSOR_XY_DATA` and `GSENSOR_Z_DATA`), which lacked `VALID` or `SEQ` indicators and risked torn reads across separate bus transactions. This raw interface is retained only as historical background and is superseded by the active driver contract in §12.
 
-## 40. P13-01 Approved AES-GCM Firmware Target Contract — Pending Implementation
+## 40. P13 AES-GCM Trusted Firmware Contract — Implemented v2
 
-> **Lifecycle:** Owner-approved D01–D12 target ABI; not current `aes_gcm.c/.h` behavior or firmware verification. Section 15 remains the current baseline; Section 29 is the target overview. This section owns the detailed **target firmware API**. The AES register/operation ABI is defined in [AES specification](14_aes_gcm.md), Section 25; Korean companion is [here](kor/19_firmware_contract.ko.md). The target driver shall recognize `VERSION` ASCII `"2.00"` before using new status/zeroize semantics; legacy `"1.00"` cannot be treated as v2-compatible.
+> **Lifecycle:** Implemented serialized v2 API contract. Use the current contract above and the read-only tracker for bounded acceptance; v1 is not v2-compatible.
 
 ### 40.1 Ownership, input and packing (D01, D03, D09, D12)
 
@@ -1097,11 +1148,13 @@ Core overflow is a **fatal internal hardware termination** target, distinct from
 
 ### 40.5 APB and integration limitations (D07, D10, D12)
 
-Always use canonical aligned 32-bit slot-4 addresses. The bridge rejects invalid offset, size and alignment before AES PSEL with a two-cycle AHB ERROR; it **does not** guarantee wrong-direction accesses to otherwise canonical offsets fault. The current AES wrapper has no local PSLVERR and retains partial direct-APB aliases. The approved target requires exact full-width wrapper-local offset decode and reserved/noncanonical direct-APB RAZ/WI without side effects or `+0x100`/high-bit aliases; it retains no AES PSLVERR. This local policy does not turn invalid CPU accesses into successes, and canonical RO/WO wrong-direction behavior remains separate and unchanged. Raw MMIO may expose pre-authentication plaintext. The firmware-only authentication gate is effective only for callers using the serialized trusted API. AES IRQ, DMA, PLIC hookup and Health AES provider enable are deferred; current Health AES remains `EXCLUDED_PENDING_CLEANUP`.
+Always use canonical aligned 32-bit slot-4 addresses. The bridge rejects invalid offset, size and alignment before AES PSEL with a two-cycle AHB ERROR; it **does not** guarantee wrong-direction accesses to otherwise canonical offsets fault. The current AES v2 wrapper has no local PSLVERR and implements exact full-width canonical address decode with reserved/noncanonical direct-APB RAZ/WI, no side effects and no `+0x100`/high-bit aliases. This local policy does not turn invalid CPU accesses into successes, and canonical RO/WO wrong-direction behavior remains separate and unchanged. Raw MMIO may expose pre-authentication plaintext. The firmware-only authentication gate is effective only for callers using the serialized trusted API. AES IRQ, DMA, PLIC hookup and Health AES provider enable are deferred; current Health AES remains `EXCLUDED_PENDING_CLEANUP`.
 
-### 40.6 Acceptance criteria and lifecycle
+### 40.6 Stable AC definitions and historical P13-01 status
 
-| AC ID | Owner requirement | Required verification | Current status |
+OPEN in this table is the historical P13-01 state. Current FW-010 is VERIFIED within the accepted serialized v2 API scope; global FW-002 remains OPEN. D08 NOT_PROVEN and separate recovery/new-platform qualification obligations remain.
+
+| AC ID | Owner requirement | Required verification | Historical P13-01 status |
 |---|---|---|---|
 | `FW-AES-AC-01` | FW-010, D01/D11 | Complete 32-bit LEN validation before MMIO, wrong arguments leave MMIO untouched | OPEN |
 | `FW-AES-AC-02` | FW-010, D11 | At most N completed post-START STATUS reads, stop on DONE; zero-budget 0 MMIO; distinguish timeout from hanging bus | OPEN |
@@ -1110,4 +1163,6 @@ Always use canonical aligned 32-bit slot-4 addresses. The bridge rejects invalid
 | `FW-AES-AC-05` | AES-003/D09/D12 | Byte packing, partial output masking, IV uniqueness and replay responsibility | OPEN |
 | `FW-AES-AC-06` | FW-010, D08 | Correct cause-based result/diagnostics, no success when PROG_ERROR persists | OPEN |
 
-These are target criteria, not evidence. `AES-001` retains its separate, narrow VERIFIED actual-core six-case KAT. FW-010 and relevant AES-002..007 rows are not promoted. P13-03 FW implementation, P13-04 independent KAT/DV and P13-05 CPU E2E are deferred separate gates.
+These criteria are not evidence. The table preserves historical P13-01 states, when P13-03/04/05 were later gates. Current AES-001..007/FW-010/VER-006/007 retain their existing source-bound bounded acceptance; D08 integrated actual-core natural overflow/late success remains NOT_PROVEN / BLOCK_FOR_PROMOTION. This reconciliation is neither status promotion nor new DV.
+
+Historical P13-03, P13-04 and P13-05 gate identities and AES-002..007 obligations are retained. This reconciliation supplies no evidence beyond the current bounded scope above.

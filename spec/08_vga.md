@@ -4,7 +4,15 @@
 >
 > **Reviewed source anchor:** `f28e95df2eafcb939e04ffaca728c44f74c90612`. This is functional-scope acceptance, not a release, CDC, or full timing-sign-off claim.
 
-> **C08 diagnostic ABI amendment:** Section 3.2's bit 5 and bits 31:16, Sections 3.2.1–3.2.4, and Section 5.2 are a normative draft pending Owner/Chat spec review. They are not implemented or verified. Existing bits 4:0, functional timing, and accepted P08B criteria retain their contracts. The reviewed source anchor does not substantiate the new diagnostics.
+> **C08 diagnostic ABI:** Implemented digital diagnostics with the bounded disposition in §6. Separate proposed physical exceptions and unaccepted AC09 remain unchanged.
+
+## Current contract and source/evidence boundary
+
+The source at `35e4633a53a080402526ef751d128df120f311a9` contains the C08 diagnostic ABI: STATUS bit 5 IS_CDC and bits 31:16 LOCK_LOSS_COUNT. The later C08 disposition in §6 supersedes the earlier diagnostic “not implemented/not executed” labels; it does not adopt the proposed physical-assurance exception in §6.1/§7.2. Preserve the frozen operation, frame-wrap ACK, clear-count, no-side-effect, reset/abort and recovery obligations. C08-PHYS-001 remains NOT_PROVEN; VGA-CDC-AC-09 BLOCK/NOT_VERIFIED, CDC-001/VER-003 OPEN, STA-001 IN_PROGRESS, STA-002 BLOCKED and SYNCASYNCNET NOT_WAIVED remain unchanged.
+
+P12 G16 Owner acceptance covers only normal VGA/Health dashboard output and Owner-observed normal KEY0 restart on its exact Health image. It does not prove synchronized UART/VGA same-N content, hardware CLEAR, trap injection, every lock-loss event, reset-branch ordering or M9K write-edge atomicity. Historical P08B functional evidence and later P12 digital/board scopes are separate; none establishes physical safety or release at the present source.
+
+Traceability: [pre_fetch_AHB_VRAM_DUAL_BUFFER.v](../rtl/video/vram/pre_fetch_AHB_VRAM_DUAL_BUFFER.v); [HW_Cleaner.v](../rtl/video/vram/HW_Cleaner.v); [vram.c](../firmware/drivers/vram.c); [summary.md](../reports/evidence/vga-hwclear/summary.md).
 
 ## 1. Status and Scope
 
@@ -133,7 +141,7 @@ Writing one selectively clears bits 0, 1, 3, and (in the amendment) 5; writing z
 
 Status access does not use the framebuffer/control readiness rejection gate. Consequently, an aligned status read or W1C write can be accepted while `OP_BUSY=1` or `DOMAIN_READY=0`. An accepted W1C bus write performs only the selected event acknowledgements; it is never a VRAM word write.
 
-### 3.2.1 Sampled-command mismatch and transaction association (draft)
+### 3.2.1 Sampled-command mismatch and transaction association
 
 The diagnostic observes HCLK-sampled **CPU-attributable framebuffer write commands** at the bank write-port interface and the response of the **same captured data-phase transaction**. It observes command intent, address/data, selected bank, and command multiplicity, not an independent BRAM bitcell acknowledgement. The comparison reference is exactly one CPU command for final OKAY, and zero for final ERROR, for a supported aligned canonical framebuffer word write. Cleaner writes, CONTROL/STATUS transfers, unsupported addresses/sizes/directions, and unrelated bus phases are excluded.
 
@@ -143,7 +151,7 @@ Set `IS_CDC` only when this transaction has a detected command/response disagree
 
 The monitor is observational: it must not drive functional commit, write-enable, AHB response, bank ownership, reset, or recovery controls. `IS_CDC=0` means only no observed qualified mismatch. A shared Boolean expression for response and write-command can make the comparison vacuous or synthesis can eliminate redundant logic; neither a retained monitor nor a zero flag proves independence. Lock transitions near a physical memory write edge, metastability, pulse width, and actual bitcell effects remain outside sampled-command proof.
 
-### 3.2.2 Captured PLL loss episodes, arm/rearm, and clock stops (draft)
+### 3.2.2 Captured PLL loss episodes, arm/rearm, and clock stops
 
 An episode is a captured `vga_pll_locked:1→0` transition while diagnostic capture is armed, not each low cycle. After `HRESETn`, capture starts disarmed with no pending event; initial lock=0 and initial acquisition of lock do not increment the counter. Stable lock for arming means at least two consecutive HCLK observations of synchronized lock=1 while `HRESETn=1`. This is a digital qualification interval, not proof of analog PLL stability.
 
@@ -151,13 +159,13 @@ Arm only after that stable-lock qualification and acknowledgement/retirement of 
 
 An asynchronous capture mechanism must preserve an armed, successfully captured episode across PLL/pixel epoch reset. If HCLK stops, retirement, counter update, and software observation wait until HCLK restarts; the captured pending notice must survive that interval unless `HRESETn` asserts. PCLK stop/restart alone is neither a lock-loss episode nor a counter reset, and diagnostic transfer must not depend on PCLK progress. A loss while already disarmed need not be counted. No guarantee is made for arbitrary short pulses; minimum capture/rearm pulse widths and physical implementation limits require later device/board evidence.
 
-### 3.2.3 STATUS sampling and interpretation (draft)
+### 3.2.3 STATUS sampling and interpretation
 
 One aligned STATUS read samples a complete 32-bit HCLK-visible register image at its globally accepted read-completion edge. Both diagnostic fields come from the same pre-update image; updates retired at that edge appear on a subsequent read. A held read does not independently complete. This prevents torn software reads of the counter/flag but does **not** atomically order pending asynchronous loss capture, transaction diagnosis, counter retirement, or the other live status fields against an external edge. A pending notice can be absent from the returned count; fault and count visibility need not occur together.
 
 For an interval without `HRESETn`, with both endpoint counts below `0xFFFF`, a positive ordinary counter difference demonstrates captured, retired loss opportunities only if the test setup and event provenance are valid. It does not show all physical losses or stress at a particular write edge. At saturation the true number of further losses is unknown; never use modulo/wrap subtraction. `COUNT=0` does not certify absence of physical loss; `COUNT>0 && IS_CDC=0` does not prove physical commit or CDC correctness. Counter retention after fault W1C and delayed capture retirement also prevent treating the two fields as a single event log.
 
-### 3.2.4 Firmware / Health diagnostic use (draft)
+### 3.2.4 Firmware / Health diagnostic use
 
 Firmware obtains both fields through one `vram_status()` result: bit 5 is the fault and `(status >> 16) & 0xFFFF` is the captured count. Read and report that snapshot before an explicit bit-5 W1C. Routine `vram_clear_events()` and operation/VSYNC housekeeping retain masks containing only bits 0, 1, and 3; they must not acknowledge bit 5 or write a saved full STATUS value back as an event-clear mask. No current driver API is claimed to implement the new explicit fault-clear operation. A pending newly diagnosed mismatch can set/re-set the sticky bit despite software clearing older history.
 
@@ -180,6 +188,7 @@ The frozen driver exposes the following bounded interface. `OK`, `TIMEOUT`, `NOT
 | Function | Arguments and behavior | Return / limitation |
 |---|---|---|
 | `vram_status()` | Reads the aligned status register. | Returns the raw 32-bit status value. |
+| `vram_clear_cdc_fault()` | Writes only STATUS bit 5 W1C; leaves LOCK_LOSS_COUNT unchanged. | `void`; no recovery or board-safety guarantee. |
 | `vram_clear_events(mask)` | Writes only `mask & (VSYNC_EVENT | OP_DONE | OP_ABORT)` to W1C status. | `void`; BUSY/READY and unselected events are not acknowledged. |
 | `vram_wait_ready(poll_budget)` | Polls until `DOMAIN_READY=1`, at most `poll_budget` reads. | `OK` or `TIMEOUT`. |
 | `vram_wait_vsync(poll_budget)` | Per poll, checks `OP_ABORT`, then not-ready, then `VSYNC_EVENT`. | `ABORTED`, `NOT_READY`, `OK`, or `TIMEOUT`. |
@@ -264,7 +273,7 @@ The existing `VGA-AC-01..08` retain their P08B meanings. The criteria below defi
 
 `VGA-CDC-AC-08` is behavioral proof; `VGA-CDC-AC-09` is structural CDC proof. TimeQuest generated-clock, recovery/removal, exception, and slack review remains under `STA-001` and shall not be inferred from either criterion.
 
-### 5.2 Diagnostic amendment acceptance cases (draft; not executed)
+### 5.2 Diagnostic amendment acceptance cases (implemented diagnostics; bounded evidence)
 
 These new criteria do not replace `VGA-AC-01..08` or `VGA-CDC-AC-01..09` and have no accepted implementation/DV evidence. Positive cases and the listed counterexamples require later scoped verification with an independent transaction/event oracle; no test execution is authorized by this document amendment.
 

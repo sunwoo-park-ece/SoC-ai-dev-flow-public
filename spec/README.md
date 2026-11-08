@@ -4,6 +4,39 @@ Feature and architecture specifications live here.
 
 Primary owner: **Developer + ChatGPT Chat (Project Leader / Tech Lead / Architect / Spec Owner / Final Reviewer)**.
 
+## Current Legacy source and reuse boundary
+
+The original reconciliation input is production source/tracker revision
+`35e4633a53a080402526ef751d128df120f311a9`. The current linker additionally
+repairs initial standard RV32 ILP32 stack alignment: `__stack_top=0x1000_8000`
+is the empty downward-stack exclusive DMEM end, with a 16-byte link-time
+alignment assertion. The [memory](02_memory_subsystem.md) and
+[firmware](19_firmware_contract.md) contracts separate this ABI repair from
+image-specific capacity and overflow assurance. This repair changes no memory
+region geometry and is not new board/vendor qualification. The accepted P14 implementation is
+`8bf26bdc05796b5be6a12410a0f04cf54837d8f9`; prior spec reconciliation is
+`d738cf06db3439fd0a90cd85bf61424bb17fa263`. The terminal revision changes only
+EN/KO tracker state, including Owner-accepted CPU-001 width/naming. It is not a
+new simulation snapshot. Spec candidate review/acceptance is still separate.
+
+The full production top and [selected-IP test composition](../verification/selected_ip/README.md)
+have different apertures: production APB slots 0..9 versus selected slots
+0,1,2,4,6. Neither omitted test peripherals nor future roadmap features alter
+the production contract. P14 selected cleanup is complete; [Clean Baseline](baseline_cleanup.md)
+remains NOT_RELEASED. AES D08 integrated natural overflow/late success is
+NOT_PROVEN, and vendor memory, physical timing/CDC and board limits are not
+automatically inherited by another platform.
+
+Another owning repository must adopt a reviewed, pinned immutable Spec snapshot,
+select clauses deliberately, and record adopted/modified/rejected/deferred
+dispositions in its own specifications. Reading or copying all Legacy EN/KO
+pairs is not automatic adoption. PLIC, ACLINT, AXI/DMA and dual-hart contracts
+require new ownership and qualification; this Legacy refresh does not define
+them. The affected numbered specifications now identify current contract,
+historical reconstruction, bounded accepted evidence and unproven/deferred work.
+The remaining Legacy peripherals and cross-cutting timing/physical documents
+retain their existing authority and are deferred from this focused reconciliation.
+
 ## Layout and Reading Order
 
 Canonical numbered English specifications stay directly under `spec/` and use a two-digit numeric prefix to make the intended reading/dependency order visible.
@@ -34,13 +67,14 @@ spec/
 ├─ 14_aes_gcm.md
 ├─ 15_adc_joystick.md
 ├─ 16_hex_display.md
-├─ 17_sw.md                      # target contract; not active baseline RTL yet
-├─ 18_led.md                     # target contract; not active baseline RTL yet
+├─ 17_sw.md                      # active P04; historical reconstruction retained
+├─ 18_led.md                     # active P04; historical reconstruction retained
 ├─ 19_firmware_contract.md       # current + approved target software contract
-├─ 20_board_io_architecture.md   # target cross-cutting architecture
+├─ 20_board_io_architecture.md   # active P04 with separate physical gaps
 ├─ 21_cpu_core.md                # detailed supplemental baseline CPU microarchitecture
-├─ 22_soc_health_firmware.md     # future health contract + spec/FW reconciliation ledger
+├─ 22_soc_health_firmware.md     # implemented Health contract + historical SYSFW ledger
 ├─ timing_constraints.md         # canonical cross-cutting STA policy
+├─ physical_assurance_limitations.md # proposed / not accepted physical register
 ├─ baseline_cleanup.md           # active consolidated cleanup tracker
 └─ kor/
    ├─ 00_soc_architecture.ko.md
@@ -67,6 +101,7 @@ spec/
    ├─ 21_cpu_core.ko.md
    ├─ 22_soc_health_firmware.ko.md
    ├─ timing_constraints.ko.md
+   ├─ physical_assurance_limitations.ko.md
    └─ baseline_cleanup.ko.md
 ```
 
@@ -74,7 +109,7 @@ The original numbered baseline/target specification set through `20_board_io_arc
 
 `baseline_cleanup.md` remains the active project-wide tracker: it collects and deduplicates cleanup findings, separates baseline-cleanup gates from PLIC/AXI/optional future work, records dependencies and blocking decisions, and defines the verification/evidence exit gate.
 
-The next project stage is **baseline cleanup decision closure and implementation**, not additional feature integration. PLIC and AXI work remain downstream of the cleanup gate.
+Legacy whole-baseline cleanup and release remain separately gated. P14 selected-IP cleanup is complete within its accepted envelope; selected reuse requires its own source adoption and requalification. PLIC and AXI are new-platform work, not existing Legacy functionality.
 
 The numeric prefix is a **navigation and authoring-order aid**, not part of the architectural meaning of the document. Explicit dependencies and ownership stated inside each specification remain authoritative.
 
@@ -82,15 +117,13 @@ When new specifications are inserted later, renumbering is allowed if it improve
 
 ## Implemented Baseline vs Target Contracts
 
-Most documents through `16_hex_display.md` reconstruct and document the currently implemented FPGA baseline. In particular, `16_hex_display.md` has been fully cleaned up and verified across RTL (CTRL RAZ/WI, exact offset decode), firmware (Shadow sync), multi-tier simulation, Quartus build, and physical board acceptance (P10-HEX S0..S6). The GPIO/SW/LED and APB topology described below were implemented and verified during Phase 4A-P04; older target-only wording inside individual documents remains historical context until the full specification refresh.
+The 23 numbered EN/KO pairs, timing and physical-assurance pairs, and this index form a 51-file candidate. The two read-only cleanup trackers give a 53-document review universe. Current clauses govern current operation; explicitly historical migration/checkpoint statements do not reopen completed implementation or establish new evidence.
 
-`17_sw.md`, `18_led.md`, and `20_board_io_architecture.md` define the contract implemented by Phase 4A-P04. Their requirements are active only where implementation and verification evidence exist; they shall not be used to imply completion of unrelated board, firmware, PLIC, or final timing acceptance.
+P04 GPIO/SW/LED, P06 Timer, P07 UART, P09B G-sensor, P10 HEX, P11 ADC, SYSFW-01 Health and P13/P14 selected digital behavior retain their individually accepted source/use boundaries. HEX S6 observations alone do not prove every HEX criterion. P11 ADC-specific CDC-003 acceptance does not close VGA CDC-001. The detailed per-IP contracts distinguish CPU bridge ERROR from local APB RAZ/WI or PSLVERR.
 
-`19_firmware_contract.md` intentionally contains both layers: current firmware rules that apply to the active baseline and approved target firmware rules that become active only with the corresponding cleanup implementation/evidence.
+`19_firmware_contract.md` separates current APIs from explicitly historical and deferred behavior. [Health](22_soc_health_firmware.md) and its [Korean companion](kor/22_soc_health_firmware.ko.md) describe implemented `soc_health_main`, accepted SYSFW-01 host/provider/build scope, later P11 ADC scope and P12 G16 normal dashboard/restart scope. AES remains EXCLUDED_PENDING_CLEANUP in Health despite separate trusted AES v2 acceptance. Historical SYSFW stage labels are not Legacy Spec refresh stage approvals.
 
-`21_cpu_core.md` reconstructs the active CPU microarchitecture in detail and records CPU-local cleanup findings plus approved spec-owner policy decisions. Its GPR-reset, machine-identification, FENCE/FENCE.I, EBREAK, and machine-counter cleanup policies are now resolved; target behavior shall still not be cited as active RTL behavior until implementation and verification evidence exists.
-
-[22_soc_health_firmware.md](22_soc_health_firmware.md) and its [Korean companion](kor/22_soc_health_firmware.ko.md) freeze the future standalone `soc_health_main` contract and the temporary baseline-cleanup spec/FW reconciliation ledger. S1 is documentation only, not implemented firmware or runtime/board acceptance. `final_main` remains a historical RC-car system demo; owning IP specifications and `baseline_cleanup.md` retain their authority.
+`21_cpu_core.md` describes the accepted CPU subset and limits. CPU-001 is VERIFIED only for width/naming; CPU-010 remains OPEN with x1..x31 unspecified after system reset. Existing GPR policy is not proof of a reset-cleared register file. FW-002/FW-003 remain OPEN. Timing/physical limits and Clean Baseline NOT_RELEASED are unchanged.
 
 `baseline_cleanup.md` does not supersede these contracts. It coordinates implementation order, status, severity, dependencies, verification, FPGA acceptance, and evidence. If a tracker item requires behavior different from a canonical specification, the specification shall be updated first.
 

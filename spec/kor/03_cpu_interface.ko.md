@@ -6,9 +6,16 @@
 >
 > **상위 명세:** `soc_architecture.md`, `memory_map.md`, `memory_subsystem.md`.
 
-> **Phase 4A-3A 읽기 규칙:** 앞의 `HSIZE` 미구동·`HRESP` 미소비를 ‘현재 baseline’으로 서술한 부분은 cleanup 전 기록이다. 아래 Phase 4A-3A data-bus fault 계약이 현행 구현 범위다. 기타 CPU cleanup은 열린 상태다.
 
 > **Store payload/mask 계약 상태:** §7.1의 승인된 A2 계약은 유지한다. 통합 CPU는 응답 독립적인 MEM payload/mask 경로를 구현하며 §7.2는 한정된 구조·simulation 근거와 남은 한계를 기록한다. 역사적 관찰은 더 새로운 동결 fault 계약을 대체하지 않는다. 실제 C1a 조합 구조 변경은 §6.4와 [CPU 구조](21_cpu_core.ko.md#203-통합-c1a-구조와-유지되는-소유권)에 설명한다.
+
+## 현행 Legacy 계약과 보증 범위
+
+`CPU-001`의 Owner 수용 `VERIFIED` 범위는 `EX_funct3_AHB[2:0]` 폭과 `MEM_store_data_AHB` 명칭뿐이다. EX는 주소/제어, MEM은 정렬 store data/mask를 소유한다. Master 입력명 `MEM_read_data2`는 유지하며 load readback은 별도다. HREADY wait 안정성, DMEM-local CUSTOM_WRITE_MASK/BRAM_HAZARD, pre-bus misalignment cause 4/6, 해당 MEM의 final ERROR cause 5/7을 유지한다. 실패 instruction의 실패 side effect 및 성공 retirement는 없다. 폭/명칭 수용은 generic AMBA, 전체 ISA 증명, whole-SoC 수용을 의미하지 않는다.
+
+기존 requirement/AC ID와 동결 의도를 유지한다. 아래 현행 계약과 충돌하는 cleanup 전 설명은 역사적 기록이며 새 구현 요구가 아니다. 상태는 읽기 전용 tracker의 기존 수용 범위를 인용하며 이 정합화로 승격하지 않는다.
+
+추적: [RV32I46F_5SP_MMIO.v](../../rtl/core/v/top/RV32I46F_5SP_MMIO.v); [AHB_MASTER.v](../../rtl/bus/AHB_MASTER.v); [README.md](../../verification/selected_ip/README.md).
 
 ## 1. 목적
 

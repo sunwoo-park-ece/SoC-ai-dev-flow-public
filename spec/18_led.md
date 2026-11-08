@@ -1,4 +1,4 @@
-# Target SoC LED Output Peripheral Specification
+# SoC LED Output Peripheral Specification
 
 > **P04 status note (2026-09-15):** APB_LED at slot 9 owns all LEDR[9:0]; reset-indicator ownership of LEDR[9] was removed. Open directed verification and the user-operated Quartus fit pass. `BOARDIO-004` remains OPEN because its explicit walking/all-on/off physical board test has not run. Pre-P04 “not implemented” text below is historical.
 
@@ -8,11 +8,17 @@
 >
 > **Parent specifications:** `soc_architecture.md`, `memory_map.md`, `apb_subsystem.md`, `reset_clock.md`, `gpio.md`, `board_io_architecture.md`.
 
+## Current contract and source/evidence boundary
+
+APB_LED is implemented P04 at 0x4009_0000 / PSEL[9] and owns all LEDR[9:0]. LED_DATA at +0x00 is a ten-bit latch; upper write bits are ignored/read zero, reset drives all outputs off, and readback reports the latch rather than illumination. The former LEDR[9] reset-indicator driver is removed. PREADY=1; no IRQ, PWM or blink hardware. Direct local invalid offsets are RAZ/WI without PSLVERR; the CPU bridge rejects invalid address/size/alignment before PSEL with two-cycle ERROR. BOARDIO-004 remains OPEN for its explicit physical walking/all-on/off test; FW-006 map acceptance and digital tests are not that board result.
+
+Traceability: [APB_LED.v](../rtl/peripherals/APB_LED.v); [AMBA_SoC_TOP.v](../rtl/soc/AMBA_SoC_TOP.v); [led.c](../firmware/drivers/led.c); [tb_p04_boardio.sv](../verification/directed/bus/tb_p04_boardio.sv).
+
 ## 1. Purpose
 
 This document defines the dedicated APB peripheral for the ten DE10-Lite red LEDs.
 
-The target design separates LED output control from the legacy `APB_GPIO` block and provides:
+The current P04 design separates LED output control from the legacy `APB_GPIO` block and provides:
 
 - one dedicated ten-bit output latch,
 - direct control of `LEDR[9:0]`,
@@ -24,22 +30,11 @@ It intentionally does not provide GPIO direction control, PWM brightness, blinki
 
 ## 2. Architectural Status and Address Ownership
 
-The active baseline currently drives `LEDR[8:0]` through the legacy `APB_GPIO` block while `LEDR[9]` is a separate reset indicator.
+The current P04 production top instantiates APB_LED on PSEL[9], base `0x4009_0000`, and assigns all LEDR[9:0] to it. PSEL[8] is dedicated SW and PSEL[1] is true GPIO; slots 10..15 are reserved/error. The earlier GPIO-to-LED/reset-indicator composition is historical. Address authority remains the memory map; no new allocation is made.
 
-The approved cleanup target assigns:
+## 3. Current Module Boundary
 
-```text
-LED_BASE = 0x4009_0000
-APB slot = PSEL[9]
-```
-
-The target APB subsystem uses `PSEL[15:0]`; existing slots 0 through 7 retain their current addresses, slot 8 is SW, slot 9 is LED, and slots 10 through 15 are reserved.
-
-These are target architectural assignments. The active FPGA baseline does not contain `APB_LED` yet, so `memory_map.md` must continue to distinguish current implementation from approved target allocation until cleanup RTL is integrated.
-
-## 3. Target Module Boundary
-
-Recommended module interface:
+Current module interface:
 
 ```text
 module APB_LED
@@ -80,23 +75,7 @@ The entire peripheral operates in the APB `PCLK` domain.
 
 ## 4. Physical Ownership
 
-After integration, `APB_LED` owns all ten red LEDs:
-
-```text
-LED_DATA[0] -> LEDR[0]
-...
-LED_DATA[9] -> LEDR[9]
-```
-
-The legacy top-level assignment:
-
-```verilog
-assign LEDR[9] = ~HRESETn;
-```
-
-shall be removed when this target architecture becomes active.
-
-If a visible reset/debug indicator is desired later, it shall use an explicitly approved board-status mechanism rather than taking one bit away from the software-visible LED peripheral.
+APB_LED owns LEDR[9:0] one-to-one. The historical `LEDR[9] = ~HRESETn` assignment is no longer active. A future reset/debug indicator requires separate approved resource ownership and may not silently consume an LED_DATA bit.
 
 ## 5. Canonical Register Map
 
@@ -108,7 +87,7 @@ Only bits `[9:0]` are implemented. Reads return zero in bits `[31:10]`; writes i
 
 The block shall explicitly decode `+0x00` and shall not intentionally reproduce legacy low-address register mirroring.
 
-An earlier draft target proposed zero/no-effect for unknown registers; no standalone APB_LED RTL is active. Frozen A2 supersedes that draft: noncanonical offsets or unsupported sizes return APB ERROR without an LED peripheral side effect.
+The direct APB_LED slave has no PSLVERR: invalid local offsets are RAZ/WI. The CPU bridge rejects noncanonical offsets or unsupported sizes/alignment before LED PSEL with two-cycle AHB ERROR and no side effect.
 
 ## 6. `LED_DATA` Write Semantics
 
@@ -150,11 +129,11 @@ LEDR    = 0x000
 
 All ten LEDs are therefore off during reset and remain off after reset until firmware writes another value.
 
-This intentionally replaces the current special `LEDR[9]` reset-indicator behavior.
+This replaced the historical special LEDR[9] reset-indicator behavior.
 
 ## 9. APB Behavior
 
-The target LED block is always ready:
+The current LED block is always ready:
 
 ```text
 PREADY = 1
@@ -183,7 +162,7 @@ No interrupt or completion polling is required.
 
 ## 11. Relationship to GPIO and SW
 
-The approved target board-I/O split is:
+The current P04 board-I/O split is:
 
 ```text
 SW[9:0]   -> APB_SW   at PSEL[8]
@@ -224,16 +203,14 @@ Board validation shall visually verify all ten LEDs and at least walking-one, al
 
 ## 14. Remaining Open Decisions
 
-The APB address, slot number, and decoder width are no longer open; they are fixed by `board_io_architecture.md`.
+The address, slot, 16-bit PSEL routing and A2 CPU validation are already implemented. BOARDIO-004 physical pattern acceptance remains OPEN; optional future LED features require separate specification authority. No new IRQ/PWM/blink feature is defined.
 
-The A2 APB reserved/default-slave ERROR policy is frozen but not implemented. Future optional LED features remain separate and do not change the local register semantics defined here.
+## 15. Current Invariants
 
-## 15. Target Invariants
-
-Once implemented:
+Current implemented invariants:
 
 1. `LED_BASE = 0x4009_0000` and the peripheral is selected by `PSEL[9]`.
-2. The APB subsystem uses the approved 16-slot target architecture.
+2. The APB subsystem uses the implemented 16-slot routing architecture.
 3. `APB_LED` owns all ten `LEDR[9:0]` outputs.
 4. `LED_DATA` is the sole architectural output latch.
 5. Only bits `[9:0]` are implemented.
@@ -241,6 +218,6 @@ Once implemented:
 7. Readback returns the latch, not a physical feedback signal.
 8. No direction register exists.
 9. No interrupt output exists.
-10. The legacy `LEDR[9] = ~HRESETn` assignment is removed when this target design becomes active.
+10. The historical LEDR[9] reset-indicator assignment is removed in current P04.
 11. The legacy GPIO slot remains present but no longer owns board LED signals.
 12. This block is not a general-purpose GPIO peripheral.

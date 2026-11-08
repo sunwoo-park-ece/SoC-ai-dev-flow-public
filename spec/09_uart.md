@@ -16,6 +16,14 @@
 > `UART-005` remains `OPEN` for source-identity-traceable physical PC/LoRa
 > acceptance; `UART-006` remains optional/OPEN and UART IRQ remains DEFERRED.
 
+## Current Legacy contract and assurance boundary
+
+P07B §20 is the active contract for both UARTs: 8-N-1 LSB first, no TX FIFO, 16-byte RX FIFO, DATA/STATUS/CONTROL/BAUD at +0x00/04/08/0c. Busy DATA writes wait and commit once on completing ACCESS; CONTROL storage has no active IRQ/control effect. RX_ERROR is sticky framing/overflow, W1C STATUS[2], with new error winning. Empty reads return zero without pop. BAUD reset=434; accepted range=217..65535 with independent TX/RX frame-latched divisors. LoRa AUX is synchronized HIGH=READY status and does not gate hardware TX. UART-001..004 accepted digital proof does not close UART-005 physical PC/LoRa acceptance or add IRQ routing.
+
+Existing requirement/AC IDs and frozen intent are preserved. Pre-cleanup descriptions that conflict with this current contract are historical, not new implementation requirements. Status cites the existing accepted scope in the read-only tracker; this reconciliation does not promote it.
+
+Traceability: [APB_UART_LORA_RT.v](../rtl/peripherals/APB_UART_LORA_RT.v); [APB_UART_RT.v](../rtl/peripherals/APB_UART_RT.v); [uart.c](../firmware/drivers/uart.c); [lora_uart.c](../firmware/drivers/lora_uart.c); [tb_p07b_uart_direct.sv](../verification/directed/uart/tb_p07b_uart_direct.sv).
+
 ## 1. Purpose
 
 This document defines the two active APB UART peripherals in the FPGA baseline:
@@ -566,9 +574,13 @@ firmware/drivers/lora_uart.c
 
 ## Phase 4A-2 Approved UART Target (not active RTL)
 
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
+
 A4 requires a busy `UART_DATA` APB write to hold `PREADY=0` until it can latch exactly one byte and start exactly one TX frame; silent drop is forbidden. `TX_READY` means an immediate DATA write can be accepted and deasserts at acceptance. Other registers do not stall merely because TX is busy. There is no UART-specific hardware timeout; every supported baud setting must guarantee TX progress. `UART_BAUD` remains a divisor, not a rate enumeration: nominal baud is 50 MHz / `BAUD_DIV`, default divisor 434 (~115200). Hardware must not whitelist only standard rates. Firmware presets include 9600, 19200, 38400, 57600, 115200, and 230400; other safe rates are allowed when peer timing permits. `BAUD_DIV=0` must not become active. Current TX/RX counters, start-bit sampling and input synchronization do not establish a high-confidence numerical lower bound, so `MIN_SAFE_BAUD_DIV = unresolved implementation constraint`; derive and verify it before implementation acceptance, and reject/prevent any unsafe divisor from becoming active. Firmware uses bounded `TX_READY` polling. STA-002 owns UART pin voltage/standard, asynchronous RX classification, drive/load and peer timing evidence; do not fabricate synchronous input delay for RX.
 
 ## Phase 4A-P05A Approved LoRa AUX Contract — Implementation Target
+
+> **HISTORICAL — pre-cleanup record:** Missing-feature, defect and target-tense statements in this section describe that earlier snapshot. Current behavior is defined by the current contract above and subsequent accepted clauses. Obligations attached to existing IDs are neither removed nor weakened.
 
 For the project interface, E220-900T22D AUX is an asynchronous module-to-FPGA **level-status** signal. `HIGH = READY` and `LOW = NOT READY`; a current synchronized HIGH permits the next UART-side write/transmission. Readiness is not an edge event and has no project-level valid-after-rising window or post-rising UART delay requirement. Do not add an AUX edge detector, pulse stretcher, minimum-high counter, or delay counter for this contract.
 

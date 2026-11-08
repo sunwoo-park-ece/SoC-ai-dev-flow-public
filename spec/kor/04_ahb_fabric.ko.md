@@ -8,6 +8,14 @@
 
 > **현재/역사적 읽기 규칙:** 아래 현행 구조는 기존 동결 Phase 4A-3A decode/error 계약을 구현한다. 과거 broad decode, unmapped silent OKAY, 미구동 `HSIZE`는 cleanup 전 기록이다. C1a는 CPU/master 조합 구조만 변경하며 주소·latency·exception 정책을 변경하지 않는다.
 
+## 현행 Legacy 계약과 보증 범위
+
+전체 production fabric은 CPU master 하나, qualified decode, 등록된 data-phase owner를 유지한다. HREADY-low에서 owner를 유지하고 final ERROR는 다음 주소를 취소한다. ERROR는 HRESP=01/ready-low 후 HRESP=01/ready-high이며 owner 없는 idle OKAY와 다르다. P14 selected test는 이 패턴을 유지하지만 비선택 production slave는 제외한다. BUS-001..005 수용은 기존 증거 범위이며 arbitration, generic AMBA, 새 플랫폼 증명을 추가하지 않는다.
+
+기존 requirement/AC ID와 동결 의도를 유지한다. 아래 현행 계약과 충돌하는 cleanup 전 설명은 역사적 기록이며 새 구현 요구가 아니다. 상태는 읽기 전용 tracker의 기존 수용 범위를 인용하며 이 정합화로 승격하지 않는다.
+
+추적: [AMBA_SoC_TOP.v](../../rtl/soc/AMBA_SoC_TOP.v); [tb_soc_bus_transitions.sv](../../verification/directed/bus/tb_soc_bus_transitions.sv); [tb_soc_cpu_fault_e2e.sv](../../verification/directed/bus/tb_soc_cpu_fault_e2e.sv).
+
 ## 1. 목적
 
 이 문서는 CPU-side `AHB_Master_Interface`와 다음 세 개의 top-level AHB-side target 사이의 baseline SoC data interconnect를 정의한다.

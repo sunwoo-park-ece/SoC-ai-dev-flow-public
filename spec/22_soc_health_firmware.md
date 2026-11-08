@@ -1,19 +1,23 @@
 # SoC Health Firmware Contract and Reconciliation Tracker
 
-> **Status:** S1/S2 contracts preserved; S3 Timer/UART/G-sensor/ADC/joystick/VGA providers implemented, locally host-tested, integrated with real peripheral RTL and built for RV32I. S4-A board I/O providers and HEX raw getters are implemented with host/RTL checks; S4-B shared formatter and real VGA/UART1 TX observers are implemented and locally verified; no physical board, timing, or Clean Baseline acceptance.
+> **Status:** Implemented SYSFW-01 standalone contract. Distinguish original host/RTL/build acceptance from later bounded ADC/VGA board evidence; no whole-system release.
 > **Language:** English is canonical; [Korean companion](kor/22_soc_health_firmware.ko.md) mirrors this contract.
 > **Roles:** Role A defines the standalone health firmware. Role B consolidates baseline-cleanup spec/FW reconciliation debt without replacing owning IP specifications.
-> **Source anchor:** `390db6da2dcc8bbfa1c93b444525b0ba1e852056`. Trace IDs: Issue #7 S0 result `5845036298`, S0 acceptance `5845199371`, S1 task `5845199693`; these are internal governance locators, not public runtime evidence.
+> **Source anchor:** Current inspection base `35e4633a53a080402526ef751d128df120f311a9`; accepted SYSFW-01 source `2bf3c7a6c4625af20631f2d3553fd3014d418be8`. Historical stage records are not new execution evidence.
+
+## Current contract and source/evidence boundary
+
+soc_health_main is the implemented standalone application, not a future placeholder. SYSFW-01 was accepted at `2bf3c7a6c4625af20631f2d3553fd3014d418be8` for host/RTL-provider/build scope; its original CPU/physical/vendor NOT_RUN rows remain historical evidence of that checkpoint. Later P11 C4 accepted the ADC-specific CPU/vendor/board/cadence/policy envelope, and P12 G16 accepted normal VGA/Health dashboard and Owner-observed restart only. These do not turn every Health provider into a physically qualified IP or prove same-N UART/VGA matching.
+
+The current app wires providers, shared board service, sole VGA preparation/release and UART observer into its cooperative loop. Copied two-slot snapshots, reader leases, explicit-field FNV-1a, current versus sticky masks, per-provider evidence classes and 32-software-epoch publication remain the contract. Software epochs are not real-time deadlines in seconds. final_main is historical RC-car demo; AES remains EXCLUDED_PENDING_CLEANUP, even after separate P13 AES acceptance. Stage labels S1/S2/S3/S4/S5 below refer to historical SYSFW-01 development, not the independent Legacy Spec-refresh stages.
+
+Traceability: [soc_health_main.c](../firmware/apps/soc_health_main.c); [soc_health.c](../firmware/services/soc_health.c); [soc_health_providers.c](../firmware/services/soc_health_providers.c); [soc_health_observers.c](../firmware/services/soc_health_observers.c); [soc_health_board_io.c](../firmware/services/soc_health_board_io.c).
 
 ## 1. Status, purpose, and historical split
 
-`firmware/apps/final_main.c` is **HISTORICAL RC-CAR SYSTEM DEMO FIRMWARE**. It is retained for provenance and demo reproduction, depends on the external STM32-based RC-car system, and is not the canonical standalone SoC integration-test firmware. After Issue #7 completes and is reviewed, it is not the basis for Issue #6 C4-A/C4-B.
+`firmware/apps/soc_health_main.c` is the current canonical standalone diagnostic; `final_main.c` is retained historical RC-car demo firmware. The implemented app, services, providers, scheduler and HEX raw getters are present in the pinned source. SYSFW-01 host/RTL/build acceptance, later P11 ADC C4 acceptance and P12 G16 bounded board-functional acceptance are separate evidence layers as described above.
 
-Owner-provided demonstration: [FPGA SoC + STM32 RC-car demo](https://www.youtube.com/shorts/XYbi3uSHmUU). The link documents provenance; it does not independently qualify the future health monitor.
-
-The future canonical application is `firmware/apps/soc_health_main.c`. It shall run standalone without the external RC-car system, exercise production peripheral contracts, report progress and failures, and freeze one snapshot for VGA and PC UART observers. It remains a reusable system diagnostic rather than an ADC-only test.
-
-S1 changes documentation only. The application, services, providers, scheduler, and HEX raw getters do not exist as S1 deliverables. S2 added §10.1 infrastructure; S3 adds only the strong/functional providers in §10.2. S3 was accepted before S4-A; S4-A was accepted before S4-B; S4-B requires owner review before S5; Issue #6 C4 remains paused. Owning IP specifications remain authoritative for registers, hardware behavior, and existing acceptance scope. Preserve all existing STOP gates; this document does not reopen P08B, add interrupts/PLIC, redesign ADC/peripheral RTL, change pins, or close global cleanup/STA/board requirements.
+Preserve owning IP contracts, one-owner MMIO, copied immutable observer snapshots and all existing STOP/release limits. This specification does not add an AES provider, PLIC/interrupts, new pins, real-time scheduling proof or blanket system/board acceptance. Historical SYSFW stage descriptions below do not indicate that the present app is unimplemented or C4 is still paused.
 
 ## 2. Health model and failure history
 
@@ -156,6 +160,8 @@ Record aborts before a helper clears stale status. Acknowledge events so later c
 
 ## 10. Implemented infrastructure and future stage gates
 
+> **Historical SYSFW checkpoint record:** Stage acceptance, NOT_RUN and next-gate tense below describe that snapshot. Current lifecycle and later P11/P12 scope are separated above and in §11.2. This is not a new status promotion.
+
 The following paths exist for the accepted S2 infrastructure and host verification:
 
 ```text
@@ -183,6 +189,8 @@ S1 implemented none of S2–S5. S2 infrastructure, S3 providers, S4-A board I/O 
 
 ### 10.1 Accepted S2 core ABI, ownership and deterministic signature
 
+> **Historical SYSFW checkpoint record:** Stage acceptance, NOT_RUN and next-gate tense below describe that snapshot. Current lifecycle and later P11/P12 scope are separated above and in §11.2. This is not a new status promotion.
+
 Stable IDs are SYSTEM_SERVICE=0, TIMER=1, UART_LOOP=2, GPIO=3, GSENSOR=4, ADC=5, JOY_POLICY=6, VGA=7, SW=8, LED=9, HEX=10, AES_GCM=11. Mask bit `1u << id` is fixed. State and evidence enum order matches §2. Each record stores state, evidence, heartbeat_count, last_progress_epoch, miss_count and detail. Current masks are derived from copied records at publication; UNKNOWN contributes no bit. FAIL sets sticky history; recovery does not clear it. No runtime sticky-clear API exists.
 
 At the S2 checkpoint, one cooperative owner advances a software epoch without Timer. Each turn visits one of ten round-robin pending providers (IDs 1–10) and at most two observer characters. SYSTEM_SERVICE progress means only that the software service turn ran. S2 peripheral placeholders stay UNKNOWN with `SOC_HEALTH_NOT_IMPLEMENTED` (0x4e4f5451, NOT QUALIFYING HARDWARE EVIDENCE). AES remains EXCLUDED_PENDING_CLEANUP with no provider/callback; all report attempts for AES are rejected. Production S2 code performs no MMIO.
@@ -204,6 +212,8 @@ The signature itself, struct padding, pointers, slot leases and live deduplicati
 
 ### 10.2 S3 strong providers and verification scope
 
+> **Historical SYSFW checkpoint record:** Stage acceptance, NOT_RUN and next-gate tense below describe that snapshot. Current lifecycle and later P11/P12 scope are separated above and in §11.2. This is not a new status promotion.
+
 `firmware/include/soc_health_providers.h` and `firmware/services/soc_health_providers.c` add provider-local state; the generic S2 core is unchanged. `soc_health_main` now calls the real provider dispatcher. The S2 pending-dispatch API remains for its unit tests; the current application uses the strong dispatcher. Both use the stable ID order. Initial bounded visits configure UART, Timer, G-sensor, ADC and VGA in that order, then a ten-way round robin visits IDs 1–10. Every step is finite: UART sends at most one byte with one readiness poll and receives/drains at most four; ADC enable requests once using `adc_enable(0)` then polls acknowledgement across turns; VGA writes at most one deterministic back-bank word. JOY shares ADC acquisition. At the S3 checkpoint GPIO/SW/LED/HEX remained pending placeholders; S4-A attaches the board callback described in §10.3. AES is never dispatched. S2 cursors still perform no hardware output.
 
 Default provider budgets are 262144 software epochs; Timer compare is 50000 PCLK counts. These are initial bounded engineering parameters, not measured wall-clock quotas or board guarantees. A 12-byte single outstanding UART transaction fits the 16-byte RX FIFO under the owned-peer assumption; RX error still fails explicitly. No scheduler-count token qualifies hardware progress.
@@ -221,6 +231,8 @@ Run `RUN_ROOT=<fresh-external-directory> scripts/wsl/soc_health_provider_test.sh
 
 ### 10.3 S4-A board I/O providers and verification scope
 
+> **Historical SYSFW checkpoint record:** Stage acceptance, NOT_RUN and next-gate tense below describe that snapshot. Current lifecycle and later P11/P12 scope are separated above and in §11.2. This is not a new status promotion.
+
 `firmware/services/soc_health_board_io.c` and `include/soc_health_board_io.h` hold static board state. An optional dispatcher callback preserves the S3-only harness; the application attaches it for IDs GPIO=3, SW=8, LED=9 and HEX=10. The ten-way schedule, strong provider functions, health core, copied snapshot ABI/signature and AES exclusion are unchanged. Each visit performs bounded work; there is no IRQ, busy wait or second VGA owner.
 
 GPIO releases the owned pair, preloads GPIO0 low, configures GPIO0 output/GPIO1 input with production APIs, then drives independently retained `0,1,1,0`. Direction/output bits outside the owned pair survive. Each sample waits at least three software epochs across visits (MMIO itself advances PCLK, covering the two synchronized input stages), then compares synchronized GPIO1 with expected stimulus. Direction and latch readback are supplementary checks. Only four matched samples complete a loopback generation. The 262144-epoch whole-cycle deadline rejects stuck/late/inverted sense even when DATA_OUT is correct; configuration/readback inconsistency fails immediately. A later complete cycle restores current PASS without clearing sticky failure.
@@ -237,6 +249,8 @@ Run `scripts/wsl/soc_health_board_io_test.sh`, `scripts/wsl/soc_health_board_io_
 
 
 ### 10.4 S4-B shared formatter and real observers
+
+> **Historical SYSFW checkpoint record:** Stage acceptance, NOT_RUN and next-gate tense below describe that snapshot. Current lifecycle and later P11/P12 scope are separated above and in §11.2. This is not a new status promotion.
 
 `include/soc_health_observers.h` / `services/soc_health_observers.c` implement one pure `soc_health_format_line(snapshot, line_index, buffer, size)` used by both observers. The return value is the untruncated logical length; nonzero size always writes a terminator within the buffer, size zero writes nothing. There are 19 logical lines, fixed 48-byte buffers, uppercase hexadecimal fields and no printf/allocation/MMIO in the formatter. State encoding is P/W/F/?/X. All values are copied snapshot input; no observer reads live health state for text.
 
@@ -410,7 +424,9 @@ Future tests shall connect contract → independently derived oracle → stimulu
 
 New/materially changed checkers shall accept valid cases and reject targeted counterexamples in isolated fixtures without mutating approved production or old evidence. Finite polling still cannot recover a terminal CPU/bus fault; signature equality still cannot prove physical output. Preserve failed attempts and keep runtime versus source-level alignment verdicts separate.
 
-### 11.1 S5 verification closure and C4 handoff boundary
+### 11.1 Historical SYSFW S5 verification and C4 handoff boundary
+
+> **Historical SYSFW checkpoint record:** Stage acceptance, NOT_RUN and next-gate tense below describe that snapshot. Current lifecycle and later P11/P12 scope are separated above and in §11.2. This is not a new status promotion.
 
 S5 completes without changing production C, drivers, peripheral RTL, checkers or the build script. Four S2/S3/S4-A/S4-B host suites and three provider/driver/RTL suites pass in fresh runs. Six S2 isolated mutations, ten S3 host/six RTL mutations, nineteen S4-A negative cases and thirty-two S4-B negative cases recheck actual targeted rejection/failure propagation. Inherited P06 Timer, P07 UART, P08B VGA/VRAM, P09 G-sensor host (real GS RTL covered by S3 integration), P10 HEX functional/shadow, P11 ADC/JOY C2/C3 and P04 GPIO/SW/LED host plus S4-A real RTL run successfully. These are not CPU E2E or physical acceptance. Raw command/source/hash/target/guard/parent evidence is retained externally and referenced by the S5 result comment.
 
@@ -441,23 +457,9 @@ This is the Issue #7 handoff matrix. RV32I BUILT means inclusion in the firmware
 
 ### 11.2 Real-Hardware Acceptance & Telemetry Evidence (Issue #6 C4-B / putty_26_09_27_1.log)
 
-Physical hardware acceptance on the Terasic DE10-Lite FPGA was executed under Issue #6 C4-B and fully verified across **4,055 consecutive parsed health snapshots** spanning 68.0 million clock cycles in the serial telemetry log:
-- **Telemetry Log**: `/home/swp/soc/putty_26_09_27_1.log` (SHA-256 `469047c4b037e6b0bcbdaee63e9098a09f8043815ff5e78b931756ed7109cd3e`).
-- **Live Board Photo**: `/home/swp/soc/P11_board_test.jpg` (SHA-256 `45f0180f3fbcbe2d686fcad80878bb7bd08069cba50be750916788c8432a6227`). Captured at epoch 141,025,616 cycles (`0x0867E150`) showing `SYSTEM: PASS`, switches `V=380`, `HEX=180`.
-- **48s Real-Board Video Demo**: `https://www.youtube.com/shorts/RxXCySoRTMY`.
+Later P11 C4-B/C/D records establish the bounded ADC/joystick board envelope: the retained telemetry log SHA-256 is `469047c4b037e6b0bcbdaee63e9098a09f8043815ff5e78b931756ed7109cd3e`, and the retained board photograph SHA-256 is `45f0180f3fbcbe2d686fcad80878bb7bd08069cba50be750916788c8432a6227`. Local raw artifact names/paths are custody details, not portable specification references. The accepted P11 cadence/direction/model comparison is summarized in [ADC](15_adc_joystick.md) and the [P11 evidence derivative](../reports/evidence/P11_ADC_FINAL_DOCUMENTATION_RECONCILIATION.md).
 
-#### Key Real-Hardware Verification Findings:
-1. **Autonomous Fault Detection & Recovery (GPIO Loopback)**:
-   - Deliberate physical disconnection of the GPIO jumper (`PIN_V10` to `PIN_W10`) was detected in real-time, incrementing `MISS` count to `0x007A` and latching sticky failure mask `S=0x00000008` (bit 3 = GPIO).
-   - Reconnecting the jumper resulted in instantaneous recovery to `P ... LOOP` with rapid heartbeat advancement (`HB=0x00141D30` = 1.31M packets), verifying resilient autonomous recovery without CPU hang.
-2. **Mathematical SW-to-HEX APB Translation & MMIO Readback**:
-   - Firmware translation rules $M = (\text{SW} \gg 9) \ \&\ 1$ and $P = \text{SW} \ \&\ \text{0x1FF}$ were verified against all 4,055 snapshots across 31 distinct switch configurations with **0 mismatches (100% mathematical fidelity)**.
-   - Hardware MMIO readback of `HEX_CTRL`, `HEX_VALUE`, `HEX_RAW_LOW`, and `HEX_RAW_HIGH` exhibited zero readback faults (`HEX P ... MISS=0000` throughout).
-3. **ADC & Joystick Zero-Miss Coexistence**:
-   - Monotonic sequence progression up to `SEQ=0x084ABAAE` (139,115,182 captures on live hardware) with **zero missed frames (`MISS=0000`)**.
-   - Hardware register `ADC_JOY_STATUS` and firmware oracle `joystick_policy_eval()` maintained **100% agreement across all 4,055 snapshots**.
-4. **Inter-Subsystem Coexistence**:
-   - High-throughput VGA memory traffic (8,333+ framebuffer swaps), 577,912 successful UART hardware loopback transfers (0 drops), dynamic slide switch toggling, and continuous HEX readback ran concurrently without perturbing ADC acquisition or CPU execution.
+Later P12 G16 Owner acceptance is BOARD_FUNCTIONAL_PASS_BOUNDED for normal VGA/Health dashboard and Owner-observed normal KEY0 restart on Health SOF SHA-256 `f40843a1fd429a74a721cc6a5c1a0bc811011dc690891f1c495c00dd090cb064`. Image selection/reset count are OWNER_ATTESTED; dashboard/post-reset states are PHOTO_OBSERVED. Same-N UART/VGA signature matching is NOT_INDEPENDENTLY_VERIFIED. Physical loopback/GPIO/pin tests, hardware CLEAR, trap injection, lock-loss/R1/R2/M9K safety, external I/O and continuous endurance are not discharged by that narrow decision. These are historical exact-image results, not current-main hardware execution or all-provider acceptance.
 
 ## 12. Baseline-cleanup spec/FW reconciliation tracker (Role B)
 
@@ -471,7 +473,9 @@ Required fields are ID, IP/subsystem, canonical spec source, FW source/API, obse
 
 Evidence IDs: **E0** = S0 static source inspection at the anchor and accepted result; **E1** = S1 document delta at its local documentation checkpoint. Neither denotes executed firmware tests. Owning specs contain their own historical evidence references. No raw logs, machine-local paths, or private payload are embedded here.
 
-### 12.2 Initial records and S1 dispositions
+### 12.2 Historical SYSFW initial records and S1 dispositions
+
+> **Historical ledger:** Preserve the then-recorded HREC dispositions. P14 removed timer_wait_ready and aes_gcm_wait_done. Current reconciliation in other documents requires separate S3 integration; no global FW-002/003 or evidence status is promoted.
 
 All rows originate from Issue #7/S0, carried into S1. `firmware/` prefixes in the FW column and `spec/` prefixes in the spec column are repository-relative.
 

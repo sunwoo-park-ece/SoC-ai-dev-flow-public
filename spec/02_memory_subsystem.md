@@ -8,6 +8,14 @@
 
 > **Store payload/mask contract status:** The integrated CPU implements the approved A2 response-independent MEM payload/lane path. Section 7.4 separates bounded, source-bound implementation observations from acceptance obligations and physical limits. Public derivative evidence packaging and overall acceptance remain separate; a specification edit alone is not verification.
 
+## Current Legacy contract and assurance boundary
+
+IMEM is 4096×32 (16 KiB), instantiated by IF/ID; DMEM is 8192×32 (32 KiB), byte enabled, little-endian. Preserve accepted store ownership, response-independent MEM payload/mask, byte-wise registered RAW merge, and one-cycle load-use interlock. The open models initialize IMEM to NOP and DMEM to zero unless images are supplied; these model defaults do not establish vendor BRAM initialization/collision/reset behavior. Startup expects preloaded IMEM and initialized DMEM, clears BSS in software, and does not copy `.data` from ROM. System reset does not clear the DMEM array. New platform memory binding requires separate qualification.
+
+Existing requirement/AC IDs and frozen intent are preserved. Pre-cleanup descriptions that conflict with this current contract are historical, not new implementation requirements. Status cites the existing accepted scope in the read-only tracker; this reconciliation does not promote it.
+
+Traceability: [IF_ID_Register.v](../rtl/core/v/pipeline_regs/IF_ID_Register.v); [AHB_MEMORY_SLAVE.v](../rtl/bus/AHB_MEMORY_SLAVE.v); [IMEM.sv](../verification/models/memory/IMEM.sv); [memory.sv](../verification/models/memory/memory.sv); [start.S](../firmware/bsp/start.S).
+
 ## 1. Purpose
 
 This document defines the baseline SoC memory subsystem below the address-map level. It specifies the architectural behavior of the CPU-local instruction memory, AHB-side data memory, load/store lane handling, synchronous BRAM timing, read-after-write bypass behavior, firmware image initialization, and reset-visible memory semantics.
@@ -357,7 +365,13 @@ Current section placement:
 - `.start`, `.text`, `.init`, `.fini` -> IMEM.
 - `.rodata`, `.srodata`, `.data`, `.sdata` -> initialized DMEM image.
 - `.bss`, `.sbss`, `COMMON` -> DMEM, runtime-zeroed.
-- stack top -> end of canonical DMEM minus 4 bytes.
+- stack top -> exclusive canonical DMEM end, `0x1000_8000`, 16-byte aligned.
+
+### 12.2.1 Initial Stack ABI and Capacity Boundary
+
+The project build uses `-march=rv32i -mabi=ilp32` (standard ILP32, not ILP32E). `__stack_top = ORIGIN(DMEM) + LENGTH(DMEM) = 0x1000_8000` is the exclusive DMEM end and the initial empty downward-growing stack pointer. Standard ABI procedures MUST enter with `sp` aligned to 16 bytes and preserve that alignment; the linker ASSERT rejects an initial stack symbol with nonzero low four bits. The symbol assignment allocates no section or byte at the exclusive boundary. The first stack frame moves `sp` below that address before accessing stack storage.
+
+For each linked image, initialized RAM and `__bss_end` MUST leave usable stack headroom within canonical DMEM; inspect that image’s ELF/map and startup binding. Alignment alone does not prove maximum call depth, worst-case stack capacity, overflow detection or a fixed reserved stack budget. No such capacity or overflow guarantee is introduced here. Startup order remains `mtvec → sp → .bss clear → main`; initialized data is preloaded, not copied from ROM.
 
 ### 12.3 Reset Does Not Clear DMEM Contents
 
@@ -365,9 +379,10 @@ System reset resets the CPU and memory-wrapper control state but does not archit
 
 The startup code establishes C runtime semantics by:
 
-1. loading `sp` from `__stack_top`,
-2. clearing the range `__bss_start` to `__bss_end` with word stores,
-3. calling `main`.
+1. installing `mtvec` from `__trap_entry`,
+2. loading `sp` from `__stack_top`,
+3. clearing the range `__bss_start` to `__bss_end` with word stores,
+4. calling `main`.
 
 Firmware shall therefore not assume that arbitrary DMEM locations are cleared merely because system reset was asserted.
 

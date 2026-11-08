@@ -2,6 +2,14 @@
 
 > **상태: PROPOSED / NOT_ACCEPTED.** [영문 정본](../physical_assurance_limitations.md)의 의미 동기화 문서다. 이 초안은 active exception authority, device qualification 또는 release acceptance가 아니다.
 
+## 현행 계약과 source/evidence 경계
+
+이 register와 exception process는 PROPOSED / NOT_ACCEPTED를 유지한다. C08-PHYS-001은 NOT_PROVEN / UNDETERMINABLE이며 필수 R1/R2 의존성은 supplemental claim이나 internal planning checkpoint로 면제할 수 없다. Diagnostic 존재, sampled zero flag, fitted SCC 0, Owner 관찰 정상 restart는 capture/ordering/bitcell 보증이 아니다. 새 limitation ID, 수용 exception, gate 변경을 만들지 않는다.
+
+기타 source-bound 한계는 AES D08 integrated natural overflow/concurrent·late-success NOT_PROVEN, vendor BRAM configuration/collision 가정, SPI/physical UART/GPIO/board mapping 및 STA-002 external I/O/electrical gap이다. 수용된 P10 HEX와 P11 ADC 관찰은 고유 source/test/use 범위이며 P12 board-functional 수용은 위험 lock-loss/atomicity를 제외한다. P14 selective cleanup은 선택 digital 범위에서만 완료됐고 Clean Baseline은 NOT_RELEASED다. Selected IP 재사용이 physical qualification을 상속하지 않는다.
+
+추적: [pre_fetch_AHB_VRAM_DUAL_BUFFER.v](../../rtl/video/vram/pre_fetch_AHB_VRAM_DUAL_BUFFER.v); [reset_release_sync.v](../../rtl/soc/reset_release_sync.v); [README.md](../../verification/selected_ip/README.md); [summary.md](../../reports/evidence/p10-hex-s6/summary.md).
+
 ## 범위와 권한
 
 이 cross-module register는 limitation record와 제안된 claim-disposition 절차를 소유한다. Behavior, acceptance criterion 및 essential device assumption은 owning subsystem spec이 유지하고 [baseline cleanup §3](baseline_cleanup.ko.md#3-cleanup-exit-gate)가 milestone gate를 유지한다. Limitation record로 어느 권한도 바꿀 수 없다.

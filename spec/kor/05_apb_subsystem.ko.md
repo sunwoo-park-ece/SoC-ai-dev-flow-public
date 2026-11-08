@@ -10,34 +10,37 @@
 
 > **Phase 4A-3A 읽기 규칙:** 앞의 `PSEL[7:0]`, `PSLVERR` 없음, zero/OKAY 설명은 cleanup 전 baseline 기록이다. 마지막 Phase 4A-3A 상태 문단은 당시 bridge/fault 상태이며 P04가 이후 SW/LED 슬롯 8/9를 활성화했다. A4 UART cleanup은 남아 있다.
 
+## 현행 Legacy 계약과 보증 범위
+
+현행 bridge는 IDLE/SETUP/ACCESS/ERROR_FINAL, `PSEL[15:0]`, `HSIZE`, global `HREADY_IN`, completing `PSLVERR`를 갖는다. Canonical 정렬 word 요청은 slot 0..9를 select하며 invalid 요청은 실제 peripheral을 select하지 않는다. SETUP은 HREADY-low, 정상 ACCESS는 PREADY에서 완료한다. Wait 동안 주소/제어를 보존하고 SETUP PWDATA는 해당 MEM HWDATA이며 ACCESS용으로 등록한다. UART DATA busy write는 PREADY를 내릴 수 있어 모든 slave가 항상 ready라는 설명은 역사적이다. Completing PSLVERR 또는 bridge validation 실패는 2-cycle ERROR이며 ERROR_FINAL은 다음 주소를 수용하지 않는다. PSTRB나 일괄 RO/WO 오류 정책을 추가하지 않는다.
+
+기존 requirement/AC ID와 동결 의도를 유지한다. 아래 현행 계약과 충돌하는 cleanup 전 설명은 역사적 기록이며 새 구현 요구가 아니다. 상태는 읽기 전용 tracker의 기존 수용 범위를 인용하며 이 정합화로 승격하지 않는다.
+
+추적: [AHB_APB_bridge.v](../../rtl/bus/AHB_APB_bridge.v); [AMBA_SoC_TOP.v](../../rtl/soc/AMBA_SoC_TOP.v); [tb_ahb_apb_bridge_fault.sv](../../verification/directed/bus/tb_ahb_apb_bridge_fault.sv); [tb_p07b_uart_ahb_wait.sv](../../verification/directed/uart/tb_p07b_uart_ahb_wait.sv).
+
 ## 1. 목적
 
-이 문서는 active `AHB_APB_bridge` 뒤의 APB subsystem을 정의하고 baseline cleanup에서 적용할 승인된 16-slot target 확장을 함께 기록한다.
+이 문서는 active `AHB_APB_bridge` 뒤의 APB subsystem을 정의하고 구현된 16-slot 확장 및 과거 migration 요구를 함께 기록한다.
 
 현재 구현은 APB-style baseline이며 완전한 AMBA APB compliance를 주장하지 않는다.
 
 ## 2. Active Baseline Topology
 
-```text
-CPU
- |
-AHB fabric
- |
-AHB_APB_bridge
- |
- | PSEL[7:0]
- v
-PSEL[0] UART0 / LoRa
-PSEL[1] legacy GPIO
-PSEL[2] Timer
-PSEL[3] G-sensor
-PSEL[4] AES-GCM
-PSEL[5] ADC / Joystick Policy
-PSEL[6] UART1 / PC
-PSEL[7] HEX
-```
+AHB→APB master 하나와 아래 full-production slot 배정이다. P14 selected fixture는 0,1,2,4,6만 노출한다.
 
-APB master는 AHB-to-APB bridge 하나뿐이다.
+| Slot | Base | Peripheral |
+|---:|---:|---|
+| 0 | `0x4000_0000` | UART0 / LoRa |
+| 1 | `0x4001_0000` | 16-pin true GPIO |
+| 2 | `0x4002_0000` | Timer |
+| 3 | `0x4003_0000` | G-sensor |
+| 4 | `0x4004_0000` | AES-GCM v2 |
+| 5 | `0x4005_0000` | ADC v2 / Joystick Policy |
+| 6 | `0x4006_0000` | UART1 / PC |
+| 7 | `0x4007_0000` | HEX |
+| 8 | `0x4008_0000` | SW |
+| 9 | `0x4009_0000` | LED |
+| 10..15 | `0x400A_0000..0x400F_0000` | Reserved / ERROR |
 
 ## 3. Clock / Reset
 
@@ -50,71 +53,27 @@ PRESETn = HRESETn
 
 ## 4. Bridge Interface
 
-AHB side:
+현행 interface:
 
 ```text
-HADDR[31:0]
-HWRITE
-HTRANS[1:0]
-HWDATA[31:0]
-HSEL
-HRDATA[31:0]
-HREADY
-HRESP[1:0] = OKAY
+AHB: HADDR[31:0], HWRITE, HTRANS[1:0], HSIZE[2:0], HWDATA[31:0],
+     HSEL, HREADY_IN -> HRDATA[31:0], HREADY, HRESP[1:0]
+APB: PCLK=HCLK, PRESETn=HRESETn, PADDR[31:0], PWRITE, PENABLE,
+     PSEL[15:0], PWDATA[31:0] <- PRDATA[31:0], PREADY, PSLVERR
 ```
-
-APB side baseline:
-
-```text
-PADDR[31:0]
-PWRITE
-PENABLE
-PSEL[7:0]
-PWDATA[31:0]
-PRDATA[31:0]
-PREADY
-```
-
-`HSIZE`, `PSTRB`, `PSLVERR`, `PPROT`는 구현하지 않는다.
+PSTRB/PPROT는 없으며 정렬 32-bit MMIO 계약을 유지한다.
 
 ## 5. State Machine
 
-Valid request:
-
-```text
-HSEL && (HTRANS == NONSEQ || HTRANS == SEQ)
-```
-
-FSM:
-
-```text
-IDLE -> SETUP -> ACCESS
-```
-
-SETUP에서는 `HREADY=0`, ACCESS에서는 `HREADY=PREADY`이다. 따라서 always-ready peripheral도 mandatory SETUP stall을 발생시킨다.
+주소는 global HREADY_IN && HSEL && HTRANS[1]이며 IDLE 또는 정상 completing ACCESS일 때 수용한다. FSM은 IDLE→SETUP→ACCESS이고 PREADY-low이면 ACCESS를 유지한다. Invalid 요청 또는 completing PSLVERR는 ACCESS(first ERROR)→ERROR_FINAL(final ERROR)→IDLE이다. ERROR_FINAL은 다음 주소를 수용하지 않는다.
 
 ## 6. Active Slot Decode
 
-현재 bridge는 `addr[31:28] == 4'h4`를 확인하고 `addr[19:16]`으로 slot을 고르지만 실제 select width는 `PSEL[7:0]`이다.
-
-| Slot | Base | Peripheral |
-|---:|---:|---|
-| 0 | `0x4000_0000` | UART0 / LoRa |
-| 1 | `0x4001_0000` | legacy GPIO |
-| 2 | `0x4002_0000` | Timer |
-| 3 | `0x4003_0000` | G-sensor |
-| 4 | `0x4004_0000` | AES-GCM |
-| 5 | `0x4005_0000` | ADC / Joystick Policy |
-| 6 | `0x4006_0000` | UART1 / PC |
-| 7 | `0x4007_0000` | HEX |
-
-`addr[27:20]`을 충분히 확인하지 않아서 `0x4xxx_xxxx` 내 alias가 생길 수 있다. 이는 non-canonical이다.
+전체 canonical `addr[31:20]==0x400`, `addr[19:16]` slot, 정렬 word와 offset allowlist를 함께 확인한다. Reserved slot 10..15, 상위 alias, invalid offset은 PSEL=0으로 ERROR다. Allocation은 위 현행 표를 따른다.
 
 ## 7. Active Response Mux
 
-PRDATA와 PREADY는 `PSEL[0]`~`PSEL[7]`에 따라 각 peripheral response를 선택한다. Default는 baseline에서 `PRDATA=0`, `PREADY=1`이다.
-
-모든 active baseline APB slave는 현재 `PREADY=1`이다.
+PRDATA/PREADY는 PSEL[0..9]에 따라 각 slave를 선택한다. Default PRDATA=0/PREADY=1은 reserved 요청을 수용하지 않는다. UART DATA busy write는 PREADY-low로 wait할 수 있다. G-sensor/ADC completing PSLVERR는 bridge에 전달되며 각 slave는 거부 접근 side effect를 억제한다.
 
 ## 8. Read / Write Flow
 
@@ -137,11 +96,9 @@ AHB store
  -> ACCESS에서 slave write commit
 ```
 
-## 9. PWDATA Setup-Phase Gap
+## 9. 현행 PWDATA SETUP / ACCESS
 
-현재 bridge는 SETUP 전체 기간에 새 `PWDATA`를 보장하지 않는다. ACCESS에서는 정확한 값이 보장되므로 현재 slave들은 동작하지만 generic APB quality gap이다.
-
-Cleanup에서 SETUP부터 address/control/data가 안정적으로 valid하도록 수정해야 한다.
+SETUP에서 PWDATA는 해당 MEM HWDATA이며 SETUP 종료 edge에 wdata_reg로 저장되어 ACCESS와 wait 동안 유지된다. 주소/제어는 accepted request의 register다. 과거 SETUP data gap은 현행 결함이 아니다. 이 project timing 계약만으로 generic APB compliance를 주장하지 않는다.
 
 ## 10. Back-to-Back Transfer
 
@@ -163,9 +120,9 @@ Cleanup 전에는 `PSLVERR` path가 없고 `HRESP`도 항상 OKAY였으며 CPU�
 
 ## 13. Register Mirroring
 
-많은 peripheral이 low address bit 일부만 decode하므로 64-KiB slot 내부에서 register mirror가 생길 수 있다. Exact canonical offset만 사용한다.
+Bridge는 비정규 주소를 PSEL 전에 거부한다. UART/Timer/GPIO는 전체 16-bit local offset을 비교하고 AES v2는 전체 canonical 32-bit 주소를 비교한다. Direct-APB 예약값 정책과 상위 slot 소유권은 별도다. Global APB-005는 IN_PROGRESS이며 부분 완료로 전체를 승격하지 않는다.
 
-## 14. 승인된 Target Expansion — 아직 Active 아님
+## 14. 과거 승인 확장 — P04에서 구현
 
 > **과거 Phase 4A-3A 이관 주석:** 당시 bridge/top은 `PSEL[15:0]`이지만 slot 8/9는 SW/LED 이관 전 ERROR였다. P04에서 슬롯 8/9를 활성화했고 10–15는 예약 ERROR로 유지한다.
 
@@ -223,7 +180,7 @@ PSEL[9] -> APB_LED  -> LEDR[9:0]
 
 PLIC source ID는 여기서 정하지 않는다.
 
-## 15. Cleanup Requirements
+## 15. Historical Cleanup Requirements
 
 최소 작업:
 
@@ -240,7 +197,7 @@ PLIC source ID는 여기서 정하지 않는다.
 
 ## 16. Baseline vs Target
 
-Active baseline:
+Historical pre-cleanup baseline:
 
 ```text
 PSEL[7:0]
@@ -249,7 +206,7 @@ slot1 = legacy pseudo-GPIO
 SW/LED dedicated peripheral 없음
 ```
 
-Approved target:
+Current implemented topology:
 
 ```text
 PSEL[15:0]
@@ -260,13 +217,13 @@ slot9 = LED
 slot10~15 = Reserved
 ```
 
-Target section은 RTL/DV/FPGA 검증 완료 전까지 migration contract로 취급한다.
+위 migration은 구현됐으며 별도 board/physical 및 global cleanup 요구는 tracker 상태를 유지한다.
 
 ## Phase 4A-2 승인된 APB/UART 목표 (APB fault 부분 Phase 4A-3A 구현)
 
 A2는 canonical APB aperture, slot 및 전체 register offset/size를 side effect 전에 검증한다. Reserved slot, alias, 비정규 offset/size는 internal/default error responder를 선택하며 실제 peripheral side effect가 없어야 한다. `PSLVERR`는 완료되는 ACCESS에서만 의미가 있고 bridge가 project 2-cycle AHB ERROR(`HRESP=01`, HREADY 0→1)로 변환한다. Cleanup 전 zero/OKAY 구현 gap은 이 버스 fault 범위에서 해소됐다. A4에서 busy UART_DATA write는 한 바이트를 정확히 한 번 수락할 때까지 `PREADY=0`; TX busy만으로 다른 register를 stall하지 않고 UART 전용 hardware timeout도 추가하지 않는다. 안전하지 않은 divisor는 active 설정이 될 수 없다.
 
-**Phase 4A-3A 구현(과거 checkpoint):** bridge/top의 `PSEL[15:0]`, 전체 slot/offset·정렬 word 검증, side-effect gate, `PSLVERR`→AHB ERROR 및 SETUP/ACCESS 안정성을 검증했다. 당시 slot 8/9는 미구현 ERROR였으나 P04가 SW/LED를 활성화하고 전체 16-slot selection을 검증했다. 10–15는 예약 ERROR이고 A4 UART busy-write는 후속 작업이다.
+**Phase 4A-3A 구현(과거 checkpoint):** bridge/top의 `PSEL[15:0]`, 전체 slot/offset·정렬 word 검증, side-effect gate, `PSLVERR`→AHB ERROR 및 SETUP/ACCESS 안정성을 검증했다. 당시 slot 8/9는 미구현 ERROR였으나 P04가 SW/LED를 활성화하고 전체 16-slot selection을 검증했다. 10–15는 예약 ERROR이고 그 과거 checkpoint에서 A4는 pending이었으며 현행 P07B digital UART busy-write 계약은 [09_uart.ko.md](09_uart.ko.md)다. Physical UART-005는 별도다.
 
 ## P09B slot-3 계약 — source/documentation 동시 게시 갱신
 
@@ -286,8 +243,8 @@ P10-HEX 구현은 canonical slot 7 (`0x4007_0000..0x4007_000C`)의 동작을 확
 - 주변장치 슬레이브 자체(`APB_HEX_display.v`)는 `PADDR[15:0]` 완전 일치 디코드를 구현한다. 미매핑 또는 비정규 로컬 오프셋은 읽기 시 0을 반환하고 쓰기 시 side effect 없이 무시된다 (`PREADY=1`, `PSLVERR` 없음).
 - 드라이버 및 검증 세부사항은 [16_hex_display.ko.md](16_hex_display.ko.md) 및 [19_firmware_contract.ko.md](19_firmware_contract.ko.md)를 따른다.
 
-## P11 ADC Slot-5 Contract — Spec Freeze (In-progress)
+## P11 ADC Slot-5 Contract — Implemented / Bounded Acceptance
 
-Slot 5 (`0x4005_0000`)는 P11에서 `APB_ADC_Controller` generic ADC slave가 된다. Valid access는 32-bit aligned, `PREADY=1`, exact full local-offset decode를 사용한다. CH3..CH6 raw offset은 valid RO reserve이며 baseline에서는 0을 반환한다. Reserved/unmapped/wrong-direction/malformed CTRL은 `PSLVERR` 및 existing bridge AHB ERROR로 전파되며 side effect가 없어야 한다. No-new CAPTURE는 invalid access가 아니므로 OKAY/no-op이다.
+Slot 5 (`0x4005_0000`)는 구현된 generic `APB_ADC_Controller`다. CPU address/offset/size/alignment 오류는 ADC PSEL 전에 bridge가 거부한다. Local interface에는 HSIZE/PSTRB가 없으며 reserved offset, wrong direction, malformed CTRL은 side effect 없는 completing `PSLVERR`이고 기존 2-cycle AHB ERROR로 전파된다. Valid access의 `PREADY=1`, exact offset, CH3..CH6 RO zero, no-new CAPTURE의 HOLD 보존 OKAY/no-op은 그대로다.
 
-Bridge allowlist는 `15_adc_joystick.md`의 v2 exact offset만 허용하도록 P11에서 갱신하며 implementation/evidence는 **(In-progress)**다.
+Bridge v2 allowlist와 ADC completing PSLVERR mux는 구현됐다. 기존 `PRDATA_JOYSTICK` / `JOYSTICK_READY` 이름은 slot 소유권을 바꾸지 않는다. P11 수용 및 source에서 관찰한 upper-zero local decode 경계는 [15_adc_joystick.ko.md](15_adc_joystick.ko.md)를 따른다. CPU alias, generic rebase 허가 또는 global APB-005 closure를 추가하지 않는다.

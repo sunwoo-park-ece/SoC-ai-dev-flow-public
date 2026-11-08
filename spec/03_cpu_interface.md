@@ -6,9 +6,16 @@
 >
 > **Parent specifications:** `soc_architecture.md`, `memory_map.md`, `memory_subsystem.md`.
 
-> **Phase 4A-3A reading rule:** Earlier “current baseline” descriptions of undriven `HSIZE` and unconsumed `HRESP` are pre-cleanup observations. The final Phase 4A-3A data-bus fault contract states the implemented scope; unrelated CPU cleanup remains open.
 
 > **Store payload/mask contract status:** Section 7.1 remains the approved A2 contract. The integrated CPU implements its response-independent MEM payload/mask path; Section 7.2 records bounded structural/simulation support and remaining limits. Historical observations do not override newer frozen fault contracts. C1a's actual combinational changes are described in Section 6.4 and [CPU structure](21_cpu_core.md#203-integrated-c1a-structure-and-preserved-ownership).
+
+## Current Legacy contract and assurance boundary
+
+`CPU-001` is Owner-accepted `VERIFIED` only for `EX_funct3_AHB[2:0]` width and the `MEM_store_data_AHB` name. EX owns address/control; MEM owns aligned store data/mask. The master input remains `MEM_read_data2`; load readback is separate. Preserve HREADY wait stability, DMEM-local CUSTOM_WRITE_MASK/BRAM_HAZARD, pre-bus misalignment causes 4/6 and matching MEM final ERROR causes 5/7. Failed instructions have no failed side effect or successful retirement. Width/naming acceptance is not generic AMBA compliance, full ISA proof, or whole-SoC acceptance.
+
+Existing requirement/AC IDs and frozen intent are preserved. Pre-cleanup descriptions that conflict with this current contract are historical, not new implementation requirements. Status cites the existing accepted scope in the read-only tracker; this reconciliation does not promote it.
+
+Traceability: [RV32I46F_5SP_MMIO.v](../rtl/core/v/top/RV32I46F_5SP_MMIO.v); [AHB_MASTER.v](../rtl/bus/AHB_MASTER.v); [README.md](../verification/selected_ip/README.md).
 
 ## 1. Purpose
 

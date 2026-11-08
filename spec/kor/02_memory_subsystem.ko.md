@@ -8,6 +8,14 @@
 
 > **Store payload/mask 계약 상태:** 통합 CPU는 승인된 A2 응답 독립적인 MEM payload/lane 경로를 구현한다. §7.4는 소스에 결부된 한정적 구현 관찰과 acceptance 의무·물리적 한계를 구분한다. 공개 derivative evidence packaging과 전체 acceptance는 별도이며 명세 수정 자체가 검증은 아니다.
 
+## 현행 Legacy 계약과 보증 범위
+
+IMEM은 IF/ID가 instantiate하는 4096×32(16 KiB), DMEM은 byte-enable을 갖는 8192×32(32 KiB) little-endian이다. 수용된 store 소유권, 응답 독립 MEM payload/mask, 등록된 byte-wise RAW merge, 1-cycle load-use interlock을 유지한다. Open model은 image가 없을 때 IMEM을 NOP, DMEM을 0으로 초기화하지만 이 기본값은 vendor BRAM 초기화/collision/reset을 증명하지 않는다. Startup은 미리 적재된 IMEM과 초기화 DMEM을 전제로 BSS만 software로 지우며 ROM에서 `.data`를 복사하지 않는다. System reset은 DMEM array를 지우지 않는다. 새 플랫폼 memory binding은 별도 재검증 대상이다.
+
+기존 requirement/AC ID와 동결 의도를 유지한다. 아래 현행 계약과 충돌하는 cleanup 전 설명은 역사적 기록이며 새 구현 요구가 아니다. 상태는 읽기 전용 tracker의 기존 수용 범위를 인용하며 이 정합화로 승격하지 않는다.
+
+추적: [IF_ID_Register.v](../../rtl/core/v/pipeline_regs/IF_ID_Register.v); [AHB_MEMORY_SLAVE.v](../../rtl/bus/AHB_MEMORY_SLAVE.v); [IMEM.sv](../../verification/models/memory/IMEM.sv); [memory.sv](../../verification/models/memory/memory.sv); [start.S](../../firmware/bsp/start.S).
+
 ## 1. 목적
 
 이 문서는 address-map보다 한 단계 아래 수준에서 baseline SoC의 memory subsystem을 정의한다. CPU-local instruction memory, AHB-side data memory, load/store byte-lane 처리, synchronous BRAM timing, read-after-write bypass, firmware image 초기화, reset 시 memory semantics를 규정한다.
@@ -357,7 +365,13 @@ DMEM : 0x1000_0000, 32 KiB
 - `.start`, `.text`, `.init`, `.fini` -> IMEM.
 - `.rodata`, `.srodata`, `.data`, `.sdata` -> initialized DMEM image.
 - `.bss`, `.sbss`, `COMMON` -> DMEM, runtime zeroing.
-- stack top -> canonical DMEM end - 4 bytes.
+- stack top -> exclusive canonical DMEM end, `0x1000_8000`, 16-byte aligned.
+
+### 12.2.1 Initial Stack ABI and Capacity Boundary
+
+Project build는 `-march=rv32i -mabi=ilp32`(ILP32E가 아닌 standard ILP32)를 사용한다. `__stack_top = ORIGIN(DMEM) + LENGTH(DMEM) = 0x1000_8000`은 exclusive DMEM end이자 비어 있는 downward-growing stack의 초기 SP다. Standard ABI procedure는 `sp`를 16-byte 정렬로 진입하고 정렬을 유지해야 한다(MUST). Linker ASSERT는 초기 stack symbol의 하위 네 bit가 0이 아니면 거부한다. Symbol assignment는 exclusive boundary에 section이나 byte를 할당하지 않는다. 첫 stack frame은 storage 접근 전에 `sp`를 그 주소 아래로 내린다.
+
+각 linked image의 initialized RAM과 `__bss_end`는 canonical DMEM 안에 사용 가능한 stack headroom을 남겨야 한다(MUST). 해당 image의 ELF/map과 startup binding을 확인한다. Alignment만으로 최대 call depth, worst-case stack capacity, overflow detection이나 고정 reserved stack budget을 증명하지 않는다. 그런 capacity/overflow 보증을 새로 만들지 않는다. Startup 순서는 `mtvec → sp → .bss clear → main`이며 initialized data는 ROM copy가 아닌 preload다.
 
 ### 12.3 Reset은 DMEM 전체를 Clear하지 않음
 
@@ -365,9 +379,10 @@ System reset은 CPU와 memory-wrapper control state를 reset하지만 DMEM array
 
 Startup code는 다음 순서로 C runtime semantics를 만든다.
 
-1. `sp`를 `__stack_top`으로 설정.
-2. `__bss_start`부터 `__bss_end`까지 word store로 clear.
-3. `main` 호출.
+1. `mtvec`를 `__trap_entry`로 설정.
+2. `sp`를 `__stack_top`으로 설정.
+3. `__bss_start`부터 `__bss_end`까지 word store로 clear.
+4. `main` 호출.
 
 따라서 firmware는 system reset이 assert되었다는 이유만으로 arbitrary DMEM location이 zero라고 가정하면 안 된다.
 
