@@ -75,15 +75,15 @@ The active CPU exposes the following data-side signals to `AHB_Master_Interface`
 | `EX_memory_write_AHB` | 1 | EX | Write transaction request |
 | `EX_alu_result_AHB` | 32 | EX | Byte address for `HADDR` |
 | `EX_funct3_AHB` | 3 effective bits | EX | Access-type metadata; intended transfer-size input |
-| `data_memory_read_data_AHB` | 32 | MEM | **Misnamed signal:** actually aligned store write data presented to the master as `MEM_read_data2` |
+| `MEM_store_data_AHB` | 32 | MEM | Aligned store write data presented to the master as `MEM_read_data2` |
 | `CUSTOM_WRITE_MASK` | 4 | MEM | Store byte-lane enable from `StoreAligner` |
 | `oBRAM_HAZARD` | 1 | EX/MEM relation | Same-word store-to-load BRAM RAW hazard indication |
 
-### 4.1 Naming Quirk
+### 4.1 Store-Data Naming
 
-`data_memory_read_data_AHB` is not load read data in the active implementation. The CPU assigns it from `data_memory_write_data`, and the top connects it to the master's `MEM_read_data2` input, which becomes `HWDATA`.
+`MEM_store_data_AHB` is not load read data in the active implementation. The CPU assigns it from `data_memory_write_data`, and the top connects it to the master's `MEM_read_data2` input, which becomes `HWDATA`.
 
-This name is retained only because it exists in the imported baseline RTL. New code and specifications shall treat it semantically as **store write data**.
+P14 renamed the imported baseline `data_memory_read_data_AHB` to `MEM_store_data_AHB`. This is a naming cleanup; EX-address/MEM-data ownership, pipeline behavior and the master's `MEM_read_data2` input are unchanged.
 
 ### 4.2 `EX_funct3_AHB` Width Quirk
 
@@ -216,7 +216,7 @@ CPU final-ERROR exception processing and younger-request cancellation remain res
 
 Acceptance requires checking response independence of both outputs in the actual elaborated/optimized design with explicit sequential and blackbox boundaries; physical DMEM write-edge address/data/lane pairing; and stable payload/lanes during waits. Back-to-back stores and DMEM↔APB/VRAM/default transitions shall produce exactly one correctly addressed/lane-qualified write per accepted successful store and none for an unaccepted, cancelled or rejected store. Include first/final ERROR, partial-store RAW merge and recovery.
 
-**Implementation observation:** CPU `store_aligner.memory_write` is exactly `Q`; data and mask connect directly to `data_memory_read_data_AHB` and `CUSTOM_WRITE_MASK`, and the master passes both through. This path already existed before C1a. The load path remains final-fault-qualified; payload independence does not apply to all CPU controls.
+**Implementation observation:** CPU `store_aligner.memory_write` is exactly `Q`; data and mask connect directly to `MEM_store_data_AHB` and `CUSTOM_WRITE_MASK`, and the master passes both through. This path already existed before C1a. The load path remains final-fault-qualified; payload independence does not apply to all CPU controls.
 
 | Obligation | Existing integrated-source evidence / limit |
 |---|---|
@@ -442,11 +442,11 @@ The pre-cleanup master declared `HSIZE` but did not drive it. Phase 4A-3A now dr
 
 ### 18.2 Former CPU `EX_funct3_AHB` Width Mismatch — resolved
 
-The pre-cleanup CPU declared a 32-bit output for 3 bits of metadata. Phase 4A-3A normalized it to a 3-bit port; the misleading store-data signal name in §18.3 remains open.
+The pre-cleanup CPU declared a 32-bit output for 3 bits of metadata. Phase 4A-3A normalized it to a 3-bit port; P14 also applies the store-data rename described in §18.3. Tracker acceptance remains separate.
 
-### 18.3 Misleading Store-Data Signal Name
+### 18.3 Store-Data Signal Name
 
-`data_memory_read_data_AHB` actually carries store write data. A future cleanup should rename it to reflect `HWDATA` semantics.
+`MEM_store_data_AHB` carries aligned MEM-stage store write data. P14 replaced the historical misleading `data_memory_read_data_AHB` name while preserving its `HWDATA` meaning and the separate load read path.
 
 ### 18.4 Non-Standard Byte-Mask Sideband
 

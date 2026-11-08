@@ -75,15 +75,15 @@ Cycle N+1 / MEM
 | `EX_memory_write_AHB` | 1 | EX | Write transaction 요청 |
 | `EX_alu_result_AHB` | 32 | EX | `HADDR`용 byte address |
 | `EX_funct3_AHB` | 유효 3 bits | EX | Access-type metadata / transfer-size용 의도된 입력 |
-| `data_memory_read_data_AHB` | 32 | MEM | **이름이 잘못된 signal:** 실제로는 aligned store write data이며 master의 `MEM_read_data2`로 연결됨 |
+| `MEM_store_data_AHB` | 32 | MEM | Aligned store write data이며 master의 `MEM_read_data2`로 연결됨 |
 | `CUSTOM_WRITE_MASK` | 4 | MEM | `StoreAligner`가 생성한 store byte-lane enable |
 | `oBRAM_HAZARD` | 1 | EX/MEM 관계 | Same-word store-to-load BRAM RAW hazard indication |
 
-### 4.1 Naming Quirk
+### 4.1 Store-Data Naming
 
-`data_memory_read_data_AHB`는 현재 구현에서 load read data가 아니다. CPU가 이 signal을 `data_memory_write_data`로 assign하며, top에서 master의 `MEM_read_data2`로 연결되어 최종적으로 `HWDATA`가 된다.
+`MEM_store_data_AHB`는 현재 구현에서 load read data가 아니다. CPU가 이 signal을 `data_memory_write_data`로 assign하며, top에서 master의 `MEM_read_data2`로 연결되어 최종적으로 `HWDATA`가 된다.
 
-이 이름은 imported baseline RTL에 존재하기 때문에 유지되어 있을 뿐이다. 신규 코드와 specification에서는 의미상 **store write data**로 취급한다.
+P14는 imported baseline의 `data_memory_read_data_AHB`를 `MEM_store_data_AHB`로 정리했다. 이는 명명 변경이며 EX 주소/MEM 데이터 소유권, pipeline 동작 및 master의 `MEM_read_data2` 입력은 유지된다.
 
 ### 4.2 `EX_funct3_AHB` Width Quirk
 
@@ -216,7 +216,7 @@ CPU의 최종 ERROR 예외 처리와 더 어린 request 취소는 계속 응답�
 
 Acceptance에는 실제 elaborated/optimized design에서 sequential/blackbox 경계를 명시한 두 출력의 응답 독립성, 실제 DMEM write-edge 주소·데이터·lane pairing, wait 중 payload/lane 안정성 검사가 필요하다. 연속 store와 DMEM↔APB/VRAM/default 전환에서 수락된 성공 store마다 정확한 주소·lane의 쓰기가 한 번 발생하고, 미수락·취소·거부 store에서는 쓰기가 없어야 한다. 첫/최종 ERROR, partial-store RAW merge, recovery를 포함한다.
 
-**구현 관찰:** CPU `store_aligner.memory_write`는 정확히 `Q`이며 data/mask는 `data_memory_read_data_AHB`, `CUSTOM_WRITE_MASK`에 직접 연결되고 master가 그대로 전달한다. 이 경로는 C1a 이전부터 존재했다. Load 경로의 final-fault qualification은 유지되며 payload 독립성이 모든 CPU 제어에 적용되는 것은 아니다.
+**구현 관찰:** CPU `store_aligner.memory_write`는 정확히 `Q`이며 data/mask는 `MEM_store_data_AHB`, `CUSTOM_WRITE_MASK`에 직접 연결되고 master가 그대로 전달한다. 이 경로는 C1a 이전부터 존재했다. Load 경로의 final-fault qualification은 유지되며 payload 독립성이 모든 CPU 제어에 적용되는 것은 아니다.
 
 | 의무 | 기존 통합 소스 evidence / 한계 |
 |---|---|
@@ -440,11 +440,11 @@ Cleanup 전 master는 `HSIZE`를 선언만 했지만 Phase 4A-3A에서 byte/half
 
 ### 18.2 과거 CPU `EX_funct3_AHB` Width Mismatch — 해결
 
-Cleanup 전 32-bit output을 Phase 4A-3A에서 3-bit port로 정규화했다. §18.3의 store-data 명명 문제는 열린 상태다.
+Cleanup 전 32-bit output을 Phase 4A-3A에서 3-bit port로 정규화했다. P14는 §18.3의 store-data 명명 정리도 적용했다. Tracker acceptance는 별도다.
 
-### 18.3 Misleading Store-Data Signal Name
+### 18.3 Store-Data Signal Name
 
-`data_memory_read_data_AHB`는 실제로 store write data를 전달한다. 향후 `HWDATA` 의미가 드러나는 이름으로 정리하는 것이 좋다.
+`MEM_store_data_AHB`는 aligned MEM-stage store write data를 전달한다. P14는 과거의 잘못된 `data_memory_read_data_AHB` 이름을 교체했으며 `HWDATA` 의미와 load read 경로는 유지된다.
 
 ### 18.4 Non-Standard Byte-Mask Sideband
 

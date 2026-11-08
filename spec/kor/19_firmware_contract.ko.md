@@ -814,7 +814,7 @@ Firmware는 UART0 status를 통해 synchronized E220-900T22D AUX level을 읽는
 
 `benchmark_main.c`는 Timer direct MMIO 대신 driver를 사용한다. Measurement setup은 RELOAD 후 START, 완료는 COUNT read 후 STOP 순서다. 과거 COMPARE=0/W1C automatic-rearm reset trick은 제거됐다.
 
-`timer_wait_ready()`는 여전히 unbounded다. P06B는 `FW-002`를 종결하거나 바꾸지 않으며 Timer IRQ/PLIC 동작을 추가하지 않는다. Host mock-MMIO ordering test와 `final_main`/`benchmark_main` 실제 RV32I build는 PASS했고, User/Chat이 이 evidence를 승인하여 `FW-004`는 VERIFIED다.
+P14는 사용되지 않던 unbounded `timer_wait_ready()` 정의와 선언을 제거했다. `timer_status()`는 nonblocking status read이며, 대기하는 caller가 유한 polling budget을 관리해야 한다. 이 제거는 전역 `FW-002`를 종결하지 않으므로 OPEN을 유지하고 Timer IRQ/PLIC 동작을 추가하지 않는다. 다음 P06B evidence와 `FW-004` 범위는 유지된다. Host mock-MMIO ordering test와 `final_main`/`benchmark_main` 실제 RV32I build는 PASS했고, User/Chat이 이 evidence를 승인하여 `FW-004`는 VERIFIED다.
 
 ## 38. Phase 4A-P07B 현행 UART Firmware Contract
 

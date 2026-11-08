@@ -740,7 +740,7 @@ EX_memory_write_AHB
 EX_alu_result_AHB
 EX_funct3_AHB
 CUSTOM_WRITE_MASK
-data_memory_read_data_AHB   // semantically HWDATA
+MEM_store_data_AHB   // semantically HWDATA
 oBRAM_HAZARD
 ```
 

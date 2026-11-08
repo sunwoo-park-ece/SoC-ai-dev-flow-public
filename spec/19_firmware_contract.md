@@ -1006,7 +1006,7 @@ The current driver exposes command-oriented `timer_start(compare)`, `timer_stop(
 
 `benchmark_main.c` uses the Timer driver rather than direct Timer MMIO. Measurement setup performs RELOAD then START, and measurement completion reads COUNT then issues STOP. The legacy COMPARE=0/W1C automatic-rearm reset trick is removed.
 
-`timer_wait_ready()` remains unbounded. P06B does not close or change `FW-002`, and no Timer IRQ/PLIC behavior is introduced. Host mock-MMIO ordering tests and actual RV32I builds of `final_main` and `benchmark_main` pass; User/Chat approved this evidence and `FW-004` is VERIFIED.
+P14 removed the unused, unbounded `timer_wait_ready()` definition and declaration. `timer_status()` remains a nonblocking status read; a caller that waits must own its finite polling budget. This retirement does not close global `FW-002`, which stays OPEN, and introduces no Timer IRQ/PLIC behavior. The following P06B evidence and `FW-004` scope are unchanged. Host mock-MMIO ordering tests and actual RV32I builds of `final_main` and `benchmark_main` pass; User/Chat approved this evidence and `FW-004` is VERIFIED.
 
 ## 38. Phase 4A-P07B Current UART Firmware Contract
 

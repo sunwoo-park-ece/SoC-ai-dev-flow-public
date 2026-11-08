@@ -182,7 +182,7 @@ Phase F — regression / Quartus / board / report
 | `BUS-002` | High | BC | 과거 `HSIZE` 미구동 문제이며 활성 master는 기존 size mapping을 구동함. | byte=`000`, half=`001`, word=`010`. | `03_cpu_interface`, `04_ahb_fabric`, `21_cpu_core` | 모든 load/store waveform | VERIFIED |
 | `BUS-003` | Blocker | BC | 과거 default silent OKAY/CPU 응답 경로 부재이며 현행 frozen error 계약은 구현됨. | 승인된 A2: 2-cycle `HRESP=01` ERROR, APB default error, precise CPU load/store access fault 구현. | `03_cpu_interface`, `04_ahb_fabric`, `05_apb_subsystem`, `07_interrupt_architecture`, `21_cpu_core` | invalid DMEM/VGA/APB/reserved fault | VERIFIED |
 | `BUS-004` | Medium | BC | 과거 address-only select이며 현재 valid-transfer/final-error 취소를 포함함. | valid-transfer qualify 또는 동등 안전성 증명. | `03_cpu_interface`, `04_ahb_fabric` | IDLE/back-to-back/wait | VERIFIED |
-| `CPU-001` | Medium | BC | `EX_funct3_AHB`는 현재 3 bits이며 `data_memory_read_data_AHB`의 store-data 명명 문제는 남음. | width/naming 정규화. | `03_cpu_interface`, `21_cpu_core` | lint + memory | OPEN |
+| `CPU-001` | Medium | BC | `EX_funct3_AHB`는 3 bits이며 P14에서 store data를 `MEM_store_data_AHB`로 명명 정리함. 상태는 명시적 evidence acceptance를 대기함. | width/naming 정규화. | `03_cpu_interface`, `21_cpu_core` | lint + memory | OPEN |
 | `CPU-002` | Medium | AXI | custom write mask/BRAM hazard가 CPU↔DMEM local sideband. | baseline에 containment; AXI generic semantics로 복사 금지. | `02_memory_subsystem`, `03_cpu_interface`, `21_cpu_core` | RAW + future AXI review | DEFERRED |
 | `BUS-005` | High | BC | 과거 wait/response 증거 공백이며 검토된 directed 소유권/wait 범위를 보존함. | delayed select/cross-slave wait 검증. | `03_cpu_interface`, `04_ahb_fabric`, `05_apb_subsystem`, `21_cpu_core` | wait-state tests | VERIFIED |
 
