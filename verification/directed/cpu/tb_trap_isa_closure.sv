@@ -27,7 +27,7 @@ module tb_trap_isa_closure;
         .debug_X4(), .debug_pc(),
         .EX_memory_read_AHB(ex_read), .EX_memory_write_AHB(ex_write),
         .EX_alu_result_AHB(ex_addr), .EX_funct3_AHB(),
-        .data_memory_read_data_AHB(), .HRDATA_FROM_AHB(32'd0),
+        .MEM_store_data_AHB(), .HRDATA_FROM_AHB(32'd0),
         .HRESP_FROM_AHB(2'b00), .HREADY_FROM_AHB(1'b1),
         .bus_stall_req(1'b0), .CUSTOM_WRITE_MASK(), .oBRAM_HAZARD()
     );

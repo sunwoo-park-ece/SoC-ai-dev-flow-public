@@ -23,7 +23,7 @@ module tb_commit_minstret;
         .retire_instruction(retire_instruction),
         .debug_X1(), .debug_X2(), .debug_X3(), .debug_X4(), .debug_pc(),
         .EX_memory_read_AHB(), .EX_memory_write_AHB(),
-        .EX_alu_result_AHB(), .EX_funct3_AHB(), .data_memory_read_data_AHB(),
+        .EX_alu_result_AHB(), .EX_funct3_AHB(), .MEM_store_data_AHB(),
         .HRDATA_FROM_AHB(32'd17), .HRESP_FROM_AHB(HRESP),
         .HREADY_FROM_AHB(HREADY), .bus_stall_req(!HREADY),
         .CUSTOM_WRITE_MASK(), .oBRAM_HAZARD()

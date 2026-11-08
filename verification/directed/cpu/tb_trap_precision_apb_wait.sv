@@ -37,7 +37,7 @@ module tb_trap_precision_apb_wait;
         .debug_X4(), .debug_pc(),
         .EX_memory_read_AHB(ex_read), .EX_memory_write_AHB(ex_write),
         .EX_alu_result_AHB(ex_addr), .EX_funct3_AHB(ex_funct3),
-        .data_memory_read_data_AHB(store_data),
+        .MEM_store_data_AHB(store_data),
         .HRDATA_FROM_AHB(read_data), .HRESP_FROM_AHB(HRESP),
         .HREADY_FROM_AHB(HREADY), .bus_stall_req(bus_stall_req),
         .CUSTOM_WRITE_MASK(write_mask), .oBRAM_HAZARD()

@@ -57,3 +57,6 @@ rtl/video/vga/v/VGA_HUD.v
 rtl/video/vga/v/VGA_Object_Renderer.v
 rtl/video/vram/HW_Cleaner.v
 rtl/video/vram/pre_fetch_AHB_VRAM_DUAL_BUFFER.v
+verification/selected_ip/selected_soc.sv
+verification/selected_ip/tb_selected_soc.sv
+verification/selected_ip/tb_load_extender.sv

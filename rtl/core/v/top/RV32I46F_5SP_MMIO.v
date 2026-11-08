@@ -21,7 +21,7 @@ module RV32I46F5SPMMIO(
 	 output [31:0] EX_alu_result_AHB,
 	 output [2:0] EX_funct3_AHB,  
 	 
-	 output [31:0] data_memory_read_data_AHB,   // HWDATA 
+	 output [31:0] MEM_store_data_AHB,   // MEM-owned aligned store payload
 	 	 
 	 input   [31:0] HRDATA_FROM_AHB,
 	 input   [1:0] HRESP_FROM_AHB,
@@ -1104,7 +1104,7 @@ module RV32I46F5SPMMIO(
                                MEM_memory_write && !MEM_exc_valid &&
                                (alu_result[31:2] == MEM_alu_result[31:2]));
 
-	    assign data_memory_read_data_AHB = data_memory_write_data;   // HWDATA  = store라이너의 입력으로 들어갔던 신호.
+	    assign MEM_store_data_AHB = data_memory_write_data;   // HWDATA  = store라이너의 입력으로 들어갔던 신호.
 
  
 endmodule

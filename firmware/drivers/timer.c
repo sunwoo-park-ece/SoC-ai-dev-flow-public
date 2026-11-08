@@ -33,12 +33,6 @@ void timer_clear_ready(void)
     mmio_write32(TIMER_BASE + TIMER_STATUS, TIMER_STATUS_READY);
 }
 
-void timer_wait_ready(void)
-{
-    while ((timer_status() & TIMER_STATUS_READY) == 0u) {
-    }
-}
-
 void timer_delay_cycles(uint32_t cycles)
 {
     volatile uint32_t i;

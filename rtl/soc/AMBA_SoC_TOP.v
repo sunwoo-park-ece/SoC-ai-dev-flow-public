@@ -278,7 +278,7 @@ wire         EX_memory_read_AHB;
 wire         EX_memory_write_AHB;
 wire [31:0] EX_alu_result_AHB;
 wire [2:0]   EX_funct3_AHB;
-wire [31:0] data_memory_read_data_AHB;
+wire [31:0] MEM_store_data_AHB;
 wire bus_stall_req;
 wire [3:0] CUSTOM_WRITE_MASK_OUT;
 
@@ -300,7 +300,7 @@ RV32I46F5SPMMIO u_CPU(
 	 .EX_alu_result_AHB      (EX_alu_result_AHB),
 	 .EX_funct3_AHB          (EX_funct3_AHB),  
 	 
-	 .data_memory_read_data_AHB(data_memory_read_data_AHB),   // HWDATA (Store Align을 거친 쓰기 데이터)
+	 .MEM_store_data_AHB(MEM_store_data_AHB),   // HWDATA (Store Align을 거친 쓰기 데이터)
 	 	 
 	 .HRDATA_FROM_AHB    (HRDATA_FROM_AHB),
 	 .HRESP_FROM_AHB     (HRESP),
@@ -321,7 +321,7 @@ AHB_Master_Interface U_INTER(
     .EX_funct3(EX_funct3_AHB),           // HSIZE 디코딩용
     
 	 // [CPU MEM 스테이지 입력] -> AHB Data Phase 제어
-    .MEM_read_data2(data_memory_read_data_AHB),     // HWDATA (Store Align을 거친 쓰기 데이터)
+    .MEM_read_data2(MEM_store_data_AHB),     // HWDATA (Store Align을 거친 쓰기 데이터)
     
 	 // [CPU 출력 및 Stall 제어]
     .HRDATA_to_CPU(HRDATA_FROM_AHB),     // LoadExtender로 전달될 읽기 데이터

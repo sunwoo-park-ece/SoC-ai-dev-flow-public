@@ -13,6 +13,8 @@ module LoadExtender (
     reg [15:0] half_sel;
 
     always @(*) begin
+        byte_sel = 8'b0;
+        half_sel = 16'b0;
         if (memory_read) begin
             case (funct3)
                 `LOAD_LB, `LOAD_LBU: begin

@@ -28,7 +28,7 @@ def main():
         if parent:return 1
     cpu='rtl/core/v/top/RV32I46F_5SP_MMIO.v';mem='rtl/bus/AHB_MEMORY_SLAVE.v';align='rtl/core/v/mem_stage/StoreAligner.v'
     mutations=[
-      ('feedback-data','structural',cpu,'assign data_memory_read_data_AHB = data_memory_write_data;','assign data_memory_read_data_AHB = data_memory_write_data & {32{!mem_fault_now}};','STRUCT_RESPONSE_DATA'),
+      ('feedback-data','structural',cpu,'assign MEM_store_data_AHB = data_memory_write_data;','assign MEM_store_data_AHB = data_memory_write_data & {32{!mem_fault_now}};','STRUCT_RESPONSE_DATA'),
       ('feedback-mask','structural',cpu,'    StoreAligner store_aligner (','    wire [3:0] mutation_raw_mask;\n    assign CUSTOM_WRITE_MASK = mutation_raw_mask & {4{!mem_fault_now}};\n    StoreAligner store_aligner (','STRUCT_RESPONSE_MASK'),
       ('shifted-mask','semantic',align,"2'b00: write_mask = 4'b0001;","2'b00: write_mask = 4'b0010;",'WRITE_LANES'),
       ('wrong-address','semantic',mem,'.wraddress (addr_reg)',".wraddress (addr_reg ^ 13'd1)",'WRITE_ADDRESS'),

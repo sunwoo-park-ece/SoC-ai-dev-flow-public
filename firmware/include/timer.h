@@ -13,7 +13,6 @@ void timer_reload(void);
 uint32_t timer_count(void);
 uint32_t timer_status(void);
 void timer_clear_ready(void);
-void timer_wait_ready(void);
 void timer_delay_cycles(uint32_t cycles);
 
 #endif
